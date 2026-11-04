@@ -899,6 +899,10 @@ and are asked to sign in again in Buzz.
   cleanup is strictly a desktop-local behaviour: when an agent sends attachments
   it read from a remote execution target, the post is published normally but no
   local cleanup is triggered and no remote source is deleted.
+- **Editing a message** keeps your unsaved changes when you switch channels,
+  close the thread or restart Buzz, and the edit reopens when you come back.
+  If it does not, choose **Edit message** on that message again. Save or Cancel
+  ends it. Unsaved edits are not listed in Drafts.
 - **Emoji suggestions** appear when you type `:` and an emoji name. If a name
   is shortened with an ellipsis, hover over it or use the arrow keys to select
   it and see the full name in a tooltip. A chosen or picked emoji is followed
