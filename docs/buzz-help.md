@@ -583,6 +583,8 @@ and are asked to sign in again in Buzz.
   Plugins can add tasks, Lead conversations and workspace actions.
   When starting a chat, type **#** to choose a workspace and load its settings.
   Folders are optional unless **Work in a new worktree** is on.
+  Besides **New → New workspace**, the composer's workspace control offers
+  **New workspace**, which creates a workspace and puts the chat in it.
 - **Channel links.** Type **#** and part of a channel name to link a channel.
   The link is a chip: Backspace or Delete removes it whole, so to change it,
   remove it and pick again with **#**.
