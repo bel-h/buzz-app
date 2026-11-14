@@ -225,7 +225,7 @@ export const apply: PluginModule["apply"] = (ctx) => {
       };
     },
     describeMigration: (saved) => {
-      const { model, effort, scope, voice } = config(saved);
+      const { model, effort, scope, voice, apps } = config(saved);
       return [
         { id: "model", label: "Model", isOverride: Boolean(model.trim()) },
         {
@@ -240,6 +240,8 @@ export const apply: PluginModule["apply"] = (ctx) => {
           isOverride: scope !== defaults.scope,
           unchangedKey: scope,
         },
+        // Another harness has no place for it, and Codex starts it off.
+        { id: "apps", label: "Codex apps and plugins", isOverride: !!apps },
       ];
     },
     migrationWarning: "Any commands Codex left running will stop.",
