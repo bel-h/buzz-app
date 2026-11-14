@@ -307,9 +307,10 @@ export async function loadChatSetup(
 ): Promise<ChatSetup & { revision: string }> {
   const store = session.sidebarPreferences;
   await store.refresh();
-  const sections = store.writable ? store.snapshot().data?.sections : undefined;
-  if (!sections) throw new WorkspaceUnavailable(false);
-  if (!sections.some((project) => project.id === projectId))
+  const preferences = store.snapshot();
+  if (!store.writable || !preferences.data)
+    throw new WorkspaceUnavailable(false);
+  if (!preferences.data.sections.some((project) => project.id === projectId))
     throw new WorkspaceUnavailable(true);
   await session.channelKit.refresh();
   const kit = session.channelKit.snapshot();
