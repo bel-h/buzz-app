@@ -1424,11 +1424,21 @@ render failures and remounts on target or revision changes. Unloading a plugin
 removes its contributions and closes its panel. Other pages can use these same
 contracts with their own layout and local navigation.
 
+### Plugin page links beside conversations
+
+A canonical `buzz://plugin` link can open beside the current conversation when
+its destination plugin also registers a matching `addressable: true` panel. The
+resolved panel must belong to the plugin named in the URL; another plugin’s
+catch-all panel cannot intercept the page destination. Without that opt-in,
+normal plugin-page navigation applies. Outside a conversation the link still
+opens the plugin page. Panels recheck access and retain the host’s existing
+Back/Forward and explicit Close behavior.
+
 ### Bundled defaults
 
 **Channels is the only required bundled plugin.** Usage, Reminders,
 Workflows, Changesets, Shared compute, Charts and File viewer are off by default for fresh installs. Bestie,
-Feedback, Diff viewer, Identity Naming, Agent Activity, Terminal, Links, GitHub, Inbox,
+Pages, Feedback, Diff viewer, Identity Naming, Agent Activity, Terminal, Links, GitHub, Inbox,
 Repositories, Agents, Claude, Codex, Builderlab,
 Membership, and Moderation are on by default, but optional. Both browser and
 native catalogs declare that policy.

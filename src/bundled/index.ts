@@ -74,6 +74,9 @@ import * as typesafe from "./typesafe";
 import pluginDevelopmentManifest from "./plugin-development/manifest.json";
 import * as pluginDevelopment from "./plugin-development";
 
+import pagesManifest from "./pages/manifest.json";
+import * as pages from "./pages";
+
 import relayNotesManifest from "./relay-notes/manifest.json";
 import * as relayNotes from "./relay-notes";
 
@@ -179,6 +182,11 @@ export const bundledPlugins: readonly BundledPlugin[] = [
   {
     manifest: { ...channelsManifest, apiVersion: 1 },
     module: channels,
+    enabledByDefault: true,
+  },
+  {
+    manifest: { ...pagesManifest, apiVersion: 1 },
+    module: pages,
     enabledByDefault: true,
   },
   {

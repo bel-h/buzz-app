@@ -1146,6 +1146,25 @@ and are asked to sign in again in Buzz.
   the Activity list and a conversation) works the same way. Each page remembers
   its own width within the same community and identity; double-click to reset.
 
+## Pages
+
+Pages is a bundled plugin for live Markdown documents shared with people and
+agents. Open Pages from the dock. Edits auto-save after a pause; Page actions →
+Revision history lets you disable auto-save and use Save. Unsaved drafts survive
+browsing within the connected session, not app restarts.
+
+Use Share page to grant access. New pages are private; View only allows community
+members to read. A link grants no access. Sharing includes retained revisions,
+and the relay operator can read content. Page actions also offers revision
+history, Markdown export and recoverable deletion. Restore saves a new revision.
+Conflicting edits preserve the draft until you reconcile the newer revision.
+
+Page references open beside the conversation, with normal Back/Forward and tab
+close behavior. Agents can call `page_help`, create and verify a Page, post its
+returned reference, then update the same document on follow-ups. The execution
+host must have Pages enabled. Saving requires relay support for NIP-AR page
+records. Pages does not migrate Canvas or the separate Shared notes format.
+
 ## Saved Solo follow-ups
 
 Messages queued behind a working agent are saved on this device for the current
