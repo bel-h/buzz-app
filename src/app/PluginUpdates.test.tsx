@@ -10,6 +10,7 @@ import {
   within,
 } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
+import "../../tests/sonner-dom";
 import type { ReactNode } from "react";
 import { Context as CordisContext } from "@deepseek-ai/cordis";
 import {
@@ -623,7 +624,183 @@ it("retains an accepted update review when the Marketplace consumer unmounts", a
   );
 });
 
-it("refreshes instead of opening a stale retained update", async () => {
+it.each([
+  [
+    "personal Git package path",
+    "https://github.com/example-org/personal-plugins.git",
+    "plugins/notes",
+  ],
+  [
+    "ordinary Git host package path",
+    "https://example.org/example-org/plugins.git",
+    "extensions/notes",
+  ],
+])(
+  "opens a fresh review from one click on a stale update (%s)",
+  async (_, repository, path) => {
+    const f = fixture();
+    f.source.repository = repository;
+    f.source.path = path;
+    f.discovered.source = repository;
+    f.candidate.path = path;
+    f.fresh.source = repository;
+    f.freshCandidate.path = path;
+    f.mount();
+    const update = await screen.findByRole("button", {
+      name: "Update and reload",
+    });
+    await waitFor(() =>
+      expect(f.installRequests.updates?.getSnapshot().status).toBe("fresh"),
+    );
+
+    f.plugin.revision = "changed before review";
+    fireEvent.click(update);
+
+    await waitFor(() => expect(f.imports.checkGit).toHaveBeenCalledTimes(2));
+    expect(f.imports.checkGit).toHaveBeenLastCalledWith(
+      repository,
+      "main",
+      undefined,
+      { commit: undefined, path },
+    );
+    const confirm = await screen.findByRole("button", {
+      name: /^Update$/,
+    });
+    const review = confirm.closest<HTMLElement>('[role="dialog"]');
+    if (!review) throw new Error("Expected the update review dialog");
+    expect(review).toHaveAccessibleName("Update Notes");
+    expect(confirm).toBeEnabled();
+    expect(f.installImport).not.toHaveBeenCalled();
+  },
+);
+
+it.each([
+  [
+    "personal Git package path",
+    "https://github.com/example-org/personal-plugins.git",
+    "plugins/notes",
+  ],
+  [
+    "ordinary Git host package path",
+    "https://example.org/example-org/plugins.git",
+    "extensions/notes",
+  ],
+])(
+  "preserves one update click while an update check is already running (%s)",
+  async (_, repository, path) => {
+    const f = fixture();
+    f.source.repository = repository;
+    f.source.path = path;
+    f.discovered.source = repository;
+    f.candidate.path = path;
+    f.fresh.source = repository;
+    f.freshCandidate.path = path;
+    f.mount();
+    const update = await screen.findByRole("button", {
+      name: "Update and reload",
+    });
+    await waitFor(() =>
+      expect(f.installRequests.updates?.getSnapshot().status).toBe("fresh"),
+    );
+
+    let releaseCheck!: () => void;
+    f.imports.checkGit.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          releaseCheck = () => resolve(f.discovered);
+        }),
+    );
+    const refresh = f.installRequests.updates?.refresh();
+    if (!refresh) throw new Error("Expected an update capability");
+    await waitFor(() => expect(f.imports.checkGit).toHaveBeenCalledTimes(2));
+    expect(f.imports.checkGit).toHaveBeenLastCalledWith(
+      repository,
+      "main",
+      undefined,
+      { commit: undefined, path },
+    );
+
+    fireEvent.click(update);
+    await act(async () => {
+      releaseCheck();
+      await refresh;
+    });
+
+    expect(f.imports.checkGit).toHaveBeenCalledTimes(2);
+    const confirm = await screen.findByRole("button", {
+      name: /^Update$/,
+    });
+    const review = confirm.closest<HTMLElement>('[role="dialog"]');
+    if (!review) throw new Error("Expected the update review dialog");
+    expect(review).toHaveAccessibleName("Update Notes");
+    expect(confirm).toBeEnabled();
+    expect(f.installImport).not.toHaveBeenCalled();
+  },
+);
+
+it("keeps one notification click queued while another review owns the lease", async () => {
+  const f = fixture();
+  const releaseReview = f.installRequests.tryHoldReview();
+  if (!releaseReview) throw new Error("Expected to hold the review lease");
+  f.mount();
+  const update = await screen.findByRole("button", {
+    name: "Update and reload",
+  });
+
+  try {
+    fireEvent.click(update);
+    expect(
+      await screen.findByRole("button", { name: "Preparing update…" }),
+    ).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Later" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: /^Update$/ })).toBeNull();
+    expect(f.installImport).not.toHaveBeenCalled();
+  } finally {
+    act(() => releaseReview());
+  }
+
+  expect(await screen.findByRole("button", { name: /^Update$/ })).toBeVisible();
+  expect(f.installImport).not.toHaveBeenCalled();
+});
+
+it.each(["Later", "Dismiss plugin update notice"])(
+  "does not open a review after %s cancels a pending notification click",
+  async (dismissLabel) => {
+    const f = fixture();
+    f.mount();
+    const update = await screen.findByRole("button", {
+      name: "Update and reload",
+    });
+    const capability = f.installRequests.updates;
+    if (!capability) throw new Error("Expected an update capability");
+
+    let releaseCheck!: () => void;
+    f.imports.checkGit.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          releaseCheck = () => resolve(f.discovered);
+        }),
+    );
+    const refresh = capability.refresh();
+    await waitFor(() => expect(f.imports.checkGit).toHaveBeenCalledTimes(2));
+    fireEvent.click(update);
+    fireEvent.click(screen.getByRole("button", { name: dismissLabel }));
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: "Update Notes" })).toBeNull(),
+    );
+
+    await act(async () => {
+      releaseCheck();
+      await refresh;
+    });
+
+    expect(screen.queryByRole("dialog", { name: "Update Notes" })).toBeNull();
+    expect(f.navigation.open).not.toHaveBeenCalled();
+    expect(f.installImport).not.toHaveBeenCalled();
+  },
+);
+
+it("opens actionable plugin settings when a clicked update disappears", async () => {
   const f = fixture();
   f.mount();
   const update = await screen.findByRole("button", {
@@ -634,16 +811,21 @@ it("refreshes instead of opening a stale retained update", async () => {
   );
 
   f.plugin.revision = "changed before review";
+  f.imports.checkGit.mockImplementationOnce(async () => ({
+    ...f.discovered,
+    candidates: [],
+  }));
   fireEvent.click(update);
 
-  await waitFor(() => expect(f.imports.checkGit).toHaveBeenCalledTimes(2));
-  expect(screen.queryByRole("button", { name: "Update" })).toBeNull();
-  fireEvent.click(
-    await screen.findByRole("button", { name: "Update and reload" }),
+  await waitFor(() =>
+    expect(f.navigation.open).toHaveBeenCalledWith({
+      version: 1,
+      kind: "settings",
+      section: "plugins",
+      pluginId: "example.notes",
+    }),
   );
-  expect(
-    await screen.findByRole("dialog", { name: "Update Notes" }),
-  ).toBeVisible();
+  expect(f.installImport).not.toHaveBeenCalled();
 });
 
 it("opens a known update when an unrelated plugin check fails", async () => {

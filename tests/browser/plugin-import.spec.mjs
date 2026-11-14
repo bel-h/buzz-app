@@ -2236,3 +2236,138 @@ test("a failed update check stays on its Settings row, and Check again clears it
   await expect(notice).toHaveCount(0);
   await expect(page.getByText("Update Standup Notes")).toHaveCount(0);
 });
+
+test("one notification-button click opens a review after a concurrent update check", async ({
+  page,
+  app,
+}, info) => {
+  const repository = "https://github.com/example-org/personal-plugins.git";
+  const plugin = (id, name, path) => ({
+    manifest: {
+      id,
+      name,
+      apiVersion: 1,
+      updates: { defaultEnabled: true },
+    },
+    source: "external",
+    enabled: true,
+    revision: "installed",
+    previous: null,
+    reloadable: true,
+    error: null,
+    updateSource: { repository, reference: "main", path },
+  });
+  const sample = {
+    path: "plugins/notes",
+    revision: "available",
+    manifest: {
+      id: "example.notes",
+      name: "Notes",
+      apiVersion: 1,
+      updates: { defaultEnabled: true },
+    },
+  };
+  await page.addInitScript(
+    (installedPlugins) => {
+      window.installedPlugins = installedPlugins;
+    },
+    [
+      plugin("example.notes", "Notes", sample.path),
+      plugin("example.missing", "Missing", sample.path),
+    ],
+  );
+  await nativeImports(page, [sample], { source: repository, warnings: [] });
+  const checks = () =>
+    page.evaluate(
+      () =>
+        window.importCalls.filter(
+          (call) =>
+            call.command === "plugin_import_git" && call.args?.checkOnly,
+        ).length,
+    );
+  await page.goto(app.origin);
+  await expect.poll(checks).toBe(1);
+  const notice = page.getByRole("dialog", {
+    name: "Update Notes",
+    exact: true,
+  });
+  await expect(
+    notice.getByRole("button", { name: "Update and reload", exact: true }),
+  ).toBeVisible();
+  await notice.screenshot({ path: info.outputPath("notification-before.png") });
+  const manage = notice.getByRole("button", {
+    name: "Manage Notes update checks",
+    exact: true,
+  });
+  await manage.focus();
+  await manage.press("Enter");
+  await expect(settingsDialog(page)).toBeVisible();
+  await expect(
+    page.getByRole("complementary", { name: "Notes details" }),
+  ).toBeVisible();
+  await expect(notice).toBeVisible();
+  await closeSettings(page);
+
+  await openSettings(page);
+  await selectSettingsSection(page, "Manage plugins");
+  const again = settingsDialog(page).getByRole("button", {
+    name: "Check again",
+    exact: true,
+  });
+  await expect(again).toBeVisible();
+  await page.evaluate(() => {
+    window.heldGitCheck = new Promise((resolve) => {
+      window.releaseGitCheck = resolve;
+    });
+  });
+  await again.click();
+  await expect.poll(checks).toBe(2);
+  await closeSettings(page);
+
+  await page.setViewportSize({ width: 480, height: 700 });
+  await page.evaluate(() => {
+    document.documentElement.dataset.colorMode = "dark";
+    document.documentElement.style.fontSize = "20px";
+  });
+  await expect(page.locator("html")).toHaveAttribute("data-color-mode", "dark");
+  const update = notice.getByRole("button", {
+    name: "Update and reload",
+    exact: true,
+  });
+  await update.click();
+  try {
+    await expect(
+      notice.getByRole("button", { name: "Preparing update…", exact: true }),
+    ).toBeDisabled();
+    await notice.screenshot({
+      path: info.outputPath("notification-refresh.png"),
+    });
+  } finally {
+    await page.evaluate(() => window.releaseGitCheck());
+  }
+
+  const review = page.getByRole("dialog", {
+    name: "Update Notes",
+    exact: true,
+  });
+  const confirm = review.getByRole("button", { name: "Update", exact: true });
+  await expect(confirm).toBeVisible();
+  await expect(confirm).toBeEnabled();
+  expect(
+    await page.evaluate(
+      () =>
+        window.importCalls.filter(
+          (call) => call.command === "plugin_import_install",
+        ).length,
+    ),
+  ).toBe(0);
+  await page.setViewportSize({ width: 1440, height: 950 });
+  await page.evaluate(() => {
+    document.documentElement.dataset.colorMode = "light";
+  });
+  await expect(page.locator("html")).toHaveAttribute(
+    "data-color-mode",
+    "light",
+  );
+  await review.screenshot({ path: info.outputPath("notification-review.png") });
+});
