@@ -16,6 +16,8 @@ const target = {
 it("round-trips browser, editor, dialog, revision and new-draft addresses without content", () => {
   for (const value of [
     { view: "browse", query: "Research", trash: true },
+    { view: "browse", folder: "shared", query: "Plan" },
+    { view: "page", folder: "shared", id, channel, edit: true },
     { view: "page", id, channel, edit: true, dialog: "link" },
     {
       view: "page",
@@ -62,6 +64,8 @@ it.each([
   { view: "page", id, channel, dialog: "share", offset: 100 },
   { view: "new", draft: "bad" },
   { view: "browse", edit: true },
+  { view: "browse", folder: "custom" },
+  { view: "browse", folder: { title: "Shared with me" } },
   { view: "browse", query: "x".repeat(513) },
   { view: "shared", shared: "" },
   { view: "shared", shared: `30023:${"b".repeat(64)}:note`, edit: true },

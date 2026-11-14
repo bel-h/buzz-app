@@ -6,6 +6,10 @@ and can be disabled in Settings → Plugins.
 ## Getting started
 
 Open Pages from the dock to create a document or find a page you can access.
+Your pages and pages created by your verified agents stay in the main collection.
+Open **Shared with me** for pages from other creators. Search applies to the open
+collection. Grouping does not change the creator, ownership or sharing settings.
+An agent page stays in Shared with me until its ownership can be verified.
 Edits save automatically after a pause; Page actions → Revision history lets you
 turn auto-save off and use Save instead. Browsing within Pages retains unsaved
 drafts for the connected session. Unsaved work is not a synced or permanent backup.

@@ -36,6 +36,8 @@ import {
 type Cursor = { until: number; before_id: string };
 export type NotesPage = {
   notes: Note[];
+  /** Storage creators from signed relay metadata, independent of revision authors. */
+  creators: Record<string, string>;
   more: boolean;
   cursor?: Cursor | undefined;
 };
@@ -531,6 +533,21 @@ export async function readNotesPage(
     return address && independentNoteStorage(address, event) ? [address] : [];
   });
   const notes: Note[] = [];
+  const creators: Record<string, string> = {};
+  for (const event of metadata) {
+    const channel = noteTag(event, "d");
+    const creator = noteTag(event, "P");
+    if (
+      channel &&
+      creator &&
+      PUBKEY.test(creator) &&
+      event.pubkey === relayAuthor &&
+      // NoteRead exposes deeply readonly payloads; proof still checks object identity.
+      hasEventProof(event as RelayEvent) &&
+      addresses.some((address) => address.channel === channel)
+    )
+      creators[channel] = creator;
+  }
   if (addresses.length) {
     const events = await read(
       [
@@ -557,6 +574,7 @@ export async function readNotesPage(
   }
   return {
     notes,
+    creators,
     more: metadata.length === NOTE_PAGE,
     ...(last ? { cursor: { until: last.created_at, before_id: last.id } } : {}),
   };

@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import type { Navigation } from "../../features/navigation/controller";
 import { buzzLinkTarget } from "../../features/navigation/buzz-links";
 import { targetKey } from "../../features/navigation/targets";
@@ -14,7 +21,10 @@ import type { NotesPage as CollectionPage, NotesWorkspace } from "./workspace";
 import type { PageProps } from "../../features/pages/service";
 import { usePagesUi } from "./ui";
 import type { PanelProps } from "../../features/panels/service";
-import { useRelayConnection } from "../../features/relay/react";
+import {
+  useRelayConnection,
+  useProfileGeneration,
+} from "../../features/relay/react";
 import type { RelayData } from "../../features/relay/service";
 import type { RelaySession } from "../../features/relay/session";
 import { FileTextIcon } from "../../shared/design-system/icons";
@@ -153,12 +163,39 @@ export function WorkingNotesCommunity({
   const searchRef = useRef<HTMLElement>(null);
   const [collection, setCollection] = useState<CollectionPage>({
     notes: [],
+    creators: {},
     more: false,
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [query, setQuery] = useState(destination?.query ?? "");
   const [trash, setTrash] = useState(destination?.trash ?? false);
+  const [folder, setFolder] = useState(destination?.folder);
+  const { profiles, viewer } = workspace.session;
+  const creators = useMemo(
+    () =>
+      [...new Set(Object.values(collection.creators))]
+        .filter((creator) => creator !== viewer)
+        .sort(),
+    [collection.creators, viewer],
+  );
+  const generation = useProfileGeneration(profiles);
+  useEffect(() => {
+    void generation;
+    const release = profiles.reserve?.(creators.length);
+    // Use the shared directory's budget and de-duplicated background reads.
+    // Missing/failed/unverified evidence leaves a document in Shared with me.
+    void profiles
+      .ensure(creators.slice(0, profiles.limit?.()), "background")
+      .catch(() => {});
+    return release;
+  }, [profiles, creators, generation]);
+  const readOwned = () =>
+    creators
+      .filter((creator) => viewer && profiles.owner?.(creator) === viewer)
+      .join(":");
+  const owned = useSyncExternalStore(profiles.subscribe, readOwned, readOwned);
+  const mainCreators = new Set([viewer, ...owned.split(":").filter(Boolean)]);
   const drafts = useRef(new Map<string, NewDraft>());
   const createdDrafts = useRef(new Map<string, NoteAddress>());
   const createdFocus = useRef(new Map<string, NoteFocus>());
@@ -184,6 +221,9 @@ export function WorkingNotesCommunity({
         if (loadId.current !== id) return;
         setCollection((old) => ({
           ...page,
+          creators: more
+            ? { ...old.creators, ...page.creators }
+            : page.creators,
           notes: more
             ? [
                 ...new Map(
@@ -250,20 +290,27 @@ export function WorkingNotesCommunity({
         ...(dialog ? { dialog } : {}),
         query,
         trash,
+        ...(folder ? { folder } : {}),
       },
       replace,
     );
   };
   const browse = () => {
     setSelected("browse");
-    visit({ view: "browse", query, trash });
+    visit({ view: "browse", query, trash, ...(folder ? { folder } : {}) });
     requestAnimationFrame(() => searchRef.current?.focus());
   };
   const newNote = (draft: Omit<NewDraft, "id">) => {
     const next = { ...draft, id: crypto.randomUUID() };
     drafts.current.set(next.id, next);
     setSelected(`new:${next.id}`);
-    visit({ view: "new", draft: next.id, query, trash });
+    visit({
+      view: "new",
+      draft: next.id,
+      query,
+      trash,
+      ...(folder ? { folder } : {}),
+    });
   };
   useEffect(() => {
     if (initial) reveal(initial);
@@ -271,6 +318,7 @@ export function WorkingNotesCommunity({
     if (destination) {
       setQuery(destination.query ?? "");
       setTrash(destination.trash ?? false);
+      setFolder(destination.folder);
       if (destination.view === "new" && destination.draft) {
         const created = createdDrafts.current.get(destination.draft);
         if (created) {
@@ -306,6 +354,8 @@ export function WorkingNotesCommunity({
     );
   }, []);
   const visible = collection.notes.filter((note) => trash || !note.deleted);
+  const isMain = (note: Note) =>
+    mainCreators.has(collection.creators[note.channel] ?? "");
   return (
     <NotesPage
       community={workspace.session.scope.replace(/:[0-9a-f]{64}$/, "")}
@@ -313,6 +363,7 @@ export function WorkingNotesCommunity({
         selected,
         query,
         trash,
+        folder,
         searchRef,
         loading,
         more: collection.more,
@@ -334,6 +385,12 @@ export function WorkingNotesCommunity({
             trash: value,
           });
         },
+        showShared: (shared) => {
+          const next = shared ? "shared" : undefined;
+          setFolder(next);
+          setQuery("");
+          visit({ view: "browse", trash, ...(next ? { folder: next } : {}) });
+        },
         create: () => newNote({ title: "", markdown: "" }),
         refresh: () => {
           void load();
@@ -342,7 +399,10 @@ export function WorkingNotesCommunity({
           void load(true);
         },
         browse,
-        entries: visible,
+        entries: visible.filter((note) =>
+          folder ? !isMain(note) : isMain(note),
+        ),
+        sharedCount: visible.filter((note) => !isMain(note)).length,
         canFilter: !!collection.notes.length || trash,
         open,
         items: [
@@ -375,6 +435,7 @@ export function WorkingNotesCommunity({
                             ...noteAddress(address),
                             query,
                             trash,
+                            ...(folder ? { folder } : {}),
                             ...view,
                           })
                       : undefined
@@ -411,6 +472,13 @@ export function WorkingNotesCommunity({
                   createdAutoSave.current.set(noteKey(note), autoSave);
                   createdDrafts.current.set(draft.id, noteAddress(note));
                   drafts.current.delete(draft.id);
+                  setCollection((old) => ({
+                    ...old,
+                    creators: {
+                      ...old.creators,
+                      [note.channel]: workspace.session.viewer ?? "",
+                    },
+                  }));
                   changed(note);
                   if (selectedRef.current === `new:${draft.id}`)
                     open(note, true, share ? "share" : undefined);
@@ -472,6 +540,7 @@ function NotePanelContents({
 }) {
   const [catalogue, setCatalogue] = useState<CollectionPage>({
     notes: [],
+    creators: {},
     more: false,
   });
   const [error, setError] = useState("");

@@ -398,7 +398,17 @@ describe("channel orchestration", () => {
     if (!channel) throw new Error("Missing channel");
     const roles = { ...channel.roles };
     f.setAgentKeys([]);
-    await f.workspace.list();
+    const listed = await f.workspace.list();
+    expect(listed.creators[note.channel]).toBe(f.viewer.pubkey);
+    const unproven = await readNotesPage(
+      async (filters) =>
+        (await f.workspace.read(filters)).map((event) =>
+          event.kind === 39000 ? { ...event } : event,
+        ),
+      f.viewer.pubkey,
+      f.relay.pubkey,
+    );
+    expect(unproven.creators).toEqual({});
     await f.workspace.open(note);
     expect(channel.roles).toEqual(roles);
     expect(

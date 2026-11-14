@@ -14,6 +14,7 @@ export type WorkingRoute = DocumentView & {
   draft?: string;
   query?: string;
   trash?: boolean;
+  folder?: "shared";
   community?: string;
 };
 export type OpenTarget = Parameters<Context["navigation"]["open"]>[0];
@@ -24,6 +25,7 @@ const keys = new Set([
   "draft",
   "query",
   "trash",
+  "folder",
   "edit",
   "dialog",
   "revision",
@@ -57,6 +59,7 @@ export function workingRoute(value: unknown): WorkingRoute | undefined {
     (typeof row.query !== "string" || row.query.length > 512)
   )
     return;
+  if (row.folder !== undefined && row.folder !== "shared") return;
   for (const key of ["edit", "trash"]) {
     if (row[key] === "true") row[key] = true;
     else if (row[key] === "false") row[key] = false;

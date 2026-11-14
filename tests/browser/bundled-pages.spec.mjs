@@ -18,6 +18,40 @@ test("edits and preserves drafts using host UI, then adopts an agent revision wi
 }) => {
   const errors = watchPageErrors(page);
   await page.goto("/tests/fixtures/bundled-pages.html");
+  await expect(
+    page.getByRole("link", { name: "Agent outline", exact: true }),
+  ).toBeVisible();
+  const shared = page.getByRole("link", {
+    name: "Shared research",
+    exact: true,
+  });
+  await expect(shared).toHaveCount(0);
+  const folder = page.getByRole("button", {
+    name: "Shared with me",
+    exact: true,
+  });
+  await folder.focus();
+  await folder.press("Enter");
+  await expect(
+    page.getByRole("button", { name: "Back to pages", exact: true }),
+  ).toBeFocused();
+  await shared.click();
+  await expect(
+    page.getByRole("article", { name: "Shared research", exact: true }),
+  ).toBeVisible();
+  await page.goBack();
+  await expect(
+    page.getByRole("list", { name: "Shared with me", exact: true }),
+  ).toBeVisible();
+  await page.goBack();
+  await expect(folder).toBeFocused();
+  await expect(shared).toHaveCount(0);
+  await page.goForward();
+  await expect(shared).toBeVisible();
+  await page
+    .getByRole("button", { name: "Back to pages", exact: true })
+    .click();
+  await expect(folder).toBeFocused();
   await page
     .getByRole("link", { name: "Connected pages plan", exact: true })
     .click();

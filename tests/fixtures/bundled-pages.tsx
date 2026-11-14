@@ -43,6 +43,21 @@ const plan = f.seed(
   "Connected pages plan",
   `# Connected notes\n\nA working plan for people and their agents.\n\n1. Create and edit the same document.\n2. Follow supporting research.\n3. Share the note deliberately.\n\n## Supporting research\n\n${noteMarkdownLink(research, f.origin)}`,
 );
+const agentPage = f.seed(
+  "Agent outline",
+  "# Agent outline\n\nShared by your agent.",
+);
+const agentChannel = f.channels.get(agentPage.channel);
+if (!agentChannel) throw new Error("Missing agent page storage");
+agentChannel.creator = f.carl.pubkey;
+const sharedPage = f.seed(
+  "Shared research",
+  "# Shared research\n\nFrom another person.",
+);
+const sharedChannel = f.channels.get(sharedPage.channel);
+if (!sharedChannel) throw new Error("Missing shared page storage");
+sharedChannel.creator = f.sam.pubkey;
+sharedChannel.roles = { [f.sam.pubkey]: "owner", [f.viewer.pubkey]: "guest" };
 const general = "00000001-1111-4111-8111-111111111111";
 f.channels.set(general, {
   id: general,

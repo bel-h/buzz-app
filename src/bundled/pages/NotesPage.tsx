@@ -6,6 +6,7 @@ import {
   Filter2Icon,
   InfoIcon,
   FileTextIcon,
+  FolderSimpleIcon,
   PlusIcon,
 } from "../../shared/design-system/icons";
 import { NavigationItem } from "../../shared/design-system/ui/NavigationItem";
@@ -41,6 +42,8 @@ export type NotesPageProps = {
   selected: string;
   query: string;
   trash: boolean;
+  folder?: "shared" | undefined;
+  sharedCount: number;
   canFilter: boolean;
   searchRef: RefObject<HTMLElement | null>;
   loading: boolean;
@@ -48,6 +51,7 @@ export type NotesPageProps = {
   error: string;
   search(query: string, commit?: boolean): void;
   showDeleted(value: boolean): void;
+  showShared(value: boolean): void;
   create(): void;
   refresh(): void;
   loadMore(): void;
@@ -63,6 +67,8 @@ export function NotesPage({
   selected,
   query,
   trash,
+  folder,
+  sharedCount,
   canFilter,
   searchRef,
   loading,
@@ -70,6 +76,7 @@ export function NotesPage({
   error,
   search,
   showDeleted,
+  showShared,
   create,
   refresh,
   loadMore,
@@ -77,6 +84,19 @@ export function NotesPage({
   browse,
 }: NotesPageProps) {
   const backRef = useRef<HTMLButtonElement>(null);
+  const folderRef = useRef<HTMLButtonElement>(null);
+  const folderBackRef = useRef<HTMLButtonElement>(null);
+  const refreshRef = useRef<HTMLButtonElement>(null);
+  const previousFolder = useRef(folder);
+  useEffect(() => {
+    if (previousFolder.current !== folder) {
+      (folder
+        ? folderBackRef.current
+        : (folderRef.current ?? refreshRef.current)
+      )?.focus();
+      previousFolder.current = folder;
+    }
+  }, [folder]);
   const reading = selected !== "browse";
   useEffect(() => {
     if (selected !== "browse" && !selected.startsWith("new:"))
@@ -94,7 +114,8 @@ export function NotesPage({
         b.event.created_at - a.event.created_at ||
         a.event.id.localeCompare(b.event.id),
     );
-  const empty = !loading && !error && !entries.length && !query;
+  const empty =
+    !loading && !error && !entries.length && !query && (folder || !sharedCount);
   const active = items.find((item) => item.id === selected);
   const titleLink = (note: Note) => (
     <li key={noteKey(note)}>
@@ -135,8 +156,14 @@ export function NotesPage({
             <PanelHeader
               title={
                 <PanelHeaderLabel
-                  title="Pages"
-                  icon={<FileTextIcon size={16} />}
+                  title={folder ? "Shared with me" : "Pages"}
+                  icon={
+                    folder ? (
+                      <FolderSimpleIcon size={16} />
+                    ) : (
+                      <FileTextIcon size={16} />
+                    )
+                  }
                 >
                   <PopoverRoot>
                     <PopoverTrigger
@@ -159,6 +186,11 @@ export function NotesPage({
                           return to the list.
                         </p>
                         <p>
+                          Pages you create and pages from your verified agents
+                          stay together. Pages from other creators appear in
+                          Shared with me. Grouping does not change access.
+                        </p>
+                        <p>
                           Each page has its own sharing settings. Access
                           includes retained revisions. The relay operator can
                           read page contents. Don’t include secrets.
@@ -168,8 +200,20 @@ export function NotesPage({
                   </PopoverRoot>
                 </PanelHeaderLabel>
               }
+              navigation={
+                folder ? (
+                  <IconButton
+                    ref={folderBackRef}
+                    aria-label="Back to pages"
+                    title="Back to pages"
+                    icon={<ArrowLeftIcon size={16} />}
+                    onClick={() => showShared(false)}
+                  />
+                ) : undefined
+              }
               actions={
                 <IconButton
+                  ref={refreshRef}
                   aria-label="Refresh pages"
                   title="Refresh pages"
                   icon={
@@ -233,27 +277,55 @@ export function NotesPage({
               {empty && (
                 <EmptyState
                   icon={null}
-                  title="No pages yet"
-                  description="Create a page or ask an agent to save one."
+                  title={folder ? "No shared pages" : "No pages yet"}
+                  description={
+                    folder
+                      ? "Pages shared by other creators appear here."
+                      : "Create a page or ask an agent to save one."
+                  }
                   action={
-                    <Button variant="subtle" onClick={create}>
-                      <PlusIcon size={16} aria-hidden="true" />
-                      New page
-                    </Button>
+                    !folder ? (
+                      <Button variant="subtle" onClick={create}>
+                        <PlusIcon size={16} aria-hidden="true" />
+                        New page
+                      </Button>
+                    ) : undefined
                   }
                 />
               )}
               {!empty && (
-                <ul className={styles.titleList} aria-label="Pages">
+                <ul
+                  className={styles.titleList}
+                  aria-label={folder ? "Shared with me" : "Pages"}
+                >
                   {visible.map(titleLink)}
-                  <li key="new-page">
-                    <NavigationItem
-                      variant="text"
-                      icon={<PlusIcon size={16} aria-hidden="true" />}
-                      label="New page"
-                      onClick={create}
-                    />
-                  </li>
+                  {!folder && (
+                    <li key="new-page">
+                      <NavigationItem
+                        variant="text"
+                        icon={<PlusIcon size={16} aria-hidden="true" />}
+                        label="New page"
+                        onClick={create}
+                      />
+                    </li>
+                  )}
+                  {!folder && sharedCount > 0 && (
+                    <li key="shared">
+                      <NavigationItem
+                        ref={folderRef}
+                        aria-label="Shared with me"
+                        aria-description={`${sharedCount} loaded pages`}
+                        icon={<FolderSimpleIcon size={16} aria-hidden="true" />}
+                        label="Shared with me"
+                        trailing={
+                          <span className="text-caption text-subtle">
+                            {sharedCount}
+                          </span>
+                        }
+                        onClick={() => showShared(true)}
+                      />
+                    </li>
+                  )}
                 </ul>
               )}
               {!loading && !error && query && !visible.length && (
@@ -282,8 +354,8 @@ export function NotesPage({
             navigation={
               <IconButton
                 ref={backRef}
-                aria-label="Back to pages"
-                title="Back to pages"
+                aria-label={folder ? "Back to Shared with me" : "Back to pages"}
+                title={folder ? "Back to Shared with me" : "Back to pages"}
                 icon={<ArrowLeftIcon size={16} />}
                 onClick={browse}
               />
