@@ -793,9 +793,10 @@ it.each(["", "Please review these fixes"])(
     t.mount(second);
     const retry = await screen.findByRole("button", { name: "Retry send" });
     expect(
-      await screen.findByRole("region", { name: "Chat attachments" }),
-    ).toHaveTextContent("Fix");
-    expect(screen.getByRole("textbox")).toHaveValue(caption);
+      screen.queryByRole("region", { name: "Chat attachments" }),
+    ).toBeNull();
+    expect(screen.getByRole("textbox")).toHaveTextContent("Fix");
+    if (caption) expect(screen.getByRole("textbox")).toHaveTextContent(caption);
     await t.user.click(retry);
     await waitFor(() => expect(t.onStarted).toHaveBeenCalledOnce());
     expect(t.publish).toHaveBeenCalledTimes(2);

@@ -975,6 +975,7 @@ and are asked to sign in again in Buzz.
   delivery confirmation and keep their access. Public chats post directly.
   The success toast confirms any change to View only and offers **View** to open
   the posted link in the destination channel.
+  Chat links stay inline in the composer and messages, like other links.
   Opening a shared chat link creates no sidebar entry.
   Direct invitations still add members. Pasting a link to a Private chat you own into a channel, thread or DM
   uses the same confirmation, then sends your original message. Owned View only

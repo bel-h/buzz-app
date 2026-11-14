@@ -86,20 +86,14 @@ const crew: ChannelReference = {
   joined: false,
 };
 
-it("keeps an unavailable chat's bubble card, lock, sent name and accessible explanation", () => {
+it("preserves an unavailable chat's authored inline label and ordinary access explanation", () => {
   const t = fixture();
   render(link(t.session, "private-session", "Session: PR 45 fixes"));
   t.answer("private-session", { state: "withheld" });
-  const card = screen.getByRole("link", {
-    name: "Chat: PR 45 fixes, unavailable",
-  });
-  expect(card.getAttribute("title")).toContain(
-    "You don’t have access, or it no longer exists.",
-  );
-  expect(card.getAttribute("aria-description")).toContain("Chat unavailable");
-  expect(card.querySelector("svg.tabler-icon-message-circle")).not.toBeNull();
-  expect(card.querySelector("svg.tabler-icon-lock")).not.toBeNull();
-  expect(card.querySelector("svg.tabler-icon-chevron-right")).toBeNull();
+  const anchor = screen.getByRole("link", { name: "Session: PR 45 fixes" });
+  expect(anchor.textContent).toBe("Session: PR 45 fixes");
+  expect(anchor.getAttribute("title")).toContain("aren’t a member");
+  expect(anchor.querySelector("svg")).toBeNull();
 });
 
 it("names an open channel and shows its hover card", async () => {
@@ -174,6 +168,7 @@ it("does not open a withheld channel link, and keeps its href for copying", () =
       registry={undefined}
       onOpenLink={open}
       session={t.session}
+      directoryLabel="Stale chat title"
     />,
   );
   t.answer("secret", { state: "withheld" });
@@ -244,7 +239,7 @@ it("keeps a link focused while its name resolves, then opens its card", async ()
   );
 });
 
-it("shows an accessible private Solo chat as Chat with a navigation chevron, not a privacy lock", () => {
+it("renders an accessible private Solo chat with the ordinary authored link label", () => {
   const t = fixture();
   render(link(t.session, "shared-chat", "Chat: Work"));
   t.answer("shared-chat", {
@@ -256,8 +251,8 @@ it("shows an accessible private Solo chat as Chat with a navigation chevron, not
     archived: false,
     joined: true,
   });
-  const card = screen.getByRole("link", { name: "Open Chat: Work" });
-  expect(card.querySelector("svg.tabler-icon-message-circle")).not.toBeNull();
-  expect(card.querySelector("svg.tabler-icon-chevron-right")).not.toBeNull();
+  const card = screen.getByRole("link", { name: "Chat: Work" });
+  expect(card.querySelector("svg.tabler-icon-message-circle")).toBeNull();
+  expect(card.querySelector("svg.tabler-icon-chevron-right")).toBeNull();
   expect(card.querySelector("svg.tabler-icon-lock")).toBeNull();
 });

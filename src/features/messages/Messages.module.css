@@ -3080,7 +3080,7 @@ html[data-keyboard-navigation] .rawDiff:focus-visible {
   margin: 0;
 }
 /* Links take the bubble's paired link ink; mentions keep their own tint. */
-.messageBubble .text a:not([data-solo-link]) {
+.messageBubble .text a {
   --link-text: var(--message-link);
   --link-hover: transparent;
   --link-focus: currentColor;
@@ -3128,9 +3128,6 @@ html[data-keyboard-navigation] .rawDiff:focus-visible {
 .messageAttachments > * {
   max-width: 100%;
   margin-block: 0;
-}
-.messageAttachments[data-solo-cards] + .messageBubble {
-  margin-top: var(--space-half);
 }
 .messageAttachments .imageUnavailable {
   border-radius: calc(var(--radius-panel) - var(--space-2));
@@ -3823,25 +3820,6 @@ html[data-keyboard-navigation]
   gap: var(--space-1);
   min-width: 0;
 }
-.composerSoloCards {
-  container-type: inline-size;
-  container-name: message-row;
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  min-width: 0;
-}
-.composerSoloCard {
-  display: flex;
-  align-items: center;
-  gap: var(--space-1);
-  min-width: 0;
-}
-.composerSoloCardContent {
-  min-width: 0;
-  max-width: calc(100% - var(--size-control));
-}
-
 html[data-keyboard-navigation] .activityExpansion {
   transition: none;
 }

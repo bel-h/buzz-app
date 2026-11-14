@@ -24,7 +24,7 @@ import { useContext, type ComponentProps, type ReactNode } from "react";
 import {
   LinkLabelContext,
   LinkContentContext,
-  LinkChannelPrivateContext,
+  LinkChannelKindContext,
 } from "../../features/conversation/LinkLabelContext";
 import { buzzLinkKind } from "../../features/navigation/buzz-links";
 import styles from "../../shared/InlineReference.module.css";
@@ -98,6 +98,7 @@ const icons = {
   spreadsheet: TableIcon,
   presentation: PresentationIcon,
   buzz: ChatCircleIcon,
+  chat: ChatCircleIcon,
   channel: HashIcon,
   message: ChatCircleIcon,
   thread: ThreadIcon,
@@ -133,12 +134,15 @@ export function LinkLabel({
 }) {
   const contextualLabel = useContext(LinkLabelContext);
   const content = useContext(LinkContentContext);
-  const privateChannel = useContext(LinkChannelPrivateContext);
-  const kind = linkKind(href);
+  const channelKind = useContext(LinkChannelKindContext);
+  const destination = linkKind(href);
+  const kind =
+    destination === "channel" && channelKind === "chat" ? "chat" : destination;
   if (!kind) return <>{label}</>;
   if (label === href && contextualLabel) label = contextualLabel;
   if (label === href) {
     if (kind === "channel") label = "Channel";
+    else if (kind === "chat") label = "Chat";
     else if (kind === "message") label = "Message";
     else if (kind === "thread") label = "Thread";
     else if (kind === "buzz") label = "Buzz";
@@ -153,7 +157,8 @@ export function LinkLabel({
   const rawDestination =
     label === href ||
     (linkKind(label) !== null && new URL(label).href === new URL(href).href);
-  const Icon = kind === "channel" && privateChannel ? LockIcon : icons[kind];
+  const Icon =
+    kind === "channel" && channelKind === "private" ? LockIcon : icons[kind];
   icon ??= (
     <Icon
       aria-hidden="true"

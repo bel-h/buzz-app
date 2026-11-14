@@ -173,10 +173,12 @@ export function separateChatCards(
   };
 }
 
-/** The Solo chats a message's cards link to, using exactly the card renderer's
- * exclusions for quoted, code and hidden links. */
-export function chatCardIds(content: string): string[] {
-  const { cards } = separateChatCards({ content } as ChannelMessage, []);
+/** Solo chat links eligible for sharing, excluding quoted, code and hidden links. */
+export function chatCardIds(
+  content: string,
+  channels: readonly ReferenceChannel[] = [],
+): string[] {
+  const { cards } = separateChatCards({ content } as ChannelMessage, channels);
   return [
     ...new Set(
       cards.flatMap((card) =>

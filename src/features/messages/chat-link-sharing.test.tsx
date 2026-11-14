@@ -42,6 +42,7 @@ async function fixture(
     alone?: boolean;
     multiple?: boolean;
     viewOnlySecond?: boolean;
+    labeled?: boolean;
   } = {},
 ) {
   const viewer = keypair(),
@@ -186,7 +187,7 @@ async function fixture(
   writeView(
     owner.session.scope,
     key,
-    `${[source, ...(options.multiple ? [second] : [])].map((id) => `buzz://channel/${id}`).join("\n\n")}\n\nPlease look at this`,
+    `${[source, ...(options.multiple ? [second] : [])].map((id) => (options.labeled ? `[Shared work](buzz://channel/${id})` : `buzz://channel/${id}`)).join("\n\n")}\n\nPlease look at this`,
   );
   const view = render(
     <MessageComposer
@@ -572,3 +573,20 @@ it.each(["before confirmation", "during signing"])(
     expect(f.published[0]?.tags).toContainEqual(["name", "Updated work"]);
   },
 );
+
+it("confirms access for a title-only inline chat link and sends it in place", async () => {
+  const f = await fixture(false, { labeled: true });
+  await send();
+  expect(
+    await screen.findByRole("alertdialog", { name: "Share this chat?" }),
+  ).toBeVisible();
+  expect(f.publish).not.toHaveBeenCalled();
+  await confirm();
+  await waitFor(() =>
+    expect(f.published.map((event) => event.kind)).toEqual([9002, 9]),
+  );
+  expect(f.published[1]?.content).toBe(
+    `[Shared work](buzz://channel/${source})\n\nPlease look at this`,
+  );
+  expect(f.members.get(source)).toEqual([f.viewer.pubkey]);
+});
