@@ -5,6 +5,7 @@ import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { expect, it, vi } from "vitest";
 import { NoteHistoryMenu, NoteSharing } from "./NoteDialogs";
+import { formatPublicKey } from "../../shared/identity/public-key";
 import {
   MenuRoot,
   MenuTrigger,
@@ -69,6 +70,47 @@ it("retries history, pages the open submenu, and selects with the retained offse
   await waitFor(() =>
     expect(screen.queryByRole("menu")).not.toBeInTheDocument(),
   );
+});
+
+it("shows each revision signer in history, with a key fallback for a missing profile", async () => {
+  const f = await workspaceFixture();
+  const note = f.seed("Plan", "Original");
+  await f.edit(f.carl, note, { title: "Agent edit", markdown: "By the agent" });
+  const storage = f.channels.get(note.channel);
+  if (!storage) throw new Error("Missing page storage");
+  storage.roles[f.sam.pubkey] = "member";
+  f.profiles.splice(
+    f.profiles.findIndex((profile) => profile.pubkey === f.sam.pubkey),
+    1,
+  );
+  await f.edit(f.sam, note, { title: "Unknown edit", markdown: "No profile" });
+  const current = await f.workspace.open(note);
+  render(
+    <MenuRoot>
+      <MenuTrigger>Actions</MenuTrigger>
+      <MenuPopup>
+        <NoteHistoryMenu
+          note={current}
+          workspace={f.workspace}
+          disabled={false}
+          onSelect={() => {}}
+        />
+      </MenuPopup>
+    </MenuRoot>,
+  );
+  await userEvent.click(screen.getByRole("button", { name: "Actions" }));
+  await userEvent.click(
+    await screen.findByRole("menuitem", { name: "Revision history" }),
+  );
+  expect(
+    await screen.findByRole("menuitem", { name: /^Plan/ }),
+  ).toHaveTextContent("You ·");
+  expect(
+    await screen.findByRole("menuitem", { name: /^Agent edit/ }),
+  ).toHaveTextContent("Carl ·");
+  expect(
+    screen.getByRole("menuitem", { name: /^Unknown edit/ }),
+  ).toHaveTextContent(formatPublicKey(f.sam.pubkey) ?? "missing key");
 });
 
 it("uses the channel member picker while guarding a pending explicit invitation", async () => {

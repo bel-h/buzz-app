@@ -9,6 +9,9 @@ import {
 } from "react";
 import type { ChannelSummary } from "../../features/relay/contracts";
 import type { MemberChange } from "../../features/channel-members/administration-protocol";
+import { useChannelIdentityNames } from "../../features/identity-names/react";
+import { useProfileGeneration } from "../../features/relay/react";
+import { formatPublicKey } from "../../shared/identity/public-key";
 import { usePagesUi } from "./ui";
 import { noteUrl, type Note } from "./model";
 import type { NotesWorkspace } from "./workspace";
@@ -183,6 +186,23 @@ function useRevisions(
   const [error, setError] = useState("");
   const [attempt, setAttempt] = useState(0);
   const [busy, setBusy] = useState(true);
+  const { profiles, viewer } = workspace.session;
+  const names = useChannelIdentityNames(workspace.session, note.channel);
+  const known = useSyncExternalStore(profiles.subscribe, profiles.snapshot);
+  const generation = useProfileGeneration(profiles);
+  const authors = useMemo(
+    () => [
+      ...new Set(page?.revisions.map((revision) => revision.event.pubkey)),
+    ],
+    [page],
+  );
+  useEffect(() => {
+    if (!enabled) return;
+    void generation;
+    const release = profiles.reserve?.(authors.length);
+    void profiles.ensure(authors, "background").catch(() => {});
+    return release;
+  }, [profiles, authors, enabled, generation]);
   // biome-ignore lint/correctness/useExhaustiveDependencies: attempt explicitly restarts the read when Retry is requested.
   useEffect(() => {
     if (!enabled) return;
@@ -203,7 +223,23 @@ function useRevisions(
       });
     return () => controller.abort();
   }, [workspace, note, offset, enabled, attempt]);
-  return { page, error, busy, retry: () => setAttempt((value) => value + 1) };
+  return {
+    page,
+    error,
+    busy,
+    retry: () => setAttempt((value) => value + 1),
+    authorName: (revision: Note) => {
+      const author = revision.event.pubkey;
+      return author === viewer
+        ? "You"
+        : names(
+            author,
+            known.get(author)?.name ??
+              formatPublicKey(author) ??
+              "Unknown author",
+          );
+    },
+  };
 }
 
 export function NoteHistoryMenu({
@@ -221,7 +257,7 @@ export function NoteHistoryMenu({
 }) {
   const [open, setOpen] = useState(false);
   const [offset, setOffset] = useState(0);
-  const { page, error, busy, retry } = useRevisions(
+  const { page, error, busy, retry, authorName } = useRevisions(
     note,
     workspace,
     offset,
@@ -258,6 +294,7 @@ export function NoteHistoryMenu({
             <span className={styles.revision}>
               <span>{revision.deleted ? "Deleted" : revision.title}</span>
               <span className="text-caption text-subtle">
+                {authorName(revision)} ·{" "}
                 {new Date(revision.event.created_at * 1000).toLocaleString()} ·{" "}
                 {revision.revision.slice(0, 8)}
                 {revision.revision === note.revision ? " · Current" : ""}
@@ -323,7 +360,7 @@ export function NoteHistory({
   selection: { revision?: string; offset?: number };
   trigger: RefObject<HTMLElement | null>;
 }) {
-  const { page, error, busy, retry } = useRevisions(
+  const { page, error, busy, retry, authorName } = useRevisions(
     note,
     workspace,
     selection.offset ?? 0,
@@ -378,6 +415,7 @@ export function NoteHistory({
             {selected.deleted ? "Deleted" : selected.title}
           </h2>
           <p className="text-caption text-subtle">
+            {authorName(selected)} ·{" "}
             {new Date(selected.event.created_at * 1000).toLocaleString()} ·{" "}
             {selected.revision.slice(0, 8)}
           </p>

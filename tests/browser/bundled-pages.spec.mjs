@@ -1,11 +1,13 @@
 import { test, expect } from "./source-fixture.mjs";
 import { watchPageErrors } from "./page-errors.mjs";
 
-async function manual(page, article) {
+async function pageAction(page, article, name) {
   await article.getByRole("button", { name: "Page actions" }).click();
-  await page
-    .getByRole("menuitem", { name: "Revision history", exact: true })
-    .click();
+  await page.getByRole("menuitem", { name, exact: true }).click();
+}
+
+async function manual(page, article) {
+  await pageAction(page, article, "Revision history");
   await page
     .getByRole("menuitem", { name: "Disable auto-save", exact: true })
     .click();
@@ -85,6 +87,9 @@ test("edits and preserves drafts using host UI, then adopts an agent revision wi
     remote,
   );
   await expect(body).toContainText("Agent update");
+  await expect(
+    body.getByRole("heading", { level: 1, name: "Agent update" }),
+  ).toBeVisible();
   await expect
     .poll(() =>
       page.evaluate(
@@ -95,13 +100,52 @@ test("edits and preserves drafts using host UI, then adopts an agent revision wi
     )
     .toBe(saved.revision);
   expect(saved.message).toBe(`[Connected pages plan](<${saved.link}>)`);
-  await article.getByRole("button", { name: "Page actions" }).click();
-  await page
-    .getByRole("menuitem", { name: "Markdown source", exact: true })
-    .click();
+  await pageAction(page, article, "Revision history");
+  const currentRevision = page.getByRole("menuitem", {
+    name: /Connected pages plan.*Carl.*Current/,
+  });
+  await expect(currentRevision).toBeVisible();
+  const olderRevision = page
+    .getByRole("menuitem", { name: /Connected pages plan.*You/ })
+    .first();
+  await olderRevision.focus();
+  await olderRevision.press("Enter");
+  const preview = page.getByRole("dialog", { name: "Revision preview" });
+  await expect(
+    preview.getByRole("region", { name: "Selected revision" }),
+  ).toContainText("You ·");
+  await page.keyboard.press("Escape");
+  await expect(preview).toBeHidden();
+  await expect(
+    article.getByRole("button", { name: "Page actions" }),
+  ).toBeFocused();
+  await pageAction(page, article, "Markdown source");
   await expect(
     article.getByRole("textbox", { name: "Markdown", exact: true }),
   ).toHaveValue(remote);
+  const sourceDraft = `${remote}\nUnsaved source edit.`;
+  await article
+    .getByRole("textbox", { name: "Markdown", exact: true })
+    .fill(sourceDraft);
+  await pageAction(page, article, "Formatted text");
+  await expect(body).toContainText("Unsaved source edit.");
+  await body.evaluate((input) => {
+    input.focus();
+    input.setSelectionRange(input.value.length, input.value.length);
+  });
+  await page.keyboard.type(" Rich edit.");
+  await pageAction(page, article, "Markdown source");
+  await expect(
+    article.getByRole("textbox", { name: "Markdown", exact: true }),
+  ).toHaveValue(`${remote}\nUnsaved source edit. Rich edit.`.trimEnd());
+  await pageAction(page, article, "Formatted text");
+  expect(
+    await page.evaluate(
+      () =>
+        window.workingNotesFixture.head(window.workingNotesFixture.plan.id)
+          .revision,
+    ),
+  ).toBe(saved.revision);
   for (const theme of ["light", "dark"]) {
     for (const width of [1440, 480]) {
       await page.setViewportSize({ width, height: 950 });
@@ -112,6 +156,18 @@ test("edits and preserves drafts using host UI, then adopts an agent revision wi
       await expect(
         article.getByRole("button", { name: "Share page", exact: true }),
       ).toBeInViewport({ ratio: 1 });
+      await expect(
+        body.getByRole("heading", { level: 1, name: "Agent update" }),
+      ).toBeVisible();
+      await pageAction(page, article, "Revision history");
+      await expect(currentRevision).toBeInViewport({ ratio: 1 });
+      const bounds = await page
+        .getByRole("menu", { name: "Revision history" })
+        .boundingBox();
+      expect(bounds.x).toBeGreaterThanOrEqual(0);
+      expect(bounds.x + bounds.width).toBeLessThanOrEqual(width);
+      await page.keyboard.press("Escape");
+      await page.keyboard.press("Escape");
       await expect
         .poll(() =>
           page.evaluate(
