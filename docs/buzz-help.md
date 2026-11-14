@@ -1161,7 +1161,8 @@ groups do not change creator attribution, ownership or access.
 Use Share page to grant access. New pages are private; View only allows community
 members to read. A link grants no access. Sharing includes retained revisions,
 and the relay operator can read content. Page actions also offers revision
-history with each revision’s author, Markdown export and recoverable deletion.
+history with each revision’s author and avatar, Markdown export and recoverable
+deletion. Revision times are relative; hover to see the exact date and time.
 Restore saves a new revision.
 Conflicting edits preserve the draft until you reconcile the newer revision.
 

@@ -85,6 +85,9 @@ it("shows each revision signer in history, with a key fallback for a missing pro
   );
   await f.edit(f.sam, note, { title: "Unknown edit", markdown: "No profile" });
   const current = await f.workspace.open(note);
+  vi.spyOn(Date, "now").mockReturnValue(
+    (current.event.created_at + 120) * 1000,
+  );
   render(
     <MenuRoot>
       <MenuTrigger>Actions</MenuTrigger>
@@ -111,6 +114,21 @@ it("shows each revision signer in history, with a key fallback for a missing pro
   expect(
     screen.getByRole("menuitem", { name: /^Unknown edit/ }),
   ).toHaveTextContent(formatPublicKey(f.sam.pubkey) ?? "missing key");
+  for (const [title, shape] of [
+    ["Plan", "circle"],
+    ["Agent edit", "squircle"],
+    ["Unknown edit", "circle"],
+  ]) {
+    const row = screen.getByRole("menuitem", { name: new RegExp(`^${title}`) });
+    expect(row.querySelector("[data-avatar-shape]")).toHaveAttribute(
+      "data-avatar-shape",
+      shape,
+    );
+    const time = row.querySelector("time");
+    expect(time).toHaveTextContent(/ago$/);
+    expect(time).toHaveAttribute("datetime");
+    expect(time?.title).not.toBe("");
+  }
 });
 
 it("uses the channel member picker while guarding a pending explicit invitation", async () => {

@@ -58,7 +58,7 @@ export function NoteTime({ note }: { note: Pick<NoteEvent, "created_at"> }) {
   );
 }
 
-function NoteAuthor({
+export function NoteAuthor({
   name,
   picture,
   isAgent,

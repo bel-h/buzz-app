@@ -12,6 +12,9 @@ import type { MemberChange } from "../../features/channel-members/administration
 import { useChannelIdentityNames } from "../../features/identity-names/react";
 import { useProfileGeneration } from "../../features/relay/react";
 import { formatPublicKey } from "../../shared/identity/public-key";
+import { avatarMedia } from "../../shared/avatar-source";
+import { NoteAuthor, NoteTime } from "./NoteMetadata";
+import readerStyles from "./NotesPage.module.css";
 import { usePagesUi } from "./ui";
 import { noteUrl, type Note } from "./model";
 import type { NotesWorkspace } from "./workspace";
@@ -228,16 +231,21 @@ function useRevisions(
     error,
     busy,
     retry: () => setAttempt((value) => value + 1),
-    authorName: (revision: Note) => {
+    author: (revision: Note) => {
       const author = revision.event.pubkey;
-      return author === viewer
-        ? "You"
-        : names(
-            author,
-            known.get(author)?.name ??
-              formatPublicKey(author) ??
-              "Unknown author",
-          );
+      const profile = known.get(author);
+      const name =
+        author === viewer
+          ? "You"
+          : names(
+              author,
+              profile?.name ?? formatPublicKey(author) ?? "Unknown author",
+            );
+      return {
+        name,
+        picture: avatarMedia(profile?.picture, workspace.session.media),
+        isAgent: !!profile?.isAgent,
+      };
     },
   };
 }
@@ -257,7 +265,7 @@ export function NoteHistoryMenu({
 }) {
   const [open, setOpen] = useState(false);
   const [offset, setOffset] = useState(0);
-  const { page, error, busy, retry, authorName } = useRevisions(
+  const { page, error, busy, retry, author } = useRevisions(
     note,
     workspace,
     offset,
@@ -293,9 +301,11 @@ export function NoteHistoryMenu({
           >
             <span className={styles.revision}>
               <span>{revision.deleted ? "Deleted" : revision.title}</span>
-              <span className="text-caption text-subtle">
-                {authorName(revision)} ·{" "}
-                {new Date(revision.event.created_at * 1000).toLocaleString()} ·{" "}
+              <span
+                className={`${readerStyles.byline} text-caption text-subtle`}
+              >
+                <NoteAuthor {...author(revision)} /> ·{" "}
+                <NoteTime note={revision.event} /> ·{" "}
                 {revision.revision.slice(0, 8)}
                 {revision.revision === note.revision ? " · Current" : ""}
               </span>
@@ -360,7 +370,7 @@ export function NoteHistory({
   selection: { revision?: string; offset?: number };
   trigger: RefObject<HTMLElement | null>;
 }) {
-  const { page, error, busy, retry, authorName } = useRevisions(
+  const { page, error, busy, retry, author } = useRevisions(
     note,
     workspace,
     selection.offset ?? 0,
@@ -414,10 +424,9 @@ export function NoteHistory({
           <h2 className="text-label">
             {selected.deleted ? "Deleted" : selected.title}
           </h2>
-          <p className="text-caption text-subtle">
-            {authorName(selected)} ·{" "}
-            {new Date(selected.event.created_at * 1000).toLocaleString()} ·{" "}
-            {selected.revision.slice(0, 8)}
+          <p className={`${readerStyles.byline} text-caption text-subtle`}>
+            <NoteAuthor {...author(selected)} /> ·{" "}
+            <NoteTime note={selected.event} /> · {selected.revision.slice(0, 8)}
           </p>
           <pre className={styles.source}>
             {selected.markdown ||
