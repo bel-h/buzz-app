@@ -5,7 +5,7 @@ import {
   ArrowsClockwiseIcon,
   Filter2Icon,
   InfoIcon,
-  FileTextIcon,
+  NoteIcon,
   FolderSimpleIcon,
   PlusIcon,
 } from "../../shared/design-system/icons";
@@ -32,12 +32,13 @@ import {
   MenuPopup,
   MenuCheckboxItem,
 } from "../../shared/design-system/ui/Menu";
-import { NoteTime } from "./NoteMetadata";
+import { NoteAuthor, NoteTime } from "./NoteMetadata";
 import styles from "./NotesPage.module.css";
 
 export type NotesPageProps = {
   community: string;
   entries: readonly Note[];
+  author(note: Note): Parameters<typeof NoteAuthor>[0];
   items: readonly { id: string; label: string; content: ReactNode }[];
   selected: string;
   query: string;
@@ -63,6 +64,7 @@ export type NotesPageProps = {
 export function NotesPage({
   community,
   entries,
+  author,
   items,
   selected,
   query,
@@ -123,13 +125,15 @@ export function NotesPage({
         nativeButton={false}
         role="link"
         aria-label={note.title}
+        aria-description={`Last edited by ${author(note).name}`}
         render={<a href={noteUrl(note, community)} />}
         label={<span className="text-label">{note.title}</span>}
-        icon={
-          <FileTextIcon size={16} className="text-subtle" aria-hidden="true" />
-        }
+        icon={<NoteIcon size={20} className="text-subtle" aria-hidden="true" />}
         trailing={
-          <span className="text-caption text-subtle">
+          <span className={`${styles.rowMetadata} text-caption text-subtle`}>
+            <span title={`Last edited by ${author(note).name}`}>
+              <NoteAuthor {...author(note)} avatarOnly />
+            </span>
             <NoteTime note={note.event} />
           </span>
         }
@@ -161,7 +165,7 @@ export function NotesPage({
                     folder ? (
                       <FolderSimpleIcon size={16} />
                     ) : (
-                      <FileTextIcon size={16} />
+                      <NoteIcon size={16} />
                     )
                   }
                 >
@@ -348,7 +352,7 @@ export function NotesPage({
             title={
               <PanelHeaderLabel
                 title={active?.label ?? "Page"}
-                icon={<FileTextIcon size={16} />}
+                icon={<NoteIcon size={16} />}
               />
             }
             navigation={

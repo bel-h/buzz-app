@@ -1,4 +1,5 @@
 import type { NoteEvent } from "./model";
+import type { ComponentProps } from "react";
 import { Avatar } from "../../shared/design-system/ui/Avatar";
 import { relativeTimestamp } from "../../shared/relative-timestamp";
 import styles from "./NotesPage.module.css";
@@ -62,10 +63,14 @@ export function NoteAuthor({
   name,
   picture,
   isAgent,
+  avatarOnly = false,
+  size = "compact",
 }: {
   name: string;
   picture?: string | undefined;
   isAgent: boolean;
+  avatarOnly?: boolean;
+  size?: ComponentProps<typeof Avatar>["size"];
 }) {
   return (
     <span className={styles.byline}>
@@ -73,10 +78,10 @@ export function NoteAuthor({
         src={picture}
         alt=""
         fallback={name}
-        size="compact"
+        size={size}
         shape={isAgent ? "squircle" : "circle"}
       />
-      <span>{name}</span>
+      <span className={avatarOnly ? "sr-only" : undefined}>{name}</span>
     </span>
   );
 }

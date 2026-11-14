@@ -299,13 +299,15 @@ export function NoteHistoryMenu({
             disabled={busy || !!error}
             onClick={() => onSelect(revision.revision, offset)}
           >
+            <span aria-hidden="true">
+              <NoteAuthor {...author(revision)} avatarOnly size="small" />
+            </span>
             <span className={styles.revision}>
               <span>{revision.deleted ? "Deleted" : revision.title}</span>
               <span
                 className={`${readerStyles.byline} text-caption text-subtle`}
               >
-                <NoteAuthor {...author(revision)} /> ·{" "}
-                <NoteTime note={revision.event} /> ·{" "}
+                {author(revision).name} · <NoteTime note={revision.event} /> ·{" "}
                 {revision.revision.slice(0, 8)}
                 {revision.revision === note.revision ? " · Current" : ""}
               </span>

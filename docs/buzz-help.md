@@ -1156,7 +1156,8 @@ browsing within the connected session, not app restarts.
 The main collection keeps your pages together with pages created by your verified
 agents. Pages from other creators are in **Shared with me**; open that folder to
 search them. An agent page stays there until ownership can be verified. These
-groups do not change creator attribution, ownership or access.
+groups do not change creator attribution, ownership or access. Each page row shows
+its last editor’s avatar beside the relative save time; hover for their name.
 
 Use Share page to grant access. New pages are private; View only allows community
 members to read. A link grants no access. Sharing includes retained revisions,

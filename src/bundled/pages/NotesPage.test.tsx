@@ -38,6 +38,14 @@ it("groups by the signed creator and verified agent ownership, preserving attrib
   render(<WorkingNotesCommunity workspace={f.workspace} />);
   await screen.findByRole("link", { name: agent.title });
   expect(screen.getByRole("link", { name: mine.title })).toBeVisible();
+  await within(screen.getByRole("link", { name: mine.title })).findByTitle(
+    "Last edited by Carl",
+  );
+  expect(
+    within(screen.getByRole("link", { name: agent.title })).getByTitle(
+      "Last edited by You",
+    ),
+  ).toBeVisible();
   expect(
     screen.queryByRole("link", { name: other.title }),
   ).not.toBeInTheDocument();
@@ -146,7 +154,10 @@ it("keeps viewer pages usable when ownership reads fail, and retries on refresh"
   render(<WorkingNotesCommunity workspace={f.workspace} />);
   await screen.findByRole("link", { name: mine.title });
   await waitFor(() =>
-    expect(ensure).toHaveBeenCalledWith([f.carl.pubkey], "background"),
+    expect(ensure).toHaveBeenCalledWith(
+      [f.carl.pubkey, f.viewer.pubkey],
+      "background",
+    ),
   );
   expect(
     screen.queryByRole("link", { name: agent.title }),

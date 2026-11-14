@@ -7,6 +7,9 @@ import {
   useSyncExternalStore,
 } from "react";
 import type { Navigation } from "../../features/navigation/controller";
+import { useIdentityNames } from "../../features/identity-names/react";
+import { formatPublicKey } from "../../shared/identity/public-key";
+import { avatarMedia } from "../../shared/avatar-source";
 import { buzzLinkTarget } from "../../features/navigation/buzz-links";
 import { targetKey } from "../../features/navigation/targets";
 import {
@@ -27,7 +30,7 @@ import {
 } from "../../features/relay/react";
 import type { RelayData } from "../../features/relay/service";
 import type { RelaySession } from "../../features/relay/session";
-import { FileTextIcon } from "../../shared/design-system/icons";
+import { NoteIcon } from "../../shared/design-system/icons";
 import { Button } from "../../shared/design-system/ui/Button";
 import { Panel } from "../../shared/design-system/ui/Panel";
 import {
@@ -104,7 +107,7 @@ export function WorkingNotesPage({
       <Panel>
         <PanelHeader
           title={
-            <PanelHeaderLabel title="Pages" icon={<FileTextIcon size={16} />} />
+            <PanelHeaderLabel title="Pages" icon={<NoteIcon size={16} />} />
           }
         />
         <div className={styles.browser}>
@@ -179,17 +182,32 @@ export function WorkingNotesCommunity({
         .sort(),
     [collection.creators, viewer],
   );
+  const identities = useMemo(
+    () => [
+      ...new Set([
+        ...creators,
+        ...collection.notes.map((note) => note.event.pubkey).sort(),
+      ]),
+    ],
+    [creators, collection.notes],
+  );
+  const profileMap = useSyncExternalStore(
+    profiles.subscribe,
+    profiles.snapshot,
+  );
+  const resolveName = useIdentityNames(workspace.session.names);
   const generation = useProfileGeneration(profiles);
   useEffect(() => {
     void generation;
-    const release = profiles.reserve?.(creators.length);
+    const release = profiles.reserve?.(identities.length);
     // Use the shared directory's budget and de-duplicated background reads.
-    // Missing/failed/unverified evidence leaves a document in Shared with me.
+    // Missing ownership evidence leaves a document in Shared with me;
+    // missing editor profiles use public-key labels.
     void profiles
-      .ensure(creators.slice(0, profiles.limit?.()), "background")
+      .ensure(identities.slice(0, profiles.limit?.()), "background")
       .catch(() => {});
     return release;
-  }, [profiles, creators, generation]);
+  }, [profiles, identities, generation]);
   const readOwned = () =>
     creators
       .filter((creator) => viewer && profiles.owner?.(creator) === viewer)
@@ -359,6 +377,18 @@ export function WorkingNotesCommunity({
   return (
     <NotesPage
       community={workspace.session.scope.replace(/:[0-9a-f]{64}$/, "")}
+      author={(note) => {
+        const key = note.event.pubkey;
+        const profile = profileMap.get(key);
+        return {
+          name:
+            key === viewer
+              ? "You"
+              : resolveName(key, profile?.name ?? formatPublicKey(key) ?? key),
+          picture: avatarMedia(profile?.picture, workspace.session.media),
+          isAgent: !!profile?.isAgent,
+        };
+      }}
       {...{
         selected,
         query,
