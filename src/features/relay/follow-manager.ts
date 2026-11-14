@@ -733,6 +733,8 @@ export function createThreadFollowSync({
     void queue(async () => {
       try {
         await ingest(events, budget());
+        // A complete snapshot, durably ingested, opens the startup gate.
+        ready = true;
         complete = !unreadable();
         settled();
         if (dirtySlots(stored.state).length) schedule(0);

@@ -2150,6 +2150,39 @@ describe("publication fences", () => {
     );
   }, 30000);
 
+  it("an overfull primary reports a clear it cannot carry, while the read still saves", async () => {
+    const f = fixture(T);
+    const owner = snapshotted(f, [])();
+    await owner.ready;
+    await owner.refresh();
+    await owner.read("room", T - 10, () => true);
+    expect((await owner.markLocalUnread("room", () => true)).sync).toBe(
+      "pending",
+    );
+    await owner.flush();
+    const live = () => Object.values(f.own())[0]?.["ov_s:room"];
+    expect(live()).toBeDefined();
+    // Peer groups now overfill the primary.
+    for (let n = 0; n < 150; n++)
+      f.addRemote(
+        peerUnreadMarker(f, `c${n}`.padEnd(120, "x"), 0, {
+          slot: n.toString(16).padStart(32, "b"),
+          createdAt: T,
+        }),
+      );
+    await owner.refresh();
+    // Reaching the bottom with nothing new: the read saves, and only the
+    // clear would end the group.
+    await owner.read("room", T - 10, () => true, true);
+    expect(owner.state().frontiers.room).toBe(T - 10);
+    await owner.flush();
+    expect(live()).toBeDefined();
+    expect(owner.snapshot()).toMatchObject({
+      status: "error",
+      error: "Channel mark read cannot be synchronized",
+    });
+  }, 30000);
+
   it("takes a complete snapshot before the first send, and again after a gap", async () => {
     const f = fixture(T);
     const full = snapshotted(f, foreign(f.key.pubkey, READ_SNAPSHOT_EVENTS))();

@@ -984,3 +984,36 @@ it("startup gate: a tap after complete recovery works, and a new writer starts c
   await again.set(K, false);
   expect(again.read().get(K)).toBe(false);
 });
+
+it("startup gate: a reconnect's complete snapshot opens the gate without a follow retry", async () => {
+  const r = relay();
+  let repair!: (events: readonly RelayEvent[], complete: boolean) => void;
+  const sync = setup(
+    r,
+    { now: 1000 },
+    {
+      reader: {
+        read: async () => {
+          throw new Error("Relay is disconnected");
+        },
+        readStateSnapshot: async () => {
+          throw new Error("Relay is disconnected");
+        },
+      } as unknown as RelayReader,
+      capacity: {
+        admit() {},
+        observeSize() {},
+        async refresh() {},
+        subscribeOwn(listener) {
+          repair = listener;
+          return () => {};
+        },
+      },
+    },
+  );
+  await sync.refresh();
+  await expect(sync.set(K, true)).rejects.toThrow("not ready");
+  repair([], true);
+  await vi.waitFor(() => expect(sync.set(K, true)).resolves.toBeUndefined());
+  expect(sync.read().get(K)).toBe(true);
+});

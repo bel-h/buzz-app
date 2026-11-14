@@ -226,10 +226,20 @@ export function createReadState({
   /** A snapshot read failed, an accepted marker failed to apply, or the
    * stream dropped, and no snapshot read or resume has succeeded since. */
   let observationOwed = false;
+  /** A channel clear the overfull primary cannot carry: never reported as
+   * synchronized until a publication fits the merged groups again. */
+  let blockedClear: string | undefined;
   const health = (patch: Partial<ReadSyncSnapshot>) => {
     if (patch.status) failedRevision = undefined;
     if (patch.status === "error") resumable = undefined;
-    const next = { ...snapshot, ...patch };
+    let next = { ...snapshot, ...patch };
+    if (
+      blockedClear &&
+      (next.status === "pending" ||
+        next.status === "accepted" ||
+        next.status === "reconciled")
+    )
+      next = { ...next, status: "error", error: blockedClear };
     if (!same(next, snapshot)) {
       snapshot = Object.freeze(next);
       emit();
@@ -757,7 +767,16 @@ export function createReadState({
         overrideActive(next.overrides[ctx], frontier(next, ctx))
       )
         next = changeOverride(next, ctx, false, 0);
-    return next === current.state ? undefined : next;
+    if (next === current.state) return;
+    // A clear the primary cannot carry stays unsynced: the read itself still
+    // advances, and the failure shows in the sync notice.
+    try {
+      groupBlob(current.clientId, next, (ctx) => frontier(next, ctx));
+    } catch {
+      blockedClear = "Channel mark read cannot be synchronized";
+      return;
+    }
+    return next;
   }
   async function mutate(
     key: string,
@@ -963,6 +982,7 @@ export function createReadState({
           let groups: ReadBlob;
           try {
             groups = primary(journal.state.overrides);
+            blockedClear = undefined;
           } catch {
             groups = primary(seen[0]?.parsed.state.overrides ?? {});
           }
