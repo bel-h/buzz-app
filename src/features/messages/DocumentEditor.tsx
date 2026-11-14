@@ -185,7 +185,10 @@ export function DocumentEditor({
       {editing &&
         !source &&
         (toolbarTarget ? createPortal(toolbar, toolbarTarget) : toolbar)}
-      <section className={styles.editorBody} aria-label="Document content">
+      <section
+        className={`${styles.editorBody} text-message`}
+        aria-label="Document content"
+      >
         <div hidden={!editing}>
           {source ? (
             <Textarea
@@ -208,7 +211,7 @@ export function DocumentEditor({
               }}
             />
           ) : (
-            <div className={`text-body ${markdownStyles.documentScale}`}>
+            <div className={markdownStyles.documentScale}>
               <EditableInput
                 ref={input}
                 draft={draft}
