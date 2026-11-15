@@ -19,6 +19,7 @@ import {
   MessageReplyIcon,
   HashIcon,
   LockIcon,
+  PlugIcon,
 } from "../../shared/design-system/icons/index";
 import { useContext, type ComponentProps, type ReactNode } from "react";
 import {
@@ -98,6 +99,7 @@ const icons = {
   spreadsheet: TableIcon,
   presentation: PresentationIcon,
   buzz: ChatCircleIcon,
+  install: PlugIcon,
   channel: HashIcon,
   message: ChatCircleIcon,
   thread: MessageReplyIcon,
@@ -141,6 +143,7 @@ export function LinkLabel({
     if (kind === "channel") label = "Channel";
     else if (kind === "message") label = "Message";
     else if (kind === "thread") label = "Thread";
+    else if (kind === "install") label = "Install plugin";
     else if (kind === "buzz") label = "Buzz";
   }
   // The channel icon already supplies the visual hash.

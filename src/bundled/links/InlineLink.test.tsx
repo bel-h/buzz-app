@@ -51,6 +51,11 @@ it.each([
     "thread",
     "Thread",
   ],
+  [
+    "buzz://plugin-install?repository=example%2Fplugin",
+    "install",
+    "Install plugin",
+  ],
 ])("renders semantic Buzz labels for %s", (href, kind, label) => {
   const html = renderToStaticMarkup(<InlineLink href={href} />);
   expect(html).toContain(`data-link-kind="${kind}"`);
