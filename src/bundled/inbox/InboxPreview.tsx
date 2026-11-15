@@ -334,6 +334,10 @@ function InboxPreviewCard({
     setReadError(undefined);
     let succeeded = false;
     try {
+      if (!valid())
+        throw new Error(
+          "This action expired. Close and reopen the conversation.",
+        );
       if (item.target.kind === "channel")
         await session.unread.prepareChannelRead(item.channelId)();
       else if (item.timeline)
@@ -439,17 +443,22 @@ function InboxPreviewCard({
       onUnreadOnlyChange={setUnreadOnly}
       unreadOnlyRef={unreadOnlyControl}
     >
-      {readError && !failure && (
-        <p className={`text-body ${styles.notice}`} role="alert">
-          {readError} Try the row again.
-        </p>
-      )}
-      {failure && (
+      {(failure || readError) && (
         <div className={styles.notice} role="alert">
-          <p className="text-body">{failure}</p>
-          <Button ref={retryButton} size="sm" onClick={() => void retry()}>
-            Retry activity
-          </Button>
+          {failure && <p className="text-body">{failure}</p>}
+          {readError && (
+            <p className="text-body">{readError} Try the row again.</p>
+          )}
+          {failure && (
+            <Button
+              ref={retryButton}
+              size="sm"
+              disabled={pending}
+              onClick={() => void retry()}
+            >
+              Retry activity
+            </Button>
+          )}
         </div>
       )}
       {rows.length ? (
