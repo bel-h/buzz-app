@@ -250,12 +250,16 @@ export function PluginUpdates({
       return;
     const review = store.startNextReview(installRequests.tryHoldReview);
     if (!review) return;
-    if (pendingAction.current?.queueId === review.queueId) {
+    const notificationReview =
+      pendingAction.current?.queueId === review.queueId;
+    if (notificationReview) {
       pendingAction.current = undefined;
       setPendingActionId(undefined);
     }
     reviewLeaseRevision.current = installRequests.reviewRevision();
-    returnFocus.current = document.activeElement as HTMLElement;
+    // Disabling a pending notice can move keyboard focus before its review starts.
+    if (!notificationReview)
+      returnFocus.current = document.activeElement as HTMLElement;
     setAction(review.update);
     setActionQueueId(review.queueId);
   }, [
@@ -272,7 +276,11 @@ export function PluginUpdates({
     : undefined;
   useEffect(() => {
     const intent = pendingAction.current;
-    if (!intent || !pendingQueue || action) return;
+    if (!intent?.queueId || action) return;
+    if (!pendingQueue) {
+      if (clearPendingAction(intent)) openPluginSettings(intent.update.id);
+      return;
+    }
     if (
       !["failed", "cancelled", "completed", "partial"].includes(
         pendingQueue.status,

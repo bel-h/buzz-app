@@ -115,31 +115,31 @@ function fixture() {
   };
   const installRequests = createPluginInstallRequests();
   const relay = { snapshot: () => ({ session: {} }) } as AppServices["relay"];
-  const mount = (plugins = manager) =>
-    render(
-      <ToastProvider>
-        <PluginUpdates
-          plugins={plugins}
-          navigation={navigation}
-          relay={relay}
-          installRequests={installRequests}
-        >
-          <button type="button">View Notes details</button>
-          <PluginUpdateFailure
-            pluginId="example.notes"
-            returnFocus={() =>
-              screen.getByRole("button", { name: "View Notes details" })
-            }
-          />
-          <MenuRoot>
-            <MenuTrigger>Profile</MenuTrigger>
-            <MenuPopup>
-              <PluginUpdatesMenu recommendations={0} onManage={vi.fn()} />
-            </MenuPopup>
-          </MenuRoot>
-        </PluginUpdates>
-      </ToastProvider>,
-    );
+  const tree = (plugins = manager) => (
+    <ToastProvider>
+      <PluginUpdates
+        plugins={plugins}
+        navigation={navigation}
+        relay={relay}
+        installRequests={installRequests}
+      >
+        <button type="button">View Notes details</button>
+        <PluginUpdateFailure
+          pluginId="example.notes"
+          returnFocus={() =>
+            screen.getByRole("button", { name: "View Notes details" })
+          }
+        />
+        <MenuRoot>
+          <MenuTrigger>Profile</MenuTrigger>
+          <MenuPopup>
+            <PluginUpdatesMenu recommendations={0} onManage={vi.fn()} />
+          </MenuPopup>
+        </MenuRoot>
+      </PluginUpdates>
+    </ToastProvider>
+  );
+  const mount = (plugins = manager) => render(tree(plugins));
   return {
     source,
     candidate,
@@ -152,6 +152,7 @@ function fixture() {
     navigation,
     installRequests,
     manager,
+    tree,
     state: () => snapshot,
     emit(next: Partial<ReturnType<PluginManager["snapshot"]>>) {
       snapshot = { ...snapshot, ...next };
@@ -763,6 +764,142 @@ it("keeps one notification click queued while another review owns the lease", as
   expect(f.installImport).not.toHaveBeenCalled();
 });
 
+it("opens plugin settings if a queued notification loses its update store", async () => {
+  const f = fixture();
+  const replacement = fixture();
+  const releaseReview = f.installRequests.tryHoldReview();
+  if (!releaseReview) throw new Error("Expected to hold the review lease");
+  const view = f.mount();
+
+  try {
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Update and reload" }),
+    );
+    expect(
+      await screen.findByRole("button", { name: "Preparing update…" }),
+    ).toBeDisabled();
+    view.rerender(f.tree(replacement.manager));
+
+    await waitFor(() =>
+      expect(f.navigation.open).toHaveBeenCalledWith({
+        version: 1,
+        kind: "settings",
+        section: "plugins",
+        pluginId: "example.notes",
+      }),
+    );
+    expect(f.installImport).not.toHaveBeenCalled();
+  } finally {
+    act(() => releaseReview());
+  }
+});
+
+it("cancels a queued notification action when dismissed before review", async () => {
+  const f = fixture();
+  const releaseReview = f.installRequests.tryHoldReview();
+  if (!releaseReview) throw new Error("Expected to hold the review lease");
+  const registerUpdates = vi.spyOn(f.installRequests, "registerUpdates");
+  f.mount();
+  const update = await screen.findByRole("button", {
+    name: "Update and reload",
+  });
+  const capability = registerUpdates.mock.calls[0]?.[0]?.capability;
+  if (!capability) throw new Error("Expected an update capability");
+  const queueUpdates = vi.spyOn(capability, "queueUpdates");
+
+  try {
+    fireEvent.click(update);
+    await screen.findByRole("button", { name: "Preparing update…" });
+    const queued = queueUpdates.mock.results[0]?.value;
+    if (!queued)
+      throw new Error("Expected the host to accept the notification queue");
+    fireEvent.click(screen.getByRole("button", { name: "Later" }));
+    await waitFor(() =>
+      expect(capability.getQueue(queued.id)?.status).toBe("cancelled"),
+    );
+  } finally {
+    act(() => releaseReview());
+  }
+
+  expect(screen.queryByRole("dialog", { name: "Update Notes" })).toBeNull();
+  expect(f.navigation.open).not.toHaveBeenCalled();
+  expect(f.installImport).not.toHaveBeenCalled();
+});
+
+it("opens plugin settings when the update queue has reached its capacity", async () => {
+  const f = fixture();
+  f.mount();
+  const update = await screen.findByRole("button", {
+    name: "Update and reload",
+  });
+  const capability = f.installRequests.updates;
+  const token = capability?.getSnapshot().candidates[0]?.token;
+  if (!capability || !token) throw new Error("Expected a fresh update token");
+  const releaseReview = f.installRequests.tryHoldReview();
+  if (!releaseReview) throw new Error("Expected to hold the review lease");
+  const queues: { id: string }[] = [];
+
+  try {
+    act(() => {
+      for (let index = 0; index < 50; index++) {
+        const queue = capability.queueUpdates([token]);
+        if (!queue)
+          throw new Error("Expected the host to accept a queued update");
+        queues.push(queue);
+      }
+    });
+    expect(capability.getSnapshot().status).toBe("fresh");
+    expect(capability.getSnapshot().candidates[0]?.token).toBe(token);
+
+    fireEvent.click(update);
+
+    await waitFor(() =>
+      expect(f.navigation.open).toHaveBeenCalledWith({
+        version: 1,
+        kind: "settings",
+        section: "plugins",
+        pluginId: "example.notes",
+      }),
+    );
+    await waitFor(() => expect(update).toBeEnabled());
+    expect(screen.queryByRole("button", { name: /^Update$/ })).toBeNull();
+    expect(f.installImport).not.toHaveBeenCalled();
+  } finally {
+    act(() => {
+      for (const queue of queues) capability.cancelQueue(queue.id);
+      releaseReview();
+    });
+  }
+});
+
+it("opens plugin settings if a queued notification update becomes stale", async () => {
+  const f = fixture();
+  const releaseReview = f.installRequests.tryHoldReview();
+  if (!releaseReview) throw new Error("Expected to hold the review lease");
+  f.mount();
+  const update = await screen.findByRole("button", {
+    name: "Update and reload",
+  });
+
+  try {
+    fireEvent.click(update);
+    await screen.findByRole("button", { name: "Preparing update…" });
+    f.plugin.revision = "changed while queued";
+  } finally {
+    act(() => releaseReview());
+  }
+
+  await waitFor(() =>
+    expect(f.navigation.open).toHaveBeenCalledWith({
+      version: 1,
+      kind: "settings",
+      section: "plugins",
+      pluginId: "example.notes",
+    }),
+  );
+  expect(f.installImport).not.toHaveBeenCalled();
+});
+
 it.each(["Later", "Dismiss plugin update notice"])(
   "does not open a review after %s cancels a pending notification click",
   async (dismissLabel) => {
@@ -825,6 +962,48 @@ it("opens actionable plugin settings when a clicked update disappears", async ()
       pluginId: "example.notes",
     }),
   );
+  expect(f.installImport).not.toHaveBeenCalled();
+});
+
+it("opens plugin settings if update checks are disabled during a stale notice refresh", async () => {
+  const f = fixture();
+  f.mount();
+  const update = await screen.findByRole("button", {
+    name: "Update and reload",
+  });
+  await waitFor(() =>
+    expect(f.installRequests.updates?.getSnapshot().status).toBe("fresh"),
+  );
+
+  let finish!: (preview: ImportPreview) => void;
+  f.imports.checkGit.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  f.plugin.revision = "changed before review";
+  fireEvent.click(update);
+  await waitFor(() => expect(f.imports.checkGit).toHaveBeenCalledTimes(2));
+
+  await act(async () => {
+    f.plugin.updateChecks = false;
+    finish(f.discovered);
+  });
+
+  await waitFor(() =>
+    expect(f.navigation.open).toHaveBeenCalledWith({
+      version: 1,
+      kind: "settings",
+      section: "plugins",
+      pluginId: "example.notes",
+    }),
+  );
+  await waitFor(() =>
+    expect(f.installRequests.updates?.getSnapshot().status).toBe("disabled"),
+  );
+  expect(f.plugin.updateChecks).toBe(false);
+  expect(screen.queryByRole("button", { name: /^Update$/ })).toBeNull();
   expect(f.installImport).not.toHaveBeenCalled();
 });
 
