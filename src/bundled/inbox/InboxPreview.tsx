@@ -144,6 +144,8 @@ function InboxPreviewCard({
   const [unreadOnly, setUnreadOnlyState] = useState(
     () => readView<unknown>(viewScope, unreadOnlyKey, false) === true,
   );
+  const unreadOnlyRef = useRef(unreadOnly);
+  unreadOnlyRef.current = unreadOnly;
   const setUnreadOnly = (value: boolean) => {
     setUnreadOnlyState(value);
     writeView(viewScope, unreadOnlyKey, value);
@@ -287,6 +289,40 @@ function InboxPreviewCard({
       session.unread.sync().capability !== "frontier-sync"
     )
       return;
+    const channel = session.channels
+      .list()
+      .channels.find((entry) => entry.id === item.channelId);
+    const generation = session.unread.generation();
+    const membership = channel?.members
+      ? [...channel.members].sort().join(":")
+      : undefined;
+    let revision = session.unread.revision();
+    const valid = () => {
+      const current = session.channels
+        .list()
+        .channels.find((entry) => entry.id === item.channelId);
+      return (
+        active.current &&
+        session.unread.sync().capability === "frontier-sync" &&
+        !!channel &&
+        !!current &&
+        !current.cached &&
+        (!current.readOnly || current.viewerRole === "guest") &&
+        !current.archived &&
+        current.channelType === channel.channelType &&
+        !!current.members?.includes(scope.viewer) &&
+        [...current.members].sort().join(":") === membership &&
+        session.unread.generation() === generation &&
+        session.unread.revision() === revision &&
+        session.unread
+          .inbox()
+          .items.some(
+            (row) =>
+              row.channelId === item.channelId &&
+              row.messageIds.includes(item.messageId),
+          )
+      );
+    };
     const row = [...(listRef.current?.children ?? [])].find(
       (element) => (element as HTMLElement).dataset.inboxRow === item.id,
     );
@@ -305,10 +341,15 @@ function InboxPreviewCard({
       else
         for (const step of item.readThrough) {
           if (!active.current) return;
+          if (!valid())
+            throw new Error(
+              "This action expired. Close and reopen the conversation.",
+            );
           await session.unread.markThrough(step.target, step.messageId);
+          revision = session.unread.revision();
         }
       succeeded = true;
-      if (active.current && unreadOnly)
+      if (active.current && unreadOnlyRef.current)
         notify("Marked as read", "success", {
           label: "Undo",
           onClick: () => {
@@ -326,7 +367,8 @@ function InboxPreviewCard({
       busy.current = false;
       if (active.current) {
         if (heldFocus)
-          focusRow.current = succeeded && unreadOnly ? successor : item.id;
+          focusRow.current =
+            succeeded && unreadOnlyRef.current ? successor : item.id;
         setPending(false);
       }
     }
@@ -370,7 +412,6 @@ function InboxPreviewCard({
         ? "Nothing unread"
         : undefined;
   const open = (row: (typeof rows)[number]) => {
-    if (busy.current) return;
     const item =
       row.kind === "reaction"
         ? {

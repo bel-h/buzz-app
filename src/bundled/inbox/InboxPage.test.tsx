@@ -675,6 +675,78 @@ it("undoes a preview read and leaves focus moved outside its pending row alone",
   expect(h.open).not.toHaveBeenCalled();
 });
 
+it.each([false, true])(
+  "uses the current preview unread filter when a pending read finishes (initial: %s)",
+  async (initialUnread) => {
+    const h = fixture();
+    render(<ToastProvider>{previewAt(h)}</ToastProvider>);
+    await waitFor(() => expect(previewRows()).toHaveLength(2));
+    const toggle = screen.getByRole("switch", { name: "Unread only" });
+    if (initialUnread) fireEvent.click(toggle);
+    const row = screen.getByText("A thread update").closest("li");
+    if (!row) throw Error("Missing preview row");
+    const release = h.holdSave();
+    try {
+      fireEvent.click(
+        within(row).getByRole("button", { name: /^Mark as read / }),
+      );
+      await waitFor(() => expect(h.saveStarted()).toBe(true));
+      fireEvent.click(toggle);
+    } finally {
+      await act(async () => release());
+    }
+    await waitFor(() =>
+      expect(
+        screen.getByRole("list", { name: "Recent activity" }),
+      ).toHaveAttribute("aria-busy", "false"),
+    );
+    expect(previewRows()).toHaveLength(initialUnread ? 2 : 1);
+    expect(screen.queryByRole("button", { name: "Undo" }) !== null).toBe(
+      !initialUnread,
+    );
+  },
+);
+
+it("retires remaining preview read steps when access changes after the first save", async () => {
+  const h = fixture();
+  const root = message(h.alice, "room", "Preview root", 30, [
+    ["p", h.viewer.pubkey],
+  ]);
+  const child = message(h.alice, "room", "Preview reply", 31, [
+    ["p", h.viewer.pubkey],
+    ["e", root.id, "", "reply"],
+  ]);
+  h.events.push(root, child);
+  h.emit([root, child]);
+  render(previewAt(h));
+  const row = (await screen.findByText("Preview reply")).closest("li");
+  if (!row) throw Error("Missing preview row");
+  await waitFor(() =>
+    expect(h.owner.session.inboxFeed.snapshot().status).toBe("ready"),
+  );
+  let saved = () => {};
+  const firstSave = new Promise<void>((resolve) => {
+    saved = resolve;
+  });
+  const original = h.session.unread.markThrough;
+  vi.spyOn(h.session.unread, "markThrough").mockImplementation(
+    async (target, id) => {
+      await original(target, id);
+      if (id === root.id) {
+        act(() => h.archiveRoom(true, 100));
+        saved();
+      }
+    },
+  );
+  fireEvent.click(within(row).getByRole("button", { name: /^Mark as read / }));
+  await act(async () => {
+    await firstSave;
+  });
+  expect(h.journal()?.state.frontiers[`msg:${root.id}`]).toBe(30);
+  expect(h.readSteps.map((step) => step.id)).toEqual([root.id]);
+  expect(h.journal()?.state.frontiers[`thread:${root.id}`]).toBeUndefined();
+});
+
 async function markRead(h: ReturnType<typeof fixture>, channelId: string) {
   const items = h.session.unread
     .inbox()
@@ -5282,9 +5354,20 @@ it("mixes hover reactions by time, preserves unread filtering, and opens the exa
     screen.queryByRole("button", { name: /reacted with/ }),
   ).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole("switch", { name: "Unread only" }));
-  fireEvent.click(
-    await screen.findByRole("button", { name: /Alice reacted with heart/ }),
-  );
+  const release = h.holdSave();
+  try {
+    fireEvent.click(
+      screen.getAllByRole("button", {
+        name: /^Mark as read /,
+      })[0] as HTMLElement,
+    );
+    await waitFor(() => expect(h.saveStarted()).toBe(true));
+    fireEvent.click(
+      await screen.findByRole("button", { name: /Alice reacted with heart/ }),
+    );
+  } finally {
+    await act(async () => release());
+  }
   expect(close).toHaveBeenCalledOnce();
   expect(h.open).toHaveBeenLastCalledWith({
     version: 1,
