@@ -731,11 +731,12 @@ it("retires remaining preview read steps when access changes after the first sav
   const original = h.session.unread.markThrough;
   vi.spyOn(h.session.unread, "markThrough").mockImplementation(
     async (target, id) => {
-      await original(target, id);
+      const result = await original(target, id);
       if (id === root.id) {
         act(() => h.archiveRoom(true, 100));
         saved();
       }
+      return result;
     },
   );
   fireEvent.click(within(row).getByRole("button", { name: /^Mark as read / }));
