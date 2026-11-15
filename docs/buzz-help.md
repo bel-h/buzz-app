@@ -921,7 +921,9 @@ and are asked to sign in again in Buzz.
   device.
 - **Activity preview**: with a mouse or trackpad, rest the pointer on
   **Activity** in the Messages sidebar to see recent mentions, DMs, thread replies, and reactions
-  without opening the Activity page. Clicking a conversation opens it directly;
+  without opening the Activity page. Hover or focus an unread row to reveal
+  **Mark as read** over its timestamp; it reads the row without opening it.
+  Clicking a conversation opens it directly;
   **Open Activity** opens the page. The card's **Unread only** switch is
   separate from the Activity page's filters and hides reactions when on. The preview is not shown on touch
   devices or while the Activity page is open.

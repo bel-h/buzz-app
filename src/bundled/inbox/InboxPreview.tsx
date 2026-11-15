@@ -24,8 +24,15 @@ import {
 import { communityRefusalTitle } from "../../features/federated-identity/CommunitySignIn";
 import type { RelayData } from "../../features/relay/service";
 import type { RelaySession } from "../../features/relay/session";
-import { ArrowRightIcon, ChecksIcon } from "../../shared/design-system/icons";
+import type { InboxItem } from "../../features/relay/inbox";
+import {
+  ArrowRightIcon,
+  CheckIcon,
+  ChecksIcon,
+} from "../../shared/design-system/icons";
 import { Button } from "../../shared/design-system/ui/Button";
+import { IconButton } from "../../shared/design-system/ui/IconButton";
+import { useToastNotification } from "../../shared/design-system/ui/Toast";
 import { EmptyState } from "../../shared/design-system/ui/EmptyState";
 import { NavigationItem } from "../../shared/design-system/ui/NavigationItem";
 import { Switch } from "../../shared/design-system/ui/Switch";
@@ -39,6 +46,7 @@ import {
 } from "./InboxRow";
 import { inboxTarget } from "./route";
 import styles from "./InboxPreview.module.css";
+import rowStyles from "./Inbox.module.css";
 
 /** Rows the card renders and enriches; the Activity page holds the rest. */
 const maxRows = 50;
@@ -243,6 +251,86 @@ function InboxPreviewCard({
     await session.unread.retrySync();
   };
   const unreadOnlyControl = useRef<HTMLElement>(null);
+  const listRef = useRef<HTMLUListElement>(null);
+  const active = useRef(false);
+  const busy = useRef(false);
+  const focusRow = useRef<string | undefined>(undefined);
+  const [pending, setPending] = useState(false);
+  const [readError, setReadError] = useState<string>();
+  const notify = useToastNotification();
+  useEffect(() => {
+    active.current = true;
+    return () => {
+      active.current = false;
+    };
+  }, []);
+  useLayoutEffect(() => {
+    if (pending || focusRow.current === undefined) return;
+    const id = focusRow.current;
+    focusRow.current = undefined;
+    if (
+      document.activeElement !== document.body &&
+      !listRef.current?.contains(document.activeElement)
+    )
+      return;
+    const row = [...(listRef.current?.children ?? [])].find(
+      (element) => (element as HTMLElement).dataset.inboxRow === id,
+    );
+    (row?.querySelector("button") ?? unreadOnlyControl.current)?.focus({
+      preventScroll: true,
+    });
+  });
+  async function markRead(item: InboxItem) {
+    if (
+      !active.current ||
+      busy.current ||
+      session.unread.sync().capability !== "frontier-sync"
+    )
+      return;
+    const row = [...(listRef.current?.children ?? [])].find(
+      (element) => (element as HTMLElement).dataset.inboxRow === item.id,
+    );
+    const heldFocus = !!row?.contains(document.activeElement);
+    const index = rows.findIndex((entry) => entry.item.id === item.id);
+    const successor = (rows[index + 1] ?? rows[index - 1])?.item.id ?? "";
+    busy.current = true;
+    setPending(true);
+    setReadError(undefined);
+    let succeeded = false;
+    try {
+      if (item.target.kind === "channel")
+        await session.unread.prepareChannelRead(item.channelId)();
+      else if (item.timeline)
+        await session.unread.markTimelineRead(item.channelId, item.messageIds);
+      else
+        for (const step of item.readThrough) {
+          if (!active.current) return;
+          await session.unread.markThrough(step.target, step.messageId);
+        }
+      succeeded = true;
+      if (active.current && unreadOnly)
+        notify("Marked as read", "success", {
+          label: "Undo",
+          onClick: () => {
+            void session.unread
+              .markUnreadLocal(item.target)
+              .catch(() => notify("Couldn't mark unread", "error"));
+          },
+        });
+    } catch (cause) {
+      if (active.current)
+        setReadError(
+          `Couldn't mark as read: ${cause instanceof Error ? cause.message : "Try again."}`,
+        );
+    } finally {
+      busy.current = false;
+      if (active.current) {
+        if (heldFocus)
+          focusRow.current = succeeded && unreadOnly ? successor : item.id;
+        setPending(false);
+      }
+    }
+  }
   const retryFocus = useRef(false);
   const retryButton = useCallback((button: HTMLButtonElement | null) => {
     if (!button) return;
@@ -282,6 +370,7 @@ function InboxPreviewCard({
         ? "Nothing unread"
         : undefined;
   const open = (row: (typeof rows)[number]) => {
+    if (busy.current) return;
     const item =
       row.kind === "reaction"
         ? {
@@ -309,6 +398,11 @@ function InboxPreviewCard({
       onUnreadOnlyChange={setUnreadOnly}
       unreadOnlyRef={unreadOnlyControl}
     >
+      {readError && !failure && (
+        <p className={`text-body ${styles.notice}`} role="alert">
+          {readError} Try the row again.
+        </p>
+      )}
       {failure && (
         <div className={styles.notice} role="alert">
           <p className="text-body">{failure}</p>
@@ -318,36 +412,67 @@ function InboxPreviewCard({
         </div>
       )}
       {rows.length ? (
-        <ul className={styles.list} aria-label="Recent activity">
+        <ul
+          ref={listRef}
+          className={styles.list}
+          aria-label="Recent activity"
+          aria-busy={pending}
+        >
           {rows.map((row) => {
-            const item = row.item;
-            return (
-              <li key={item.id}>
-                {row.kind === "reaction" ? (
+            if (row.kind === "reaction")
+              return (
+                <li key={row.item.id}>
                   <ReactionRowButton
                     item={row.item}
                     session={session}
                     profiles={profiles}
                     name={name}
-                    channel={channelOf(item.channelId)}
-                    time={shortAge(item.createdAt)}
+                    channel={channelOf(row.item.channelId)}
+                    time={shortAge(row.item.createdAt)}
                     onClick={() => open(row)}
                   />
-                ) : (
+                </li>
+              );
+            const item = row.item;
+            const identity = rowIdentity(
+              item,
+              channelOf(item.channelId),
+              profiles,
+              name,
+            );
+            const readable =
+              hasUnread(row.item) && sync.capability === "frontier-sync";
+            return (
+              <li
+                key={item.id}
+                className={rowStyles.row}
+                data-inbox-row={item.id}
+                data-action={readable || undefined}
+              >
+                <div className={rowStyles.rowSurface}>
                   <InboxRowButton
                     item={row.item}
-                    identity={rowIdentity(
-                      row.item,
-                      channelOf(item.channelId),
-                      profiles,
-                      name,
-                    )}
+                    identity={identity}
                     media={session.media}
                     feed={feed}
                     time={shortAge(item.createdAt)}
+                    disabled={pending}
                     onClick={() => open(row)}
                   />
-                )}
+                  {readable && (
+                    <span className={rowStyles.rowAction}>
+                      <IconButton
+                        size="sm"
+                        variant="ghost"
+                        disabled={pending}
+                        aria-label={`Mark as read ${identity.sender} in ${identity.context}`}
+                        title="Mark as read"
+                        onClick={() => void markRead(row.item)}
+                        icon={<CheckIcon size={16} aria-hidden="true" />}
+                      />
+                    </span>
+                  )}
+                </div>
               </li>
             );
           })}

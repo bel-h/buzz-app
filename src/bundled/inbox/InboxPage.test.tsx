@@ -559,6 +559,122 @@ const previewRows = () =>
   within(screen.getByRole("list", { name: "Recent activity" })).queryAllByRole(
     "listitem",
   );
+
+it.each([
+  ["Please review this", false],
+  ["A thread update", true],
+  ["A direct reply", false],
+  ["A Solo update", true],
+])(
+  "marks preview activity read in place: %s (keyboard: %s)",
+  async (text, keyboard) => {
+    const h = fixture({ withDm: true, withSolo: true });
+    const close = vi.fn();
+    render(previewAt(h, close));
+    await waitFor(() => expect(previewRows()).toHaveLength(4));
+    fireEvent.click(screen.getByRole("switch", { name: "Unread only" }));
+    const row = screen.getByText(text).closest("li");
+    if (!row) throw new Error("Missing preview row");
+    const read = within(row).getByRole("button", { name: /^Mark as read / });
+    const open = within(row).getByRole("button", { name: /^Open / });
+    expect(read.closest("button")).not.toBe(open);
+    if (keyboard) {
+      open.focus();
+      await userEvent.tab();
+      expect(read).toHaveFocus();
+      await userEvent.keyboard("{Enter}");
+    } else await userEvent.click(read);
+    await waitFor(() => expect(previewRows()).toHaveLength(3));
+    expect(screen.queryByText(text)).not.toBeInTheDocument();
+    expect(h.open).not.toHaveBeenCalled();
+    expect(close).not.toHaveBeenCalled();
+    expect(document.activeElement?.getAttribute("aria-label")).toMatch(
+      /^Open /,
+    );
+    fireEvent.click(screen.getByRole("switch", { name: "Unread only" }));
+    const readRow = screen.getByText(text).closest("li");
+    if (!readRow) throw new Error("Missing read preview row");
+    expect(within(readRow).queryByRole("img", { name: "Unread" })).toBeNull();
+    expect(
+      within(readRow).queryByRole("button", { name: /^Mark as read / }),
+    ).toBeNull();
+    await userEvent.click(
+      within(readRow).getByRole("button", { name: /^Open / }),
+    );
+    expect(close).toHaveBeenCalledOnce();
+    expect(h.open).toHaveBeenCalledOnce();
+  },
+);
+
+it("keeps preview read actions pending and recovers from a failed save", async () => {
+  const h = fixture();
+  const close = vi.fn();
+  render(previewAt(h, close));
+  await waitFor(() => expect(previewRows()).toHaveLength(2));
+  const row = screen.getByText("A thread update").closest("li");
+  if (!row) throw new Error("Missing preview row");
+  const read = within(row).getByRole("button", { name: /^Mark as read / });
+  const release = h.holdSave();
+  h.failSave();
+  try {
+    await userEvent.click(read);
+    await waitFor(() => expect(h.saveStarted()).toBe(true));
+    expect(read).toBeDisabled();
+    expect(within(row).getByRole("button", { name: /^Open / })).toBeDisabled();
+    expect(
+      within(row).getByRole("img", { name: "Unread" }),
+    ).toBeInTheDocument();
+  } finally {
+    await act(async () => release());
+  }
+  expect(await screen.findByRole("alert")).toHaveTextContent("disk full");
+  expect(read).toBeEnabled();
+  await userEvent.click(read);
+  await waitFor(() =>
+    expect(within(row).queryByRole("img", { name: "Unread" })).toBeNull(),
+  );
+  expect(screen.queryByRole("alert")).toBeNull();
+  expect(within(row).getByRole("button", { name: /^Open / })).toHaveFocus();
+  expect(h.open).not.toHaveBeenCalled();
+  expect(close).not.toHaveBeenCalled();
+});
+
+it.each(["read-only", "unsupported"] as const)(
+  "offers no preview read action with %s read state",
+  async (readCapability) => {
+    const h = fixture({ readCapability });
+    render(previewAt(h));
+    await waitFor(() => expect(previewRows().length).toBeGreaterThan(0));
+    expect(screen.queryByRole("button", { name: /^Mark as read / })).toBeNull();
+  },
+);
+
+it("undoes a preview read and leaves focus moved outside its pending row alone", async () => {
+  const h = fixture();
+  render(<ToastProvider>{previewAt(h)}</ToastProvider>);
+  await waitFor(() => expect(previewRows()).toHaveLength(2));
+  fireEvent.click(screen.getByRole("switch", { name: "Unread only" }));
+  const row = screen.getByText("A thread update").closest("li");
+  if (!row) throw new Error("Missing preview row");
+  const release = h.holdSave();
+  const outside = screen.getByRole("button", { name: "Open Activity" });
+  try {
+    await userEvent.click(
+      within(row).getByRole("button", { name: /^Mark as read / }),
+    );
+    await waitFor(() => expect(h.saveStarted()).toBe(true));
+    outside.focus();
+  } finally {
+    await act(async () => release());
+  }
+  await waitFor(() => expect(previewRows()).toHaveLength(1));
+  expect(outside).toHaveFocus();
+  fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+  await waitFor(() => expect(previewRows()).toHaveLength(2));
+  expect(screen.getByText("A thread update")).toBeInTheDocument();
+  expect(h.open).not.toHaveBeenCalled();
+});
+
 async function markRead(h: ReturnType<typeof fixture>, channelId: string) {
   const items = h.session.unread
     .inbox()
