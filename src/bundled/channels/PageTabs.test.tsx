@@ -16,7 +16,10 @@ import type { ConversationExtensions } from "../../features/conversation/contrac
 import { setThreadPlacementPreference } from "../../features/messages/thread-preferences";
 import type { RelaySession } from "../../features/relay/session";
 import { createNavigationController } from "../../features/navigation/controller";
-import { createMemoryHistory } from "../../features/navigation/history";
+import {
+  createMemoryHistory,
+  type NavigationHistory,
+} from "../../features/navigation/history";
 import type { JsonValue, OpenTarget } from "../../features/navigation/targets";
 import { pageTabRoute } from "./page-tab-route";
 import type { ConversationTab as Tab } from "./useChannelTabState";
@@ -110,6 +113,7 @@ function fixture(
   visits?: boolean,
   history?: "tabs",
   initial: OpenTarget = switchboard,
+  driver: NavigationHistory = createMemoryHistory(initial),
 ) {
   const channels = [
     { id: "alpha", name: "alpha" },
@@ -163,7 +167,7 @@ function fixture(
       handleOpenRequests: () => () => {},
     },
     navigation: history
-      ? createNavigationController(createMemoryHistory(initial)).navigation
+      ? createNavigationController(driver).navigation
       : {
           open: vi.fn(),
           snapshot: () => ({
@@ -667,5 +671,65 @@ it("keeps the selection a close leaves when it returns to an earlier visit", asy
   });
   expect(screen.getByRole("tab", { name: /beta/, selected: true })).toBe(
     screen.getByRole("tab", { name: /beta/ }),
+  );
+});
+
+it("names the tab a page's own close leaves shown", () => {
+  const page = fixture(undefined, "tabs");
+  page.open({ channelId: "alpha" }, { keep: true });
+  page.open({ channelId: "alpha", threadId: "root" }, { keep: true });
+  page.open({ channelId: "beta" }, { keep: true });
+  expect(page.close({ channelId: "beta" })).toBe(true);
+  expect(screen.getByText("conversation in alpha")).toBeVisible();
+  expect(page.navigation.snapshot().entry.target).toEqual({
+    ...switchboard,
+    route: { version: 1, params: { tab: "conversation:alpha" } },
+  });
+  traverse(page, "back");
+  expect(page.navigation.snapshot().entry.target).toEqual({
+    ...switchboard,
+    route: { version: 1, params: { tab: "thread:alpha:root" } },
+  });
+});
+
+it("gives an opening made before a close's return lands its visit after it", async () => {
+  // Browser history returns from a dismissal a task later.
+  const memory = createMemoryHistory(switchboard);
+  const returns: (() => void)[] = [];
+  const driver: NavigationHistory = {
+    ...memory,
+    dismiss: (visits, fallback) => {
+      returns.push(() => memory.dismiss(visits, fallback));
+    },
+  };
+  const page = fixture(undefined, "tabs", switchboard, driver);
+  page.open({ channelId: "alpha", threadId: "root" });
+  page.open({ channelId: "beta" }, { keep: true });
+  page.close({ channelId: "beta" });
+  page.close({ channelId: "alpha", threadId: "root" });
+  page.open({ channelId: "dm" });
+  expect(returns).toHaveLength(2);
+  await act(async () => {
+    for (const land of returns) land();
+    await Promise.resolve();
+  });
+  expect(page.navigation.snapshot().entry.target).toEqual({
+    ...switchboard,
+    route: { version: 1, params: { tab: "conversation:dm" } },
+  });
+  expect(screen.getByText("conversation in Alice")).toBeVisible();
+  traverse(page, "back");
+  expect(page.navigation.snapshot().entry.target).toEqual(switchboard);
+});
+
+it("reopens a tab with Back without taking focus to its composer", () => {
+  const page = fixture(undefined, "tabs");
+  page.open({ channelId: "alpha" });
+  page.open({ channelId: "beta" });
+  traverse(page, "back");
+  // A falsy request asks for no focus.
+  expect(screen.getByText("conversation in alpha")).toHaveAttribute(
+    "data-focus",
+    "0",
   );
 });

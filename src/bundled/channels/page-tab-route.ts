@@ -19,7 +19,7 @@ export function pageTabRoute(
     Object.keys(rest).length ||
     typeof tab !== "string" ||
     !tab ||
-    tab.length > 2048 ||
+    tab.length > 1024 ||
     (message !== undefined &&
       (typeof message !== "string" || !hex.test(message)))
   )

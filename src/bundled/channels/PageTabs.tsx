@@ -35,7 +35,9 @@ import {
 import panelStyles from "../../features/panels/Panels.module.css";
 import { useChannelLabels } from "./useChannelLabels";
 import {
+  entryPane,
   panelTabId,
+  selectedTabId,
   tabPane,
   threadTab,
   useChannelTabState,
@@ -157,6 +159,7 @@ export function PageTabs({
   const pendingReturn = useRef<{
     from: string;
     kept?: string | undefined;
+    paneOpen: boolean;
     open?: { tab: string; message?: string | undefined };
   }>(undefined);
   const returning = () =>
@@ -180,19 +183,29 @@ export function PageTabs({
       recording.current = false;
     }
   };
-  // Closing a tab retires its visits; the selection it leaves stays.
+  // Closing a tab retires its visits; the selection it leaves stays. A
+  // closed selection leaves the side pane showing its first survivor.
   const dismissTabs = (ids: readonly string[]) => {
-    const selected = tabState.getSelected();
-    const kept =
-      !ids.includes(selected) &&
-      (tabState.tabs.some((tab) => tab.id === selected) ||
-        tabState.entries.some((entry) => panelTabId(entry) === selected))
-        ? selected
-        : undefined;
+    const survivors = [
+      ...tabState.tabs
+        .filter((tab) => tabPane(tab) === "side")
+        .map((tab) => tab.id),
+      ...tabState.entries
+        .filter((entry) => entryPane(tabState.mainEntries, entry) === "side")
+        .map(panelTabId),
+    ].filter((tab) => !ids.includes(tab));
+    const kept = selectedTabId(tabState.getSelected(), survivors) || undefined;
     const fallback = pageTarget(kept);
     if (!fallback || !ids.length) return;
     const { id } = navigator.snapshot().entry;
-    pendingReturn.current = { from: id, kept };
+    // A later close before the return lands keeps an opening that waits.
+    pendingReturn.current = {
+      from: id,
+      kept,
+      paneOpen: tabState.paneOpen,
+      ...(returning() &&
+        pendingReturn.current?.open && { open: pendingReturn.current.open }),
+    };
     navigator.dismiss(
       (visit) => ids.includes(tabOfVisit(visit)?.tab ?? ""),
       fallback,
@@ -356,13 +369,13 @@ export function PageTabs({
             : `conversation:${channelId}`),
       );
       // Each open at a message asks the reader to show it again; any other
-      // open focuses the composer.
+      // open focuses the composer, except a Back/Forward reopen.
       if (threadId)
         secondary.openConversationThread(
           channelId,
           messageId ?? threadId,
           (existing?.kind === "thread" && existing.rootId) || threadId,
-          messageId ? "reveal" : "focus",
+          messageId || restoring.current ? "reveal" : "focus",
         );
       else {
         const tab = `conversation:${channelId}`;
@@ -376,7 +389,9 @@ export function PageTabs({
             channelId,
             ...(messageId && { messageId }),
             revealRequest: (prior?.revealRequest ?? 0) + (messageId ? 1 : 0),
-            focusRequest: (prior?.focusRequest ?? 0) + (messageId ? 0 : 1),
+            focusRequest:
+              (prior?.focusRequest ?? 0) +
+              (messageId || restoring.current ? 0 : 1),
             ...(markRead === false && { markRead: false }),
           };
           return previous
@@ -432,7 +447,7 @@ export function PageTabs({
         if (landed.open) tabState.leaveVisit();
         if (selected) {
           tabState.select(selected);
-          tabState.setPaneOpen(true);
+          tabState.setPaneOpen(!!landed.open || landed.paneOpen);
         }
         if (landed.open) {
           const { tab, message } = landed.open;
