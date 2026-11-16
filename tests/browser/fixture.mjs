@@ -2108,6 +2108,16 @@ export const test = base.extend({
         });
         return;
       }
+      // Thread follow choices sync through their own slots.
+      if (event.tags.some(([k, v]) => k === "t" && v === "thread-follows")) {
+        report.followPublications ??= [];
+        report.followPublications.push({ community, event });
+        // Stored beside read state: the same snapshot reads both back.
+        readEvents
+          .get(community)
+          .set(event.tags.find(([key]) => key === "d")?.[1], event);
+        return;
+      }
       expect(event.tags).toContainEqual(["t", "read-state"]);
       const blob = JSON.parse(
         nip44.v2.decrypt(

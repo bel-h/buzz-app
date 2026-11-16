@@ -581,11 +581,11 @@ test.extend({ readState: true, threadUnread: true })(
       .click();
     const newest = Math.max(...history.map((event) => event.created_at));
     await expect
-      .poll(async () => (await frontiers())["activity:alpha"] ?? 0)
+      .poll(async () => (await frontiers())["alpha"] ?? 0)
       .toBeGreaterThanOrEqual(newest);
     await page.setViewportSize({ width: 600, height: 900 });
     await expect(tab).toBeFocused();
-    const caughtUp = (await frontiers())["activity:alpha"];
+    const caughtUp = (await frontiers())["alpha"];
     const message = app.append(
       "primary",
       "alpha",
@@ -604,16 +604,14 @@ test.extend({ readState: true, threadUnread: true })(
     // message has passed too.
     const reply = app.reply(root.id);
     await expect
-      .poll(async () =>
-        read(await frontiers(), reply, `thread-activity:${root.id}`),
-      )
+      .poll(async () => read(await frontiers(), reply, `thread:${root.id}`))
       .toBe(true);
-    expect(read(await frontiers(), message, "activity:alpha")).toBe(false);
+    expect(read(await frontiers(), message, "alpha")).toBe(false);
     await page
       .getByRole("button", { name: "Close Thread root 1 tab", exact: true })
       .click();
     await expect
-      .poll(async () => read(await frontiers(), message, "activity:alpha"))
+      .poll(async () => read(await frontiers(), message, "alpha"))
       .toBe(true);
   },
 );

@@ -473,7 +473,7 @@ test("thread buttons show observed unread independently, clear only after readin
     .getByRole("button", { name: "Close Channel settings tab", exact: true })
     .click();
   await expect(
-    alpha.getByRole("img", { name: /Marked unread on this device only/ }),
+    alpha.getByRole("img", { name: /^Marked unread$/ }),
   ).toBeAttached();
   // Marking it unread shows the whole row again, its threads included.
   await expect(activity).toHaveAccessibleName(/unread threads?/);
