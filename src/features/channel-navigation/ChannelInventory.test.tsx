@@ -49,7 +49,10 @@ import { createRef, useState, type ReactNode, type ReactElement } from "react";
 import userEvent from "@testing-library/user-event";
 import { ChannelHeaderMenu } from "../../bundled/channels/ChannelHeaderMenu";
 import { PrimarySidebar } from "../../app/shell/PrimarySidebar";
-import { buzzLinkTarget } from "../navigation/buzz-links";
+import {
+  buzzLinkTarget,
+  parseCommunityShareLink,
+} from "../navigation/buzz-links";
 import {
   ChannelNavigationProvider,
   useChannelNavigation,
@@ -1010,9 +1013,9 @@ it("copies a channel link that opens the same channel", async () => {
   await copy();
   expect(await screen.findByText("Link copied.")).toBeInTheDocument();
   const [link] = writeText.mock.calls[0] ?? [];
-  expect(link).toBe("buzz://channel/beta");
+  expect(link).toBe("https://relay.test/channel/beta");
   expect(
-    buzzLinkTarget(link, {
+    buzzLinkTarget(parseCommunityShareLink(link)?.link ?? "", {
       viewer: "a".repeat(64),
       communityOrigin: "https://relay.test",
     }),

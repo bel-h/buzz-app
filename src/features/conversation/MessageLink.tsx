@@ -87,6 +87,7 @@ function clearMessageActions(link: HTMLElement | null) {
 
 export function MessageLink({
   url,
+  sharedUrl = url,
   children,
   registry,
   onOpenLink,
@@ -99,6 +100,9 @@ export function MessageLink({
   channelPrivate = false,
 }: {
   url: string;
+  /** The authored link when `url` is its in-app form, such as a community's
+   * https link opened as `buzz://`: what copying the link hands out. */
+  sharedUrl?: string | undefined;
   children?: ReactNode;
   registry: ContributionReader<LinkRenderer> | undefined;
   onOpenLink(url: string): boolean;
@@ -215,7 +219,7 @@ export function MessageLink({
     setCopying(true);
     setNotice(undefined);
     try {
-      await writeClipboardText(url);
+      await writeClipboardText(sharedUrl);
       setNotice({ text: "Link copied", error: false });
     } catch {
       setNotice({
@@ -328,6 +332,7 @@ export function MessageLink({
             : description
         }
         data-link-label={label ?? ""}
+        data-shared-href={sharedUrl === url ? undefined : sharedUrl}
         data-panel-target={panelTarget ? url : undefined}
         data-solo-link={chatChip ? "" : undefined}
         title={
