@@ -1,10 +1,13 @@
 // Browse: the agents this community's members have shared, each importable
-// as a new agent. The catalog is read a page at a time; an over-budget page is
-// retried smaller.
+// as a new agent. The whole catalog is read so it can be searched and sorted
+// here, with its stars and import counts; an over-budget page is retried
+// smaller.
 import {
   type ReactNode,
+  useCallback,
+  useDeferredValue,
   useEffect,
-  useId,
+  useMemo,
   useRef,
   useState,
   useSyncExternalStore,
@@ -27,7 +30,18 @@ import {
   type SharedAgent,
   sharedAgents,
 } from "../../features/agents/shared-agents";
-import { ReadError } from "../../features/relay/errors";
+import {
+  excerpt,
+  importCount,
+  type Marketplace,
+  type MarketplaceState,
+  marketplaceFor,
+  readAll,
+  score,
+  starCount,
+  address,
+  terms,
+} from "../../features/agents/marketplace";
 import type { EventData } from "../../features/relay/events";
 import {
   useProfileGeneration,
@@ -36,11 +50,19 @@ import {
 import { useReauthorizedRetry } from "../../features/relay/RecoveryNotice";
 import type { RelayData } from "../../features/relay/service";
 import type { RelaySession } from "../../features/relay/session";
+import { MatchedLabel } from "../../features/search/MatchedLabel";
 import { Dialog } from "../../shared/design-system/ui/Dialog";
 import { Button } from "../../shared/design-system/ui/Button";
 import { Avatar } from "../../shared/design-system/ui/Avatar";
+import { Combobox } from "../../shared/design-system/ui/Combobox";
+import { SearchField } from "../../shared/design-system/ui/SearchField";
 import { Select } from "../../shared/design-system/ui/Select";
 import { Tooltip } from "../../shared/design-system/ui/Tooltip";
+import {
+  DownloadIcon,
+  StarFilledIcon,
+  StarIcon,
+} from "../../shared/design-system/icons";
 import { useAvatarPreview } from "../../features/profiles/use-avatar-preview";
 import {
   canonicalPublicKey,
@@ -62,6 +84,17 @@ import cardStyles from "./AgentCard.module.css";
 import styles from "./AgentBrowse.module.css";
 
 const pageSize = 200;
+/** At most 10,000 catalog events, as the community catalog reads. */
+const maxPages = 50;
+
+type Sort = "relevance" | "stars" | "imports" | "newest" | "name";
+const SORTS = [
+  { value: "relevance", label: "Best match" },
+  { value: "stars", label: "Most starred" },
+  { value: "imports", label: "Most imported" },
+  { value: "newest", label: "Newest" },
+  { value: "name", label: "Name" },
+] as const;
 
 type Importing = Readonly<{
   agents: Agents;
@@ -78,6 +111,8 @@ export type SharedAgentSelection = {
   agent: SharedAgent;
   session: RelaySession;
   community: string | undefined;
+  /** Who is signed in, who stars and imports. */
+  viewer: string | undefined;
 };
 type Selection = {
   selectedId?: string | undefined;
@@ -91,29 +126,65 @@ export function AgentBrowse({
   const connection = useRelayConnection(relay);
   if (connection.status !== "ready")
     return <p>Connect to a community to browse shared agents.</p>;
-  // A new session (another community) starts over from the first page.
+  // A new session (another community) starts over.
   return (
     <SharedAgentList
       key={connection.generation}
       session={connection.session}
       community={connection.origin}
+      viewer={connection.viewer}
       {...selection}
     />
+  );
+}
+
+const useMarketplace = (marketplace: Marketplace) =>
+  useSyncExternalStore(
+    marketplace.subscribe,
+    marketplace.snapshot,
+    marketplace.snapshot,
+  );
+
+/** Each person's name as their profile gives it, else their short key. */
+function useNames(session: RelaySession, people: readonly string[]) {
+  const profiles = useSyncExternalStore(
+    session.profiles.subscribe,
+    session.profiles.snapshot,
+    session.profiles.snapshot,
+  );
+  const generation = useProfileGeneration(session.profiles);
+  const key = people.join();
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `key` stands for `people`.
+  useEffect(() => {
+    void generation;
+    if (people.length) void session.profiles.ensure(people).catch(() => {});
+  }, [session, key, generation]);
+  // Stable until a profile arrives, so sorting doesn't rerun on every star.
+  return useCallback(
+    (pubkey: string) => {
+      const profile = profiles.get(pubkey);
+      return profile && !profile.nameIsFallback
+        ? profile.name
+        : (formatPublicKey(pubkey) ?? pubkey);
+    },
+    [profiles],
   );
 }
 
 function SharedAgentList({
   session,
   community,
+  viewer,
   selectedId,
   onSelect,
 }: Selection & {
   session: RelaySession;
   community: string | undefined;
+  viewer: string | undefined;
 }) {
-  const [events, setEvents] = useState<readonly EventData[]>([]);
-  const [cursor, setCursor] = useState<{ until: number; before_id: string }>();
-  const [more, setMore] = useState(false);
+  const marketplace = marketplaceFor(session, viewer);
+  const counts = useMarketplace(marketplace);
+  const [agents, setAgents] = useState<readonly SharedAgent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [attempt, setAttempt] = useState(0);
@@ -124,54 +195,103 @@ function SharedAgentList({
   // biome-ignore lint/correctness/useExhaustiveDependencies: An explicit retry reruns this finite read.
   useEffect(() => {
     const controller = new AbortController();
+    const { signal } = controller;
     setLoading(true);
     setError(false);
     const failed = reauthorized.begin();
-    const readPage = async () => {
-      let limit = pageSize;
-      for (;;) {
-        controller.signal.throwIfAborted();
-        try {
-          const page = await session.read(
-            [{ kinds: [AGENT_CATALOG_KIND], limit, ...cursor }],
-            { signal: controller.signal },
-          );
-          if (controller.signal.aborted) return;
-          setEvents((previous) => (cursor ? [...previous, ...page] : page));
-          setMore(page.length === limit);
-          return;
-        } catch (problem) {
-          // Match the community catalog's bounded retry at the same cursor.
-          if (
-            problem instanceof ReadError &&
-            problem.kind === "invalid-response" &&
-            problem.message === "Relay response exceeds the read budget" &&
-            limit > 1
-          ) {
-            limit = Math.floor(limit / 2);
-            continue;
-          }
-          throw problem;
-        }
-      }
-    };
-    void readPage()
+    void (async () => {
+      const events: EventData[] = await readAll(
+        (filters, settings) => session.read(filters, settings),
+        { kinds: [AGENT_CATALOG_KIND] },
+        signal,
+        { limit: pageSize, maxPages },
+      );
+      const listed = sharedAgents(events);
+      // Shown once, with its counts, so sorting by them doesn't reorder it
+      // as they arrive. Counts that can't load leave browsing working.
+      await marketplace.load(listed, signal);
+      signal.throwIfAborted();
+      setAgents(listed);
+    })()
       .catch((problem) => {
-        if (controller.signal.aborted) return;
+        if (signal.aborted) return;
         setError(true);
         failed(problem);
       })
       .finally(() => {
-        if (!controller.signal.aborted) setLoading(false);
+        if (!signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-  }, [session, cursor, attempt]);
-  const agents = sharedAgents(events);
+  }, [session, attempt]);
+
+  const [query, setQuery] = useState("");
+  const [creator, setCreator] = useState("");
+  const [chosenSort, setSort] = useState<Sort>();
+  const words = terms(useDeferredValue(query));
+  const searching = words.length > 0;
+  // Most starred first; best match while searching, unless a sort was chosen.
+  // Best match is offered only while searching.
+  const sort: Sort =
+    chosenSort && (searching || chosenSort !== "relevance")
+      ? chosenSort
+      : searching
+        ? "relevance"
+        : "stars";
+  const owners = useMemo(
+    () => [...new Set(agents.map((agent) => agent.owner))],
+    [agents],
+  );
+  const name = useNames(session, owners);
+  const creators = useMemo(() => {
+    const listed = new Map<string, number>();
+    for (const agent of agents)
+      listed.set(agent.owner, (listed.get(agent.owner) ?? 0) + 1);
+    return [...listed.keys()].sort(
+      (a, b) =>
+        (listed.get(b) ?? 0) - (listed.get(a) ?? 0) ||
+        name(a).localeCompare(name(b)),
+    );
+  }, [agents, name]);
+  // Counts are read as they stand when the list is sorted, so a card you star
+  // stays where it is until you search, filter or sort again.
+  const sorting = useRef(counts);
+  sorting.current = counts;
+  // Names matter to order only while searching, where they're matched.
+  const naming = useRef(name);
+  naming.current = name;
+  const wordsKey = words.join(" ");
+  // biome-ignore lint/correctness/useExhaustiveDependencies: Counts are sampled, not followed; `wordsKey` stands for `words`.
+  const results = useMemo(() => {
+    const reactions = sorting.current;
+    const name = naming.current;
+    const scored = agents.flatMap((agent) => {
+      if (creator && agent.owner !== creator) return [];
+      const value = score(agent, words, name(agent.owner));
+      return value > 0 ? [{ agent, value }] : [];
+    });
+    type Scored = (typeof scored)[number];
+    const byName = (a: Scored, b: Scored) =>
+      a.agent.name.localeCompare(b.agent.name) ||
+      a.agent.id.localeCompare(b.agent.id);
+    const order: Record<Sort, (a: Scored, b: Scored) => number> = {
+      relevance: (a, b) => b.value - a.value || byName(a, b),
+      stars: (a, b) =>
+        starCount(reactions, b.agent) - starCount(reactions, a.agent) ||
+        byName(a, b),
+      imports: (a, b) =>
+        importCount(reactions, b.agent) - importCount(reactions, a.agent) ||
+        byName(a, b),
+      newest: (a, b) => b.agent.createdAt - a.agent.createdAt || byName(a, b),
+      name: byName,
+    };
+    return scored.sort(order[sort]).map((item) => item.agent);
+  }, [agents, wordsKey, creator, sort, searching && name]);
+
   const grid = useRef<HTMLDivElement>(null);
   // A selection made elsewhere, such as View on a published agent, scrolls to
   // its card once the card is here; one chosen in the grid is in view already.
   const shown = useRef<string>(undefined);
-  const present = agents.some((agent) => agent.id === selectedId);
+  const present = results.some((agent) => agent.id === selectedId);
   useEffect(() => {
     if (!present || shown.current === selectedId) return;
     shown.current = selectedId;
@@ -179,8 +299,71 @@ function SharedAgentList({
       ?.querySelector<HTMLElement>("[data-selected]")
       ?.scrollIntoView({ block: "center" });
   }, [present, selectedId]);
+  const unavailable = marketplace.unavailable(counts);
   return (
     <div className="flex flex-col gap-section-gap">
+      {agents.length > 0 && (
+        <search className={styles.toolbar}>
+          <div className={styles.search}>
+            <SearchField
+              label="Search agents"
+              placeholder="Search names and instructions"
+              value={query}
+              onValueChange={setQuery}
+            />
+          </div>
+          <div className={styles.creator}>
+            <Combobox.Root
+              items={["", ...creators]}
+              value={creator}
+              itemToStringLabel={(pubkey: string) =>
+                pubkey ? name(pubkey) : "All creators"
+              }
+              filter={(pubkey: string, text: string) =>
+                !text.trim() ||
+                (pubkey ? name(pubkey) : "All creators")
+                  .toLowerCase()
+                  .includes(text.trim().toLowerCase())
+              }
+              autoHighlight
+              onValueChange={(pubkey) => setCreator(pubkey ?? "")}
+            >
+              <Combobox.Trigger label="Creator">
+                {creator ? name(creator) : "All creators"}
+              </Combobox.Trigger>
+              <Combobox.Popup
+                search
+                size="compact"
+                side="bottom"
+                collisionAvoidance={{ side: "none", align: "shift" }}
+                empty="No matching creators."
+              >
+                <Combobox.List>
+                  {(pubkey: string) => (
+                    <Combobox.Item key={pubkey || "all"} value={pubkey}>
+                      {pubkey ? name(pubkey) : "All creators"}
+                    </Combobox.Item>
+                  )}
+                </Combobox.List>
+              </Combobox.Popup>
+            </Combobox.Root>
+          </div>
+          <Select
+            label="Sort"
+            variant="field"
+            value={sort}
+            groups={[
+              {
+                label: "",
+                options: SORTS.filter(
+                  (item) => searching || item.value !== "relevance",
+                ),
+              },
+            ]}
+            onValueChange={(value) => setSort(value as Sort)}
+          />
+        </search>
+      )}
       {loading && <p role="status">Loading shared agents…</p>}
       {error && (
         <div role="alert">
@@ -193,48 +376,185 @@ function SharedAgentList({
       {!loading && !error && !agents.length && (
         <p>No shared agents found in this community yet.</p>
       )}
-      <div ref={grid} className={cardStyles.grid}>
-        {agents.map((agent) => (
-          <SurfaceButton
+      {agents.length > 0 && (
+        <div className={styles.summary}>
+          <p className="m-0 text-body-sm text-secondary" role="status">
+            {results.length === agents.length
+              ? `${agents.length} ${agents.length === 1 ? "agent" : "agents"}`
+              : `${results.length} of ${agents.length} agents`}
+          </p>
+          {(searching || creator) && !results.length && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                setQuery("");
+                setCreator("");
+              }}
+            >
+              Clear search
+            </Button>
+          )}
+        </div>
+      )}
+      <div ref={grid} className={`${cardStyles.grid} ${styles.grid}`}>
+        {results.map((agent) => (
+          <div
             key={agent.id}
-            className={`${cardStyles.card} ${cardStyles.agentCard}`}
-            aria-label={agent.name}
-            aria-current={selectedId === agent.id || undefined}
+            className={`${cardStyles.card} ${cardStyles.agentCard} ${styles.listing}`}
             data-selected={selectedId === agent.id || undefined}
-            onClick={(event) => {
-              shown.current = agent.id;
-              onSelect({ agent, session, community }, event.currentTarget);
-            }}
           >
-            <SharedAgentCardContent agent={agent} community={community} />
-          </SurfaceButton>
+            <SurfaceButton
+              className={styles.open}
+              aria-label={agent.name}
+              aria-current={selectedId === agent.id || undefined}
+              onClick={(event) => {
+                shown.current = agent.id;
+                onSelect(
+                  { agent, session, community, viewer },
+                  event.currentTarget,
+                );
+              }}
+            />
+            <AgentCardBackdrop agent={agent} community={community} />
+            <span className={cardStyles.portrait} aria-hidden="true">
+              <AgentPortrait agent={agent} community={community} />
+            </span>
+            <span className={cardStyles.identity}>
+              <span className={`${cardStyles.name} text-label`}>
+                <Matched text={agent.name} words={words} />
+              </span>
+              <span className={cardStyles.detail}>
+                <span className={cardStyles.detailText}>
+                  by {name(agent.owner)}
+                </span>
+              </span>
+            </span>
+            {agent.instructions && (
+              <span className={`${styles.excerpt} text-body-sm`}>
+                <Matched
+                  text={excerpt(agent.instructions, words)}
+                  words={words}
+                />
+              </span>
+            )}
+            <span className={styles.counts}>
+              <ImportCount agent={agent} counts={counts} />
+              <StarToggle
+                agent={agent}
+                marketplace={marketplace}
+                counts={counts}
+                viewer={viewer}
+                unavailable={unavailable}
+              />
+            </span>
+          </div>
         ))}
       </div>
-      {more && !error && (
-        <Button
-          disabled={loading}
-          onClick={() => {
-            const last = [...events]
-              .sort(
-                (a, b) =>
-                  b.created_at - a.created_at || a.id.localeCompare(b.id),
-              )
-              .at(-1);
-            if (last) setCursor({ until: last.created_at, before_id: last.id });
-          }}
-        >
-          Load more
-        </Button>
-      )}
     </div>
+  );
+}
+
+/** `text` with every occurrence of each search word underlined. */
+function Matched({ text, words }: { text: string; words: readonly string[] }) {
+  const lower = text.toLowerCase();
+  const positions: number[] = [];
+  for (const word of words)
+    for (
+      let at = lower.indexOf(word);
+      at !== -1;
+      at = lower.indexOf(word, at + 1)
+    )
+      for (let index = at; index < at + word.length; index++)
+        positions.push(index);
+  return <MatchedLabel label={text} positions={positions} />;
+}
+
+function ImportCount({
+  agent,
+  counts,
+}: {
+  agent: SharedAgent;
+  counts: MarketplaceState;
+}) {
+  if (counts.status !== "ready") return null;
+  const count = importCount(counts, agent);
+  return (
+    <span
+      className={styles.count}
+      role="img"
+      aria-label={`${count} ${count === 1 ? "import" : "imports"}`}
+      title={`Imported by ${count} ${count === 1 ? "person" : "people"} from the Marketplace`}
+    >
+      <DownloadIcon size={16} aria-hidden="true" />
+      <span aria-hidden="true">{count}</span>
+    </span>
+  );
+}
+
+/** Stars an agent the way you would star a repository: once per person. */
+function StarToggle({
+  agent,
+  marketplace,
+  counts,
+  viewer,
+  unavailable,
+}: {
+  agent: SharedAgent;
+  marketplace: Marketplace;
+  counts: MarketplaceState;
+  viewer: string | undefined;
+  unavailable: string | undefined;
+}) {
+  const key = address(agent);
+  const people = counts.stars.get(key);
+  const count = people?.size ?? 0;
+  const starred = !!viewer && !!people?.get(viewer)?.length;
+  const failure = counts.failures.get(key);
+  return (
+    <>
+      {failure && (
+        <span role="alert" className="text-body-sm text-danger">
+          {failure}
+        </span>
+      )}
+      <Button
+        size="sm"
+        variant={starred ? "glass" : "glass-ghost"}
+        aria-pressed={starred}
+        aria-label={`${starred ? "Unstar" : "Star"} ${agent.name}, ${count} ${count === 1 ? "star" : "stars"}`}
+        title={unavailable ?? (starred ? "Unstar" : "Star")}
+        disabled={!!unavailable || counts.pending.has(key)}
+        onClick={() => void marketplace.toggleStar(agent)}
+      >
+        <span className={styles.count}>
+          {starred ? (
+            // The Bestie badge's gold, in either theme.
+            <span
+              className={styles.gold}
+              data-accent="bee"
+              data-color-mode="light"
+            >
+              <StarFilledIcon size={16} aria-hidden="true" />
+            </span>
+          ) : (
+            <StarIcon size={16} aria-hidden="true" />
+          )}
+          {count}
+        </span>
+      </Button>
+    </>
   );
 }
 
 export function SharedAgentPanel({
   selection,
+  onImported,
   ...importing
 }: Importing & { selection: SharedAgentSelection }) {
-  const { agent, session, community } = selection;
+  const { agent, session, community, viewer } = selection;
+  const marketplace = marketplaceFor(session, viewer);
+  const counts = useMarketplace(marketplace);
   const pack = agentAvatars.find((item) => item.url === agent.picture);
   const picture = useAvatarPreview(
     pack ? "" : (agent.picture ?? ""),
@@ -260,7 +580,18 @@ export function SharedAgentPanel({
             key={agent.id}
             shared={agent}
             variant={backdrop ? "glass" : "subtle"}
+            onImported={(imported) => {
+              void marketplace.recordImport(agent);
+              onImported(imported);
+            }}
             {...importing}
+          />
+          <StarToggle
+            agent={agent}
+            marketplace={marketplace}
+            counts={counts}
+            viewer={viewer}
+            unavailable={marketplace.unavailable(counts)}
           />
         </div>
       </section>
@@ -286,42 +617,36 @@ export function SharedAgentPanel({
               </span>
             }
           />
+          {agent.runtime && (
+            <PreferenceRow
+              title="Harness"
+              trailing={<span className={styles.fact}>{agent.runtime}</span>}
+            />
+          )}
+          {agent.provider && (
+            <PreferenceRow
+              title="Provider"
+              trailing={<span className={styles.fact}>{agent.provider}</span>}
+            />
+          )}
+          {counts.status === "ready" && (
+            <PreferenceRow
+              title="Imports"
+              trailing={
+                <span className={styles.fact}>
+                  {importCount(counts, agent)}
+                </span>
+              }
+            />
+          )}
         </SettingsGroup>
       </section>
-      <SharedAgentDetails agent={agent} />
-    </div>
-  );
-}
-
-function SharedAgentDetails({ agent }: { agent: SharedAgent }) {
-  const [expanded, setExpanded] = useState(false);
-  const id = useId();
-  const long =
-    agent.instructions.length > 320 ||
-    agent.instructions.split("\n").length > 5;
-  return (
-    <div className={styles.details}>
-      <InlineHeader title="Instructions" />
-      <section
-        id={id}
-        className={styles.instructions}
-        data-collapsed={long && !expanded ? "" : undefined}
-        aria-label="Instructions"
-      >
-        {agent.instructions || "No instructions included."}
-      </section>
-      {long && (
-        <div className={styles.instructionsAction}>
-          <Button
-            variant="subtle"
-            aria-expanded={expanded}
-            aria-controls={id}
-            onClick={() => setExpanded(!expanded)}
-          >
-            {expanded ? "See less" : "See more"}
-          </Button>
-        </div>
-      )}
+      <div className={styles.details}>
+        <InlineHeader title="Instructions" />
+        <section className={styles.instructions} aria-label="Instructions">
+          {agent.instructions || "No instructions included."}
+        </section>
+      </div>
     </div>
   );
 }
@@ -388,6 +713,7 @@ function ImportShared({
       {open && (
         <SharedImportDialog
           {...props}
+          counted
           onClose={() => setOpen(false)}
           finalFocus={trigger}
         />
@@ -498,10 +824,13 @@ export function SharedImportDialog({
   openSettings,
   onClose,
   finalFocus,
+  counted = false,
 }: Importing & {
   shared: SharedDefinition;
   onClose(): void;
   finalFocus: React.RefObject<HTMLButtonElement | null>;
+  /** From the Marketplace, where each import is a public record. */
+  counted?: boolean;
 }) {
   const { snapshot, types: known } = useAgents(agents);
   const body = useRef<HTMLDivElement>(null);
@@ -687,6 +1016,12 @@ export function SharedImportDialog({
           disabled={pending}
           onChange={setInstructions}
         />
+        {counted && (
+          <p className="m-0 text-body-sm text-secondary">
+            Imports from the Marketplace are counted publicly: anyone in this
+            community can see who imported this agent.
+          </p>
+        )}
         {(refused || error) && (
           <p role="alert" className="m-0 text-body-sm text-danger">
             {refused || error}

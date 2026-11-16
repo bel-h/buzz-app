@@ -6207,7 +6207,9 @@ it("opens a Marketplace tile in the profile pane and returns focus on close and 
     expect(
       screen.getByRole("heading", { name: "Marketplace helper" }),
     ).toBeVisible();
-    expect(screen.getByText("Help with tasks.")).toBeVisible();
+    expect(
+      screen.getByRole("region", { name: "Instructions" }),
+    ).toHaveTextContent("Help with tasks.");
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     await user.click(
       screen.getByRole("button", { name: "Close Marketplace helper tab" }),
