@@ -528,6 +528,9 @@ and are asked to sign in again in Buzz.
   activity clears the loading error.
   A DM row whose unread messages are all in one thread opens that thread; later DM messages outside it stay
   unread until you open the whole DM, which its row then does.
+  Each conversation or thread a row opens, and each GitHub or profile tab a link opens beside it, is a stop for
+  **Back** and **Forward**: Back from a pull request returns to the thread you opened it from, then to Activity as
+  it was. Closing a tab removes its stops.
   **Reactions** shows recent reactions to your messages, with shared emoji grouped together per message and each person’s remaining emoji in their own row; selecting it turns Unread off.
   Reactions have no unread state or badge count. Clicking one opens your exact message in its conversation or thread.
   New reactions from updated clients appear; older unaddressed reactions are not backfilled.

@@ -9,6 +9,8 @@ import type {
   PageTabTarget,
 } from "../../features/conversation/contracts";
 import type { ConversationHostServices } from "../../features/conversation/ConversationHost";
+import type { PagesReader } from "../../features/pages/service";
+import type { OpenTarget } from "../../features/navigation/targets";
 import {
   buzzLinkTarget,
   isBuzzLink,
@@ -33,6 +35,7 @@ import {
 import panelStyles from "../../features/panels/Panels.module.css";
 import { useChannelLabels } from "./useChannelLabels";
 import {
+  panelTabId,
   tabPane,
   threadTab,
   useChannelTabState,
@@ -42,6 +45,7 @@ import { useConversationTabs } from "./useConversationTabs";
 import { ConversationTab as ConversationReader } from "./ConversationTab";
 import { panelOpening } from "../../features/panels/service";
 import { useCoveredByDock } from "./useCoveredByDock";
+import { pageTabRoute } from "./page-tab-route";
 import styles from "./Channels.module.css";
 
 export type { PageTabOptions, PageTabsProps, PageTabTarget };
@@ -50,7 +54,7 @@ export type { PageTabOptions, PageTabsProps, PageTabTarget };
 const previews = new WeakMap<RelaySession, Map<string, string>>();
 
 type HostProps = {
-  host: ConversationHostServices;
+  host: ConversationHostServices & { pages?: PagesReader | undefined };
   extensions?: ConversationExtensions | undefined;
 };
 
@@ -99,6 +103,102 @@ export function PageTabs({
     };
   }, []);
   const fallbackFocus = useRef<HTMLDivElement>(null);
+  const navigator = host.navigation;
+  // The page shown as this workspace mounted. When its route accepts tab
+  // visits, a tab it opens, or a link opens beside it, takes a visit that
+  // Back and Forward return to, as Channels' threads and details do.
+  const [tabPage] = useState(() => {
+    const { target } = navigator.snapshot().entry;
+    if (workspace || target.kind !== "page") return;
+    const route = host.pages
+      ?.snapshot()
+      .find(
+        (item) => item.key === `${target.pluginId}/${target.pageId}`,
+      )?.route;
+    try {
+      if (route?.version === 1 && route.validate({ tab: "conversation" }))
+        return { pluginId: target.pluginId, pageId: target.pageId };
+    } catch {}
+  });
+  const ownPage = (
+    target: OpenTarget,
+  ): target is Extract<OpenTarget, { kind: "page" }> =>
+    !!tabPage &&
+    target.kind === "page" &&
+    target.pluginId === tabPage.pluginId &&
+    target.pageId === tabPage.pageId;
+  const tabOfVisit = (target: OpenTarget) =>
+    ownPage(target) && target.route?.version === 1
+      ? pageTabRoute(target.route.params)
+      : undefined;
+  // The page's last visit naming no tab, as with the filters it opened
+  // with; a close that leaves no tab selected returns to it.
+  const pageVisit = useRef<OpenTarget>(undefined);
+  const pageTarget = (
+    tab?: string,
+    message?: string,
+  ): OpenTarget | undefined => {
+    const { target } = navigator.snapshot().entry;
+    if (!ownPage(target)) return;
+    const { route: _route, ...plain } = target;
+    if (!tab) return pageVisit.current ?? plain;
+    return {
+      ...plain,
+      route: { version: 1, params: { tab, ...(message && { message }) } },
+    };
+  };
+  const visitedTab = () => tabOfVisit(navigator.snapshot().entry.target)?.tab;
+  // Back/Forward reopening a visit's tab takes no visit of its own, and a
+  // visit this page opens has nothing to reopen.
+  const restoring = useRef(false);
+  const recording = useRef(false);
+  // A close's return lands after its dismissal in browser history. Until
+  // then the retiring visit is current; an opening waits for the return.
+  const pendingReturn = useRef<{
+    from: string;
+    kept?: string | undefined;
+    open?: { tab: string; message?: string | undefined };
+  }>(undefined);
+  const returning = () =>
+    pendingReturn.current?.from === navigator.snapshot().entry.id;
+  // Record where Back returns before an opening changes the selection.
+  const leaveVisit = (tab: string) => {
+    if (tabPage && !restoring.current && !returning() && visitedTab() !== tab)
+      tabState.leaveVisit();
+  };
+  const visitTab = (tab: string, message?: string) => {
+    const target = pageTarget(tab, message);
+    if (!target || restoring.current || visitedTab() === tab) return;
+    if (returning() && pendingReturn.current) {
+      pendingReturn.current.open = { tab, message };
+      return;
+    }
+    recording.current = true;
+    try {
+      void navigator.open(target, { focus: "preserve", sidebar: "preserve" });
+    } finally {
+      recording.current = false;
+    }
+  };
+  // Closing a tab retires its visits; the selection it leaves stays.
+  const dismissTabs = (ids: readonly string[]) => {
+    const selected = tabState.getSelected();
+    const kept =
+      !ids.includes(selected) &&
+      (tabState.tabs.some((tab) => tab.id === selected) ||
+        tabState.entries.some((entry) => panelTabId(entry) === selected))
+        ? selected
+        : undefined;
+    const fallback = pageTarget(kept);
+    if (!fallback || !ids.length) return;
+    const { id } = navigator.snapshot().entry;
+    pendingReturn.current = { from: id, kept };
+    navigator.dismiss(
+      (visit) => ids.includes(tabOfVisit(visit)?.tab ?? ""),
+      fallback,
+    );
+    if (navigator.snapshot().entry.id === id) pendingReturn.current = undefined;
+  };
   const secondary = useConversationTabs({
     state: tabState,
     relay: host.relay,
@@ -132,6 +232,17 @@ export function PageTabs({
     threadPane: "side",
     visits,
     navigation: host.navigation,
+    ...(tabPage && {
+      onVisitPanel(entry) {
+        leaveVisit(panelTabId(entry));
+        visitTab(panelTabId(entry));
+      },
+      onClosePanel: (entry) => dismissTabs([panelTabId(entry)]),
+      onCloseThread: (tab) => dismissTabs([tab.id]),
+      onCloseConversation: (tab) => dismissTabs([tab.id]),
+      onCloseTabs: (tabs, entries) =>
+        dismissTabs([...tabs.map((tab) => tab.id), ...entries.map(panelTabId)]),
+    }),
     conversationIcon: (item) => {
       const Icon = channelIcon(item);
       return <Icon size="1rem" />;
@@ -224,6 +335,7 @@ export function PageTabs({
       if (!mounted.current || !tab) return false;
       tabState.setTabs((tabs) => tabs.filter((item) => item.id !== tab.id));
       setCloses(committedCloses.current + 1);
+      dismissTabs([tab.id]);
       return true;
     };
     opening.current = (
@@ -237,6 +349,12 @@ export function PageTabs({
       // An open thread keeps its tab in whichever pane it was moved to, and
       // under its verified root.
       const existing = threadId ? tabOf({ channelId, threadId }) : undefined;
+      leaveVisit(
+        existing?.id ??
+          (threadId
+            ? `thread:${channelId}:${threadId}`
+            : `conversation:${channelId}`),
+      );
       // Each open at a message asks the reader to show it again; any other
       // open focuses the composer.
       if (threadId)
@@ -282,9 +400,76 @@ export function PageTabs({
           );
         page.set(id, opened);
       }
+      visitTab(opened, messageId);
       return true;
     };
   });
+  // Each visit to the page restores the tabs it showed. A tab closed since
+  // without being dismissed, as one a later open replaced, opens again
+  // beside the others: Back and Forward never close a tab.
+  const enteredVisit = useRef<string>(undefined);
+  const enter = useRef(() => {});
+  useLayoutEffect(() => {
+    enter.current = () => {
+      const { id: entry, target } = navigator.snapshot().entry;
+      if (
+        !mounted.current ||
+        !ownPage(target) ||
+        enteredVisit.current === entry
+      )
+        return;
+      enteredVisit.current = entry;
+      tabState.enterVisit(`${entry}:page`, undefined, true);
+      const route = tabOfVisit(target);
+      if (!route) pageVisit.current = target;
+      if (recording.current) return;
+      const landed = pendingReturn.current;
+      if (landed && landed.from !== entry) {
+        pendingReturn.current = undefined;
+        // The close's survivor stays selected over the visit's own snapshot;
+        // an opening made meanwhile takes its visit now.
+        const selected = landed.open?.tab ?? landed.kept;
+        if (landed.open) tabState.leaveVisit();
+        if (selected) {
+          tabState.select(selected);
+          tabState.setPaneOpen(true);
+        }
+        if (landed.open) {
+          const { tab, message } = landed.open;
+          queueMicrotask(() => visitTab(tab, message));
+        }
+        return;
+      }
+      const thread = /^thread:([^:]+):([^:]+)(?::[^:]+)?$/.exec(
+        route?.tab ?? "",
+      );
+      const conversation = /^conversation:(.+)$/.exec(route?.tab ?? "");
+      const reopen: PageTabTarget | undefined =
+        thread?.[1] && thread[2]
+          ? { channelId: thread[1], threadId: thread[2] }
+          : conversation?.[1]
+            ? { channelId: conversation[1] }
+            : undefined;
+      if (!reopen || tabOf(reopen)) return;
+      restoring.current = true;
+      try {
+        opening.current(
+          {
+            ...reopen,
+            ...(route?.message && { messageId: route.message }),
+          },
+          { keep: true },
+        );
+      } finally {
+        restoring.current = false;
+      }
+    };
+  });
+  useLayoutEffect(() => {
+    if (!tabPage) return;
+    enter.current();
+    return navigator.subscribe(() => enter.current());
+  }, [navigator, tabPage]);
   const open = useCallback(
     (target: PageTabTarget, options?: PageTabOptions) =>
       opening.current(target, options),
