@@ -69,7 +69,6 @@ import {
   formatPublicKey,
 } from "../../shared/identity/public-key";
 import { AgentCardBackdrop, AgentPortrait } from "./AgentCard";
-import { SurfaceButton } from "../../shared/design-system/ui/SurfaceButton";
 import { PreferenceRow } from "../../shared/design-system/ui/PreferenceRow";
 import { SettingsGroup } from "../../shared/design-system/ui/SettingsGroup";
 import { InlineHeader } from "../../shared/design-system/ui/Header";
@@ -122,7 +121,7 @@ type Selection = {
 export function AgentBrowse({
   relay,
   ...selection
-}: Selection & { relay: RelayData }) {
+}: Selection & Importing & { relay: RelayData }) {
   const connection = useRelayConnection(relay);
   if (connection.status !== "ready")
     return <p>Connect to a community to browse shared agents.</p>;
@@ -177,11 +176,13 @@ function SharedAgentList({
   viewer,
   selectedId,
   onSelect,
-}: Selection & {
-  session: RelaySession;
-  community: string | undefined;
-  viewer: string | undefined;
-}) {
+  ...importing
+}: Selection &
+  Importing & {
+    session: RelaySession;
+    community: string | undefined;
+    viewer: string | undefined;
+  }) {
   const marketplace = marketplaceFor(session, viewer);
   const counts = useMarketplace(marketplace);
   const [agents, setAgents] = useState<readonly SharedAgent[]>([]);
@@ -404,18 +405,6 @@ function SharedAgentList({
             className={`${cardStyles.card} ${cardStyles.agentCard} ${styles.listing}`}
             data-selected={selectedId === agent.id || undefined}
           >
-            <SurfaceButton
-              className={styles.open}
-              aria-label={agent.name}
-              aria-current={selectedId === agent.id || undefined}
-              onClick={(event) => {
-                shown.current = agent.id;
-                onSelect(
-                  { agent, session, community, viewer },
-                  event.currentTarget,
-                );
-              }}
-            />
             <AgentCardBackdrop agent={agent} community={community} />
             <span className={cardStyles.portrait} aria-hidden="true">
               <AgentPortrait agent={agent} community={community} />
@@ -439,7 +428,23 @@ function SharedAgentList({
               </span>
             )}
             <span className={styles.counts}>
-              <ImportCount agent={agent} counts={counts} />
+              <ImportShared
+                shared={agent}
+                marketplace={marketplace}
+                variant="glass-ghost"
+                label={`Import ${agent.name}${
+                  counts.status === "ready"
+                    ? `, ${importCount(counts, agent)} ${importCount(counts, agent) === 1 ? "import" : "imports"}`
+                    : ""
+                }`}
+                title="Import a copy"
+                {...importing}
+              >
+                <span className={styles.count}>
+                  <DownloadIcon size={16} aria-hidden="true" />
+                  {counts.status === "ready" && importCount(counts, agent)}
+                </span>
+              </ImportShared>
               <StarToggle
                 agent={agent}
                 marketplace={marketplace}
@@ -447,6 +452,23 @@ function SharedAgentList({
                 viewer={viewer}
                 unavailable={unavailable}
               />
+              <span className={styles.more}>
+                <Button
+                  size="sm"
+                  variant="glass"
+                  aria-label={`More about ${agent.name}`}
+                  aria-current={selectedId === agent.id || undefined}
+                  onClick={(event) => {
+                    shown.current = agent.id;
+                    onSelect(
+                      { agent, session, community, viewer },
+                      event.currentTarget,
+                    );
+                  }}
+                >
+                  More
+                </Button>
+              </span>
             </span>
           </div>
         ))}
@@ -468,28 +490,6 @@ function Matched({ text, words }: { text: string; words: readonly string[] }) {
       for (let index = at; index < at + word.length; index++)
         positions.push(index);
   return <MatchedLabel label={text} positions={positions} />;
-}
-
-function ImportCount({
-  agent,
-  counts,
-}: {
-  agent: SharedAgent;
-  counts: MarketplaceState;
-}) {
-  if (counts.status !== "ready") return null;
-  const count = importCount(counts, agent);
-  return (
-    <span
-      className={styles.count}
-      role="img"
-      aria-label={`${count} ${count === 1 ? "import" : "imports"}`}
-      title={`Imported by ${count} ${count === 1 ? "person" : "people"} from the Marketplace`}
-    >
-      <DownloadIcon size={16} aria-hidden="true" />
-      <span aria-hidden="true">{count}</span>
-    </span>
-  );
 }
 
 /** Stars an agent the way you would star a repository: once per person. */
@@ -579,13 +579,14 @@ export function SharedAgentPanel({
           <ImportShared
             key={agent.id}
             shared={agent}
+            marketplace={marketplace}
             variant={backdrop ? "glass" : "subtle"}
-            onImported={(imported) => {
-              void marketplace.recordImport(agent);
-              onImported(imported);
-            }}
+            shape="control"
+            onImported={onImported}
             {...importing}
-          />
+          >
+            Import
+          </ImportShared>
           <StarToggle
             agent={agent}
             marketplace={marketplace}
@@ -693,26 +694,53 @@ function Sharer({
 }
 
 /** The panel keeps one action; configuration belongs to the import dialog. */
+/** Import's trigger and dialog; an import made here is counted. */
 function ImportShared({
+  shared,
+  marketplace,
+  agents,
+  types,
+  onImported,
+  onOpen,
+  openSettings,
+  children,
   variant,
-  ...props
-}: Importing & { shared: SharedAgent; variant: "glass" | "subtle" }) {
+  shape = "capsule",
+  label,
+  title,
+}: Importing & {
+  shared: SharedAgent;
+  marketplace: Marketplace;
+  variant: "glass" | "glass-ghost" | "subtle";
+  shape?: "capsule" | "control";
+  children: ReactNode;
+  /** The trigger's name, when its content doesn't say Import. */
+  label?: string;
+  title?: string;
+}) {
   const [open, setOpen] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
+  const props = { shared, agents, types, onOpen, openSettings };
   return (
     <>
       <Button
         ref={trigger}
         variant={variant}
+        shape={shape}
         size="sm"
-        shape="control"
+        {...(label ? { "aria-label": label } : {})}
+        {...(title ? { title } : {})}
         onClick={() => setOpen(true)}
       >
-        Import
+        {children}
       </Button>
       {open && (
         <SharedImportDialog
           {...props}
+          onImported={(agent) => {
+            void marketplace.recordImport(shared);
+            onImported(agent);
+          }}
           counted
           onClose={() => setOpen(false)}
           finalFocus={trigger}

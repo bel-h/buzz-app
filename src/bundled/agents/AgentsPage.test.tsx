@@ -4118,7 +4118,9 @@ it("links a Marketplace agent's Import to Manage plugins while no agent type plu
     );
     await user.click(screen.getByRole("tab", { name: "Marketplace" }));
     await user.click(
-      await screen.findByRole("button", { name: "Marketplace helper" }),
+      await screen.findByRole("button", {
+        name: "More about Marketplace helper",
+      }),
     );
     await user.click(screen.getByRole("button", { name: "Import" }));
     const dialog = screen.getByRole("dialog", { name: "Marketplace helper" });
@@ -5012,7 +5014,9 @@ it("asks before a marketplace listing opens one of your agents over a draft", as
     await user.type(screen.getByRole("textbox", { name: "Reply" }), "!");
     await user.click(screen.getByRole("tab", { name: "Marketplace" }));
     await user.click(
-      await screen.findByRole("button", { name: "Marketplace helper" }),
+      await screen.findByRole("button", {
+        name: "More about Marketplace helper",
+      }),
     );
     await user.click(screen.getByRole("button", { name: "Import" }));
     const open = within(
@@ -6200,7 +6204,7 @@ it("opens a Marketplace tile in the profile pane and returns focus on close and 
     view.rerender(<AgentsPage agents={view.agents} relay={relay} />);
     await user.click(screen.getByRole("tab", { name: "Marketplace" }));
     const tile = await screen.findByRole("button", {
-      name: "Marketplace helper",
+      name: "More about Marketplace helper",
     });
     await user.click(tile);
     expect(tile).toHaveAttribute("aria-current", "true");

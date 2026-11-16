@@ -56,25 +56,6 @@
   gap: var(--space-3);
   padding-top: var(--space-8);
 }
-/* The whole card opens the agent; the star above it is its own control. */
-.open {
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  border-radius: inherit;
-  cursor: pointer;
-}
-.listing:has(> .open:hover) {
-  background: var(--surface-hover);
-}
-html[data-keyboard-navigation] .open:focus-visible {
-  outline: 2px solid var(--border-focus);
-  outline-offset: 2px;
-}
-.listing > :not(.open) {
-  position: relative;
-  pointer-events: none;
-}
 .excerpt {
   display: -webkit-box;
   -webkit-box-orient: vertical;
@@ -84,17 +65,17 @@ html[data-keyboard-navigation] .open:focus-visible {
   color: var(--text-secondary);
   overflow-wrap: anywhere;
 }
+/* Import and star at the start, More at the end. */
 .counts {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  justify-content: flex-end;
   gap: var(--space-2);
   align-self: stretch;
   margin-top: auto;
 }
-.counts > * {
-  pointer-events: auto;
+.more {
+  margin-inline-start: auto;
 }
 .count {
   display: inline-flex;

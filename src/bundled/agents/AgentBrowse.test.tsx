@@ -41,6 +41,7 @@ function AgentBrowse(
   return (
     <>
       <Catalog
+        {...props}
         relay={props.relay}
         selectedId={selection?.agent.id}
         onSelect={setSelection}
@@ -198,8 +199,12 @@ const community = (
 it("browses shared agents and opens their full details", async () => {
   const read = vi.fn().mockResolvedValue([shared]);
   render(<AgentBrowse relay={community(read)} {...importing()} />);
-  const card = await screen.findByRole("button", { name: "Shared helper" });
-  const listing = card.parentElement as HTMLElement;
+  const card = await screen.findByRole("button", {
+    name: "More about Shared helper",
+  });
+  // More → its row → the card.
+  const listing = card.parentElement?.parentElement
+    ?.parentElement as HTMLElement;
   // The card shows who shared it and how its instructions begin.
   expect(within(listing).getByText(/^by npub…/)).toBeVisible();
   expect(within(listing).getByText("Help with tasks.")).toBeVisible();
@@ -226,26 +231,46 @@ it("scrolls to an agent selected from elsewhere, not one chosen here", async () 
     const read = vi.fn().mockResolvedValue([shared]);
     const relay = community(read);
     const onSelect = vi.fn();
-    const view = render(<Catalog relay={relay} onSelect={onSelect} />);
-    const card = await screen.findByRole("button", { name: "Shared helper" });
+    const view = render(
+      <Catalog {...importing()} relay={relay} onSelect={onSelect} />,
+    );
+    const card = await screen.findByRole("button", {
+      name: "More about Shared helper",
+    });
     fireEvent.click(card);
     const [{ agent }] = onSelect.mock.calls[0] ?? [];
     view.rerender(
-      <Catalog relay={relay} selectedId={agent.id} onSelect={onSelect} />,
+      <Catalog
+        {...importing()}
+        relay={relay}
+        selectedId={agent.id}
+        onSelect={onSelect}
+      />,
     );
     expect(card).toHaveAttribute("aria-current", "true");
-    expect(card.parentElement).toHaveAttribute("data-selected");
+    expect(card.closest("[data-selected]")).not.toBeNull();
     expect(scrollIntoView).not.toHaveBeenCalled();
     // As View on a published agent selects it, before its page has loaded.
     view.unmount();
-    render(<Catalog relay={relay} selectedId={agent.id} onSelect={onSelect} />);
-    const listed = await screen.findByRole("button", { name: "Shared helper" });
+    render(
+      <Catalog
+        {...importing()}
+        relay={relay}
+        selectedId={agent.id}
+        onSelect={onSelect}
+      />,
+    );
+    const listed = await screen.findByRole("button", {
+      name: "More about Shared helper",
+    });
     await vi.waitFor(() =>
       expect(scrollIntoView).toHaveBeenCalledExactlyOnceWith({
         block: "center",
       }),
     );
-    expect(scrollIntoView.mock.contexts[0]).toBe(listed.parentElement);
+    expect(scrollIntoView.mock.contexts[0]).toBe(
+      listed.closest("[data-selected]"),
+    );
   } finally {
     Reflect.deleteProperty(Element.prototype, "scrollIntoView");
   }
@@ -327,7 +352,9 @@ it("reads every page, shrinking over-budget ones, and retries a failure from the
     // Both heads, one from each page, once every page is read.
     expect(await screen.findByText("Helper 0")).toBeVisible();
     expect(screen.getByText("Helper 100")).toBeVisible();
-    expect(screen.getAllByRole("button", { name: /^Helper / })).toHaveLength(2);
+    expect(
+      screen.getAllByRole("button", { name: /^More about Helper / }),
+    ).toHaveLength(2);
     expect(
       query.mock.calls.slice(0, 2).map(([filters]) => filters[0]?.limit),
     ).toEqual([200, 100]);
@@ -392,7 +419,9 @@ it("names the sharer by their profile, with their key on hover", async () => {
   const read = vi.fn().mockResolvedValue([shared]);
   const profiles = directory({ [shared.pubkey]: { name: "Cora" } });
   render(<AgentBrowse relay={community(read, profiles)} {...importing()} />);
-  fireEvent.click(await screen.findByRole("button", { name: "Shared helper" }));
+  fireEvent.click(
+    await screen.findByRole("button", { name: "More about Shared helper" }),
+  );
   const dialog = await screen.findByRole("region", {
     name: "Shared agent profile",
   });
@@ -416,7 +445,9 @@ it("imports a shared agent through the import path, then hands back", async () =
   ]);
   const props = importing();
   render(<AgentBrowse relay={community(read)} {...props} />);
-  fireEvent.click(await screen.findByRole("button", { name: "Shared helper" }));
+  fireEvent.click(
+    await screen.findByRole("button", { name: "More about Shared helper" }),
+  );
   const dialog = await screen.findByRole("region", {
     name: "Shared agent profile",
   });
@@ -450,7 +481,9 @@ it("imports a shared agent through the import path, then hands back", async () =
 it("says how to import, and undoes edits back to what was shared", async () => {
   const read = vi.fn().mockResolvedValue([shared]);
   render(<AgentBrowse relay={community(read)} {...importing()} />);
-  fireEvent.click(await screen.findByRole("button", { name: "Shared helper" }));
+  fireEvent.click(
+    await screen.findByRole("button", { name: "More about Shared helper" }),
+  );
   fireEvent.click(screen.getByRole("button", { name: "Import" }));
   const dialog = screen.getByRole("dialog", { name: "Shared helper" });
   expect(dialog).toHaveAccessibleDescription(
@@ -506,7 +539,9 @@ it("offers to open an agent you already have rather than copy it", async () => {
   );
   const onOpen = vi.fn();
   render(<AgentBrowse relay={community(read)} {...props} onOpen={onOpen} />);
-  fireEvent.click(await screen.findByRole("button", { name: "Shared helper" }));
+  fireEvent.click(
+    await screen.findByRole("button", { name: "More about Shared helper" }),
+  );
   fireEvent.click(screen.getByRole("button", { name: "Import" }));
   const dialog = screen.getByRole("dialog", { name: "Shared helper" });
   expect(dialog).toHaveAccessibleDescription("You already have this agent.");
@@ -537,7 +572,9 @@ it("refuses a shared agent whose instructions block/buzz would refuse", async ()
   ]);
   const props = importing();
   render(<AgentBrowse relay={community(read)} {...props} />);
-  fireEvent.click(await screen.findByRole("button", { name: "Shared helper" }));
+  fireEvent.click(
+    await screen.findByRole("button", { name: "More about Shared helper" }),
+  );
   const panel = await screen.findByRole("region", {
     name: "Shared agent profile",
   });
@@ -561,7 +598,9 @@ it("imports as the chosen type, and keeps the panel open with the error when it 
     new Error("Connect to a community first"),
   );
   render(<AgentBrowse relay={community(read)} {...props} />);
-  fireEvent.click(await screen.findByRole("button", { name: "Shared helper" }));
+  fireEvent.click(
+    await screen.findByRole("button", { name: "More about Shared helper" }),
+  );
   const dialog = await screen.findByRole("region", {
     name: "Shared agent profile",
   });
@@ -586,7 +625,9 @@ it("does not silently replace an unavailable shared runtime", async () => {
   const read = vi.fn().mockResolvedValue([shared]);
   const props = importing([{ ...echo, importShared: () => undefined }]);
   render(<AgentBrowse relay={community(read)} {...props} />);
-  fireEvent.click(await screen.findByRole("button", { name: "Shared helper" }));
+  fireEvent.click(
+    await screen.findByRole("button", { name: "More about Shared helper" }),
+  );
   fireEvent.click(screen.getByRole("button", { name: "Import" }));
   const dialog = screen.getByRole("dialog", { name: "Shared helper" });
   expect(within(dialog).getByRole("button", { name: "Import" })).toBeDisabled();
@@ -612,7 +653,9 @@ async function noTypes(
       openSettings={openSettings}
     />,
   );
-  fireEvent.click(await screen.findByRole("button", { name: "Shared helper" }));
+  fireEvent.click(
+    await screen.findByRole("button", { name: "More about Shared helper" }),
+  );
   fireEvent.click(screen.getByRole("button", { name: "Import" }));
   return screen.getByRole("dialog", { name: "Shared helper" });
 }
@@ -657,7 +700,9 @@ it("does not say no plugin is on when only a hosted type is", async () => {
       openSettings={openSettings}
     />,
   );
-  fireEvent.click(await screen.findByRole("button", { name: "Shared helper" }));
+  fireEvent.click(
+    await screen.findByRole("button", { name: "More about Shared helper" }),
+  );
   fireEvent.click(screen.getByRole("button", { name: "Import" }));
   const dialog = screen.getByRole("dialog", { name: "Shared helper" });
   expect(
@@ -690,7 +735,9 @@ it("keeps Manage plugins plain text while a shared agent is still importing", as
       openSettings={openSettings}
     />,
   );
-  fireEvent.click(await screen.findByRole("button", { name: "Shared helper" }));
+  fireEvent.click(
+    await screen.findByRole("button", { name: "More about Shared helper" }),
+  );
   fireEvent.click(screen.getByRole("button", { name: "Import" }));
   const dialog = screen.getByRole("dialog", { name: "Shared helper" });
   fireEvent.click(within(dialog).getByRole("button", { name: "Import" }));
@@ -776,7 +823,9 @@ it("shows long instructions in full, with no See more", async () => {
     },
   ]);
   render(<AgentBrowse relay={community(read)} {...importing()} />);
-  fireEvent.click(await screen.findByRole("button", { name: "Shared helper" }));
+  fireEvent.click(
+    await screen.findByRole("button", { name: "More about Shared helper" }),
+  );
   expect(
     await screen.findByRole("region", { name: "Instructions" }),
   ).toHaveTextContent(long);
@@ -834,8 +883,8 @@ const reactionOn = (
 });
 const cardNames = () =>
   screen
-    .getAllByRole("button", { name: /^(Alpha|Beta|Gamma)$/ })
-    .map((button) => button.getAttribute("aria-label"));
+    .getAllByRole("button", { name: /^More about (Alpha|Beta|Gamma)$/ })
+    .map((button) => button.getAttribute("aria-label")?.slice(11));
 
 it("counts stars and imports by address, most starred first, and never the owner's own import", async () => {
   const alpha = listing("Alpha");
@@ -878,7 +927,9 @@ it("counts stars and imports by address, most starred first, and never the owner
   expect(
     screen.getByRole("button", { name: "Star Beta, 2 stars" }),
   ).toHaveAttribute("aria-pressed", "false");
-  expect(screen.getAllByRole("img", { name: "1 import" })).toHaveLength(1);
+  expect(
+    screen.getAllByRole("button", { name: /^Import \w+, 1 import$/ }),
+  ).toHaveLength(1);
   const user = userEvent.setup();
   await user.click(screen.getByRole("combobox", { name: "Sort" }));
   await user.click(await screen.findByRole("option", { name: "Newest" }));
@@ -951,7 +1002,7 @@ it("stars from the card and unstars from the panel, one deletion per reaction", 
     ],
   });
   // Opened beside the grid, the agent shows the same star.
-  fireEvent.click(screen.getByRole("button", { name: "Alpha" }));
+  fireEvent.click(screen.getByRole("button", { name: "More about Alpha" }));
   const panel = await screen.findByRole("region", {
     name: "Shared agent profile",
   });
@@ -1013,7 +1064,9 @@ it("keeps browsing when stars can't load, with starring disabled", async () => {
     name: "Star Alpha, 0 stars",
   });
   expect(star).toBeDisabled();
-  expect(screen.queryByRole("img", { name: /import/ })).toBeNull();
+  expect(
+    screen.getByRole("button", { name: "Import Alpha" }),
+  ).toBeInTheDocument();
 });
 
 it("records an import from the panel once, publicly", async () => {
@@ -1028,7 +1081,9 @@ it("records an import from the panel once, publicly", async () => {
       {...props}
     />,
   );
-  fireEvent.click(await screen.findByRole("button", { name: "Alpha" }));
+  fireEvent.click(
+    await screen.findByRole("button", { name: "More about Alpha" }),
+  );
   const panel = await screen.findByRole("region", {
     name: "Shared agent profile",
   });
@@ -1048,8 +1103,44 @@ it("records an import from the panel once, publicly", async () => {
   );
   // The card counts it at once; the dialog, still open, hides the grid.
   expect(
-    await screen.findByRole("img", { name: "1 import", hidden: true }),
+    await screen.findByRole("button", {
+      name: "Import Alpha, 1 import",
+      hidden: true,
+    }),
   ).toBeInTheDocument();
+});
+
+it("opens the import dialog from a card's import count", async () => {
+  const alpha = listing("Alpha", { owner: "c1".repeat(32) });
+  const writes = outbox();
+  const props = importing();
+  render(
+    <AgentBrowse
+      relay={community(vi.fn().mockResolvedValue([alpha]), directory(), {
+        writes,
+      })}
+      {...props}
+    />,
+  );
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Import Alpha, 0 imports" }),
+  );
+  const dialog = await screen.findByRole("dialog");
+  expect(
+    within(dialog).getByText(
+      /Imports from the Marketplace are counted publicly/,
+    ),
+  ).toBeVisible();
+  expect(
+    screen.queryByRole("region", { name: "Shared agent profile" }),
+  ).toBeNull();
+  fireEvent.click(within(dialog).getByRole("button", { name: "Import" }));
+  await vi.waitFor(() => expect(props.onImported).toHaveBeenCalled());
+  await vi.waitFor(() =>
+    expect(writes.sent).toEqual([
+      expect.objectContaining({ kind: 7, content: "📥" }),
+    ]),
+  );
 });
 
 it("keeps a card in place when you star it, until the list is sorted again", async () => {

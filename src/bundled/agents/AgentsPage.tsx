@@ -836,6 +836,11 @@ export function AgentsPage({
           ) : tab === "marketplace" ? (
             <AgentBrowse
               relay={relay}
+              agents={agents}
+              types={runnable}
+              onImported={leaveListing}
+              onOpen={(agent) => browse(agent.pubkey, leaveListing)}
+              openSettings={openSettings}
               selectedId={shared?.agent.id}
               onSelect={(selection, trigger) => {
                 sharedTrigger.current = trigger;
