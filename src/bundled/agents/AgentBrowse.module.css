@@ -56,6 +56,13 @@
   gap: var(--space-3);
   padding-top: var(--space-8);
 }
+/* Search matches on a card pop like find on screen, not the shared underline. */
+.listing mark {
+  background-color: var(--surface-find-match);
+  color: var(--text-on-find-match);
+  text-decoration: none;
+  box-decoration-break: clone;
+}
 .excerpt {
   display: -webkit-box;
   -webkit-box-orient: vertical;
