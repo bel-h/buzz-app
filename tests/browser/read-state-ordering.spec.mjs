@@ -1,6 +1,6 @@
 import { test, expect } from "./source-fixture.mjs";
 
-test("capture rejects cold or closed storage instead of deferring its reservation", async ({
+test("capture rejects cold or closed storage and reserves synchronously; an early automatic read queues behind startup", async ({
   page,
   context,
   sourceOrigin,
@@ -48,7 +48,7 @@ test("capture rejects cold or closed storage instead of deferring its reservatio
       await owner.read("msg:early", 11, () => true);
       const retried = owner.state().frontiers["msg:early"];
       const captured = store.capture();
-      await store.update((current) => ({ ...current, revision: 2 }));
+      await store.update((current) => ({ ...current, revision: 3 }));
       const before = await captured;
       const after = await store.capture();
       owner.dispose();
@@ -69,11 +69,12 @@ test("capture rejects cold or closed storage instead of deferring its reservatio
   });
   expect(result).toEqual({
     cold: "Read-state storage not ready",
-    early: "Read-state storage not ready",
-    untouched: undefined,
+    // The early read waits for startup and consumes revision 1; the repeat, 2.
+    early: null,
+    untouched: 11,
     retried: 11,
-    before: 1,
-    after: 2,
+    before: 2,
+    after: 3,
     closed: "Read-state storage not ready",
   });
 });

@@ -550,6 +550,20 @@ test("thread buttons show observed unread independently, clear only after readin
     .click();
   await expect(alpha).toBeFocused();
   await page.clock.resume();
+  // The channel mark syncs and forces every reply unread. End only that mark
+  // before reading the threads: their own unread indications must remain.
+  await page.evaluate(() =>
+    window.fixtureRelay
+      .snapshot()
+      .session.unread.clearUnreadLocal({ kind: "channel", channelId: "alpha" }),
+  );
+  await expect(alpha.getByRole("img", { name: /^Marked unread$/ })).toHaveCount(
+    0,
+  );
+  await expect
+    .poll(async () => (await channelUnread(page, "alpha")).threads)
+    .toBe(2);
+  await expect(broadcast).toHaveAccessibleName(/Observed unread replies/);
   const beforeRect = await first.boundingBox();
   await first.hover();
   const afterRect = await first.boundingBox();
