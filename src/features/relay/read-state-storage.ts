@@ -11,6 +11,7 @@ import {
   record,
   slotId,
   uint32,
+  unreadCoordinate,
   type ReadState,
 } from "./read-state-model";
 
@@ -178,7 +179,10 @@ export function readJournal(raw: unknown, viewer: string): ReadJournal {
     contexts[`ov_c:${key}`] = value.clear;
     contexts[`ov_b:${key}`] = value.baseline;
   }
-  const parsed = parseReadBlob({ v: 2, client_id: raw.clientId, contexts });
+  const parsed = parseReadBlob(
+    { v: 2, client_id: raw.clientId, contexts },
+    true,
+  );
   if (
     Object.keys(parsed.state.frontiers).length !==
       Object.keys(raw.state.frontiers).length ||
@@ -249,9 +253,11 @@ export function readJournal(raw: unknown, viewer: string): ReadJournal {
   // An unexpected saved unread shape (an earlier draft) starts a fresh
   // version-2 record rather than stopping startup.
   let unread: UnreadJournal | undefined;
+  let fresh = true;
   if (raw.unread !== undefined)
     try {
       unread = readUnread(raw.unread, [raw.slot, ...(spill as string[])]);
+      fresh = false;
     } catch {
       unread = newUnreadJournal();
     }
@@ -285,7 +291,11 @@ export function readJournal(raw: unknown, viewer: string): ReadJournal {
     )
       throw new Error("Invalid saved read operation");
     const event = eventDto(raw.pending.event);
-    if (
+    // A fresh unread record drops the envelope its discarded slot was sending.
+    if (fresh && unreadCoordinate(event)) {
+      if (event.pubkey !== viewer || event.created_at > raw.lastCreatedAt)
+        throw new Error("Saved read operation identity mismatch");
+    } else if (
       event.pubkey !== viewer ||
       ![
         ...[raw.slot, ...spill].map((slot) => `read-state:${slot}`),
@@ -294,7 +304,7 @@ export function readJournal(raw: unknown, viewer: string): ReadJournal {
       event.created_at > raw.lastCreatedAt
     )
       throw new Error("Saved read operation identity mismatch");
-    pending = { event, revision: raw.pending.revision as number };
+    else pending = { event, revision: raw.pending.revision as number };
   }
   return {
     version: 1,

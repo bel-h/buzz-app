@@ -3501,23 +3501,59 @@ async fn read_state_unread_v2_codec_is_its_own_paired_shape() {
         )
         .await
         .is_err());
-    // Neither cross pair of prefix and tag decodes.
-    for tags in [
-        serde_json::json!([
-            ["d", format!("read-state-unread-v2:{}", "c".repeat(32))],
-            ["t", "read-state"]
-        ]),
-        serde_json::json!([
-            ["d", format!("read-state:{}", "c".repeat(32))],
-            ["t", "read-state-unread-v2"]
-        ]),
-        serde_json::json!([
-            ["d", format!("read-state:{}", "c".repeat(32))],
-            ["t", "read-state"]
-        ]),
+    // Each crossed pairing is validly re-signed with the fixture key, so only
+    // the coordinate, tag and version gate can reject it.
+    let resign = |event: &serde_json::Value, tags: serde_json::Value| {
+        let mut event = event.clone();
+        event["tags"] = tags;
+        let hash = Sha256::digest(
+            serde_json::to_vec(&serde_json::json!([
+                0,
+                event["pubkey"],
+                event["created_at"],
+                event["kind"],
+                event["tags"],
+                event["content"]
+            ]))
+            .unwrap(),
+        );
+        let secp = secp256k1::Secp256k1::new();
+        let keypair = secp256k1::Keypair::from_seckey_byte_array(&secp, [1; 32]).unwrap();
+        event["id"] = format!("{hash:x}").into();
+        event["sig"] = secp
+            .sign_schnorr_no_aux_rand(&hash, &keypair)
+            .to_string()
+            .into();
+        verify(&event);
+        event
+    };
+    let pair = |prefix: &str, tag: &str| {
+        serde_json::json!([["d", format!("{prefix}:{}", "c".repeat(32))], ["t", tag]])
+    };
+    let v1 = host
+        .sign_read_state(
+            "c".repeat(32),
+            now,
+            serde_json::json!({"v":1,"client_id":"fixture","contexts":{"room":1}}),
+        )
+        .await
+        .unwrap();
+    // The re-signer itself yields events that decode under their own pair.
+    for (event, prefix) in [(&signed, "read-state-unread-v2"), (&v1, "read-state")] {
+        let same = resign(event, pair(prefix, prefix));
+        assert!(host.decode_read_state(vec![same]).await.is_ok());
+    }
+    for (event, prefix, tag) in [
+        // A version-2 blob under a crossed pair, or the version-1 pair.
+        (&signed, "read-state-unread-v2", "read-state"),
+        (&signed, "read-state", "read-state-unread-v2"),
+        (&signed, "read-state", "read-state"),
+        // A version-1 blob under a crossed pair, or the version-2 pair.
+        (&v1, "read-state", "read-state-unread-v2"),
+        (&v1, "read-state-unread-v2", "read-state"),
+        (&v1, "read-state-unread-v2", "read-state-unread-v2"),
     ] {
-        let mut crossed = signed.clone();
-        crossed["tags"] = tags;
+        let crossed = resign(event, pair(prefix, tag));
         assert!(host.decode_read_state(vec![crossed]).await.is_err());
     }
 }

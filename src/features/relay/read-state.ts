@@ -1450,7 +1450,16 @@ export function createReadState({
     }
     return queue(async () => {
       try {
-        await save((current) => current);
+        // A released group is new publishable intent: one pass sends it.
+        let released = false;
+        await save((current) => {
+          released =
+            heldCount(settleUnread(current, now())) < heldCount(current);
+          return released
+            ? { ...current, revision: current.revision + 1 }
+            : current;
+        });
+        if (released) schedule();
       } catch (error) {
         health({ status: "error", error: errorText(error) });
         armUpkeep(60);

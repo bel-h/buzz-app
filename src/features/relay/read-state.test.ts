@@ -2628,6 +2628,35 @@ describe("expiring unread (version 2)", () => {
     expect(active(owner)).toBe(true);
   });
 
+  it("a released group schedules one publish pass that sends it", async () => {
+    const f = fixture(T);
+    f.addRemote(
+      await peerUnreadMarker(f, "far", 0, {
+        createdAt: T,
+        set: T + 661,
+        slot: "c".repeat(32),
+        clientId: "far",
+      }),
+    );
+    const owner = complete(f, { debounceMs: 10 });
+    await owner.ready;
+    await owner.refresh();
+    await owner.flush();
+    expect(f.unread()).toBeUndefined();
+    f.setNow(T + 1);
+    await owner.upkeep();
+    expect(held(f)).toEqual({});
+    // No explicit flush: the release itself starts the send.
+    await vi.waitFor(() =>
+      expect(f.unread()).toEqual({
+        far: 0,
+        "ov_s:far": T + 661,
+        "ov_c:far": 0,
+        "ov_b:far": 0,
+      }),
+    );
+  });
+
   it("a held group from a repeated delivery is kept once", async () => {
     const f = fixture(T);
     const far = await peerUnreadMarker(f, "far", 0, {
@@ -2681,9 +2710,18 @@ describe("expiring unread (version 2)", () => {
     let owner = await started(f);
     expect(held(f).far).toEqual([[T + 700, 0, old - 10, old]]);
     owner.dispose();
-    f.setNow(T + 100);
+    // Retention while held: a local floor past the old read position drops
+    // the ordinary frontier, so only the held entry still carries it.
+    await f.storage.update((current) => ({
+      ...(current as ReadJournal),
+      floor: old + 1,
+    }));
     owner = complete(f);
     await owner.ready;
+    await owner.read("room", T, () => true, true);
+    expect(f.journal()?.state.frontiers.far).toBeUndefined();
+    expect(held(f).far).toHaveLength(1);
+    f.setNow(T + 100);
     await owner.upkeep();
     // Read past its baseline: dead, not unread again.
     expect(active(owner, "far")).toBe(false);
@@ -2803,6 +2841,7 @@ describe("expiring unread (version 2)", () => {
 });
 
 describe("saved expiring unread journal", () => {
+  const T2 = 1800000000;
   it("an unexpected saved unread shape starts a fresh record instead of stopping startup", () => {
     const key = keypair();
     const journal = readJournal(
@@ -2814,6 +2853,72 @@ describe("saved expiring unread journal", () => {
     );
     expect(journal.unread).toMatchObject({ watermark: 0, held: {} });
     expect(journal.unread?.slot).toMatch(/^[0-9a-f]{32}$/);
+  });
+  it("an unexpected saved unread shape drops the envelope its old slot was sending", () => {
+    const key = keypair();
+    const old = "a".repeat(32);
+    const event = eventDto(
+      finalizeEvent(
+        {
+          kind: 30078,
+          created_at: 5,
+          tags: [
+            ["d", `read-state-unread-v2:${old}`],
+            ["t", "read-state-unread-v2"],
+          ],
+          content: "x",
+        },
+        key.secret,
+      ),
+    );
+    const journal = readJournal(
+      {
+        ...newReadJournal(),
+        revision: 1,
+        lastCreatedAt: 5,
+        unread: { slot: old, held: { room: { s: 1 } }, watermark: "x" },
+        pending: { event, revision: 1 },
+      },
+      key.pubkey,
+    );
+    expect(journal.pending).toBeUndefined();
+    expect(journal.unread?.slot).not.toBe(old);
+  });
+  it("a version-2 record from another device ignores unpaired groups and stray read positions", async () => {
+    const f = fixture(T2);
+    f.addRemote(
+      await signReadState(
+        {
+          slot: "b".repeat(32),
+          createdAt: T2,
+          blob: {
+            v: 2,
+            client_id: "peer",
+            contexts: {
+              stray: T2,
+              "ov_s:loose": T2,
+              "ov_c:loose": 0,
+              "ov_b:loose": 0,
+              side: 0,
+              "ov_s:side": T2,
+              "ov_c:side": 0,
+              "ov_b:side": 0,
+            },
+          },
+        },
+        f.key.secret,
+        T2,
+      ),
+    );
+    const owner = f.make({
+      host: { ...f.host, communityId: "test-community" },
+      reader: { ...f.reader, readStateSnapshot: () => f.reader.read() },
+    });
+    await owner.ready;
+    await owner.refresh();
+    expect(owner.state().frontiers.stray).toBeUndefined();
+    expect(owner.state().overrides.loose).toBeUndefined();
+    expect(owner.state().overrides.side?.set).toBe(T2);
   });
   it("a journal from before version 2 keeps read positions and imports no marks", () => {
     const key = keypair();

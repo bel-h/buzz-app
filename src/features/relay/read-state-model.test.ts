@@ -14,7 +14,10 @@ import {
   unreadStamp,
 } from "./read-state-model";
 
+// Aggregate (journal) parsing: frontiers and groups without wire pairing.
 const parse = (contexts: Record<string, unknown>) =>
+  parseReadBlob({ v: 2, client_id: "test", contexts }, true).state;
+const wire = (contexts: Record<string, unknown>) =>
   parseReadBlob({ v: 2, client_id: "test", contexts }).state;
 describe("NIP-RS read-state algebra", () => {
   it("is commutative, associative and idempotent across frontier and override replays", () => {
@@ -105,6 +108,41 @@ describe("NIP-RS read-state algebra", () => {
       clear: 0,
       baseline: 4,
     });
+  });
+  it.each([
+    [
+      "a group with no frontier",
+      { "ov_s:room": 3, "ov_c:room": 0, "ov_b:room": 4 },
+    ],
+    [
+      "a group with an invalid frontier",
+      { room: -1, "ov_s:room": 3, "ov_c:room": 0, "ov_b:room": 4 },
+    ],
+    ["a frontier-only entry", { other: 9 }],
+    [
+      "a non-channel group",
+      {
+        "thread:x": 2,
+        "ov_s:thread:x": 3,
+        "ov_c:thread:x": 0,
+        "ov_b:thread:x": 2,
+      },
+    ],
+  ])("a version-2 record drops %s", (_name, extra) => {
+    const paired = { side: 0, "ov_s:side": 5, "ov_c:side": 0, "ov_b:side": 0 };
+    expect(wire({ ...paired, ...extra })).toEqual({
+      frontiers: { side: 0 },
+      overrides: { side: { set: 5, clear: 0, baseline: 0 } },
+    });
+  });
+  it("a version-2 record keeps a tombstone with its paired frontier, and version 1 keeps frontiers", () => {
+    expect(wire({ room: 7, "ov_c:room": 3, other: 9 })).toEqual({
+      frontiers: { room: 7 },
+      overrides: { room: { set: 0, clear: 3, baseline: 0 } },
+    });
+    expect(
+      parseReadBlob({ v: 1, client_id: "a", contexts: { other: 9 } }).state,
+    ).toEqual({ frontiers: { other: 9 }, overrides: {} });
   });
   it("escapes reserved IDs once and accepts prototype-looking IDs as ordinary data", () => {
     const state = parse(

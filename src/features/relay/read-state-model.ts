@@ -123,8 +123,12 @@ export function unreadCoordinate(
 }
 export const UNREAD_TAG = "read-state-unread-v2";
 
-/** Groups override siblings BEFORE invalid-entry dropping. Unknown versions fail closed. */
-export function parseReadBlob(raw: unknown): ParsedReadBlob {
+/**
+ * Groups override siblings BEFORE invalid-entry dropping. Unknown versions fail closed.
+ * A version-2 wire record keeps only complete channel groups with their own
+ * valid paired frontier (0 included); `journal` hydrates saved state instead.
+ */
+export function parseReadBlob(raw: unknown, journal = false): ParsedReadBlob {
   if (
     !record(raw) ||
     (raw.v !== 1 && raw.v !== 2) ||
@@ -178,6 +182,15 @@ export function parseReadBlob(raw: unknown): ParsedReadBlob {
   }
   // Version-1 override keys are never imported, merged or carried.
   if (raw.v === 1) overrides.clear();
+  else if (!journal) {
+    const contexts = raw.contexts;
+    frontiers.clear();
+    for (const key of [...overrides.keys()]) {
+      const frontier = contexts[key];
+      if (channelContext(key) && uint32(frontier)) frontiers.set(key, frontier);
+      else overrides.delete(key);
+    }
+  }
   return Object.freeze({
     clientId: raw.client_id,
     version: raw.v,
