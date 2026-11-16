@@ -49,6 +49,7 @@ import { createUpdates } from "../features/updates/updates";
 import { PanelsService } from "../features/panels/service";
 import { BackdropsService } from "../features/backdrops/service";
 import { SubjectLiftService } from "../features/messages/subject-lift";
+import { pluginUi } from "../features/plugin-ui/service";
 import { Context } from "@deepseek-ai/cordis";
 import { BrowserService } from "../features/browser/service";
 import { PagesService } from "../features/pages/service";
@@ -112,6 +113,7 @@ export function createServices() {
   const panels = new PanelsService(ctx);
   const backdrops = new BackdropsService(ctx);
   new SubjectLiftService(ctx);
+  ctx.provide("ui", pluginUi);
   const accountActions = new AccountActionsService(ctx);
   const conversation = new ConversationService(ctx);
   const settingsCards = new SettingsCardsService(ctx);
