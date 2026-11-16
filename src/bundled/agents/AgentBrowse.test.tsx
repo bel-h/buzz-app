@@ -1110,6 +1110,33 @@ it("records an import from the panel once, publicly", async () => {
   ).toBeInTheDocument();
 });
 
+it("marks search matches after an emoji on the right letters", async () => {
+  render(
+    <AgentBrowse
+      relay={community(
+        vi
+          .fn()
+          .mockResolvedValue([
+            listing("Reviewer", { instructions: "🤖🤖 You review code." }),
+          ]),
+        directory(),
+      )}
+      {...importing()}
+    />,
+  );
+  await screen.findByText("Reviewer");
+  const user = userEvent.setup();
+  await user.type(
+    screen.getByRole("searchbox", { name: "Search agents" }),
+    "review",
+  );
+  await vi.waitFor(() =>
+    expect(
+      [...document.querySelectorAll("mark")].map((mark) => mark.textContent),
+    ).toEqual(["Review", "review"]),
+  );
+});
+
 it("opens the import dialog from a card's import count", async () => {
   const alpha = listing("Alpha", { owner: "c1".repeat(32) });
   const writes = outbox();

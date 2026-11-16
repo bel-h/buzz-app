@@ -477,18 +477,18 @@ function SharedAgentList({
   );
 }
 
-/** `text` with every occurrence of each search word underlined. */
+/** `text` with every occurrence of each search word marked. MatchedLabel
+ * counts code points, so matching does too: an emoji before a match must not
+ * shift the mark. */
 function Matched({ text, words }: { text: string; words: readonly string[] }) {
-  const lower = text.toLowerCase();
+  const chars = [...text].map((char) => char.toLowerCase());
   const positions: number[] = [];
-  for (const word of words)
-    for (
-      let at = lower.indexOf(word);
-      at !== -1;
-      at = lower.indexOf(word, at + 1)
-    )
-      for (let index = at; index < at + word.length; index++)
-        positions.push(index);
+  for (const word of words) {
+    const want = [...word];
+    for (let at = 0; at + want.length <= chars.length; at++)
+      if (want.every((char, k) => chars[at + k] === char))
+        for (let k = 0; k < want.length; k++) positions.push(at + k);
+  }
   return <MatchedLabel label={text} positions={positions} />;
 }
 
