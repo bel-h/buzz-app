@@ -758,7 +758,7 @@ export function createReadState({
       // Without a complete load the mark stays on this device, labelled so.
       if (!channelContext(key) || snapshot.completeness !== "snapshot") return;
       next = changeOverride(next, key, true, frontier(next, key) ?? 0);
-      groupBlob(current.clientId, next, (ctx) => frontier(next, ctx));
+      groupBlob(current.clientId, next.overrides, (ctx) => frontier(next, ctx));
       return next;
     }
     for (const ctx of new Set([key, ...clearKeys]))
@@ -771,7 +771,7 @@ export function createReadState({
     // A clear the primary cannot carry stays unsynced: the read itself still
     // advances, and the failure shows in the sync notice.
     try {
-      groupBlob(current.clientId, next, (ctx) => frontier(next, ctx));
+      groupBlob(current.clientId, next.overrides, (ctx) => frontier(next, ctx));
     } catch {
       blockedClear = "Channel mark read cannot be synchronized";
       return;
@@ -970,11 +970,7 @@ export function createReadState({
           const merged = localState(journal);
           const { clientId } = journal;
           const primary = (overrides: ReadState["overrides"]) =>
-            groupBlob(
-              clientId,
-              { frontiers: ownFrontiers, overrides },
-              (key) => merged.frontiers[key],
-            );
+            groupBlob(clientId, overrides, (key) => merged.frontiers[key]);
           // When the merged groups overfill the primary, republish the last
           // published groups, compacted against current frontiers so they can
           // only shrink: frontiers still publish, and override actions fail

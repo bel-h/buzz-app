@@ -285,20 +285,19 @@ export function readBlob(
     );
   return blob;
 }
-/** The primary's override part: every channel group and its own frontier,
- * which travel together. Throws when they cannot fit in one blob. */
+/** The primary's override part: every channel group with its merged stored
+ * frontier (0 when never read), which travel together whether or not this
+ * installation owns that frontier. Throws when they cannot fit in one blob. */
 export function groupBlob(
   clientId: string,
-  state: ReadState,
+  groups: ReadState["overrides"],
   frontier: (key: string) => number | undefined,
 ): ReadBlob {
   const overrides = Object.fromEntries(
-    Object.entries(state.overrides).filter(([key]) => channelContext(key)),
+    Object.entries(groups).filter(([key]) => channelContext(key)),
   );
   const frontiers = Object.fromEntries(
-    Object.keys(overrides).flatMap((key) =>
-      state.frontiers[key] === undefined ? [] : [[key, state.frontiers[key]]],
-    ),
+    Object.keys(overrides).map((key) => [key, frontier(key) ?? 0]),
   );
   return readBlob(clientId, { frontiers, overrides }, frontier);
 }
@@ -334,14 +333,12 @@ export function packReadState(
     const first = bins[0];
     if (!first) throw new Error("Read-state primary slot missing");
     first.used = bytes(JSON.stringify(primary));
-    for (const key of Object.keys(primary.contexts))
-      if (
-        !key.startsWith("ov_") &&
-        frontiers[unescapeContext(key)] !== undefined
-      ) {
+    // Each group's paired frontier stays in the primary, own or not.
+    for (const [key, value] of Object.entries(primary.contexts))
+      if (!key.startsWith("ov_")) {
         const id = unescapeContext(key);
         pinned.add(id);
-        first.frontiers[id] = frontiers[id] as number;
+        first.frontiers[id] = Math.max(value, frontiers[id] ?? 0);
       }
   }
   const home = new Map<string, number>();

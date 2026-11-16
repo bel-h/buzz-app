@@ -2183,6 +2183,51 @@ describe("publication fences", () => {
     });
   }, 30000);
 
+  it("publishes every channel group with its merged stored frontier, own or not", async () => {
+    const old = T - 31 * 24 * 60 * 60;
+    const cases = [
+      { key: "fresh", frontier: 0 },
+      { key: "peer", peers: true, frontier: T - 100 },
+      {
+        key: "stale",
+        setup: async (owner: ReturnType<ReturnType<typeof snapshotted>>) =>
+          owner.read("stale", old, () => true),
+        frontier: old,
+      },
+    ];
+    for (const { key, setup, peers, frontier } of cases) {
+      const f = fixture(T);
+      const peer = peers
+        ? [
+            await signReadState(
+              {
+                slot: "b".repeat(32),
+                createdAt: T,
+                blob: { v: 1, client_id: "peer", contexts: { peer: T - 100 } },
+              },
+              f.key.secret,
+              T,
+            ),
+          ]
+        : [];
+      const owner = snapshotted(f, peer)();
+      await owner.ready;
+      await owner.refresh();
+      await setup?.(owner);
+      await owner.markLocalUnread(key, () => true);
+      await owner.flush();
+      expect(ownerStatus(owner)).toBe("reconciled");
+      // The final signed plaintext of this device's primary.
+      const [primary] = Object.values(f.own());
+      expect(primary).toMatchObject({
+        [key]: frontier,
+        [`ov_s:${key}`]: 1,
+        [`ov_c:${key}`]: 0,
+        [`ov_b:${key}`]: frontier,
+      });
+    }
+  }, 30000);
+
   it("takes a complete snapshot before the first send, and again after a gap", async () => {
     const f = fixture(T);
     const full = snapshotted(f, foreign(f.key.pubkey, READ_SNAPSHOT_EVENTS))();
