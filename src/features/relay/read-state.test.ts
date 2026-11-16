@@ -108,6 +108,13 @@ function fixture(now = 100) {
           ]),
       );
     },
+    /** This device's own version-2 unread contexts, if published. */
+    unread: (): Record<string, number> | undefined => {
+      const d = (item: RelayEvent) => item.tags.find(([n]) => n === "d")?.[1];
+      const at = `read-state-unread-v2:${journal?.unread?.slot}`;
+      const event = remote.find((item) => d(item) === at);
+      return event && decodeReadState([event], key.secret)[0].blob.contexts;
+    },
     addRemote: (event: RelayEvent) => {
       remote = [...remote, event];
     },
@@ -126,11 +133,17 @@ function peerUnreadMarker(
   key: string,
   baseline = 0,
   {
-    set = 1,
-    clear = 0,
     createdAt = 100,
+    set = createdAt,
+    clear = 0,
     slot = "b".repeat(32),
     clientId = "peer",
+  }: {
+    createdAt?: number;
+    set?: number;
+    clear?: number;
+    slot?: string;
+    clientId?: string;
   } = {},
 ) {
   return signReadState(
@@ -138,9 +151,10 @@ function peerUnreadMarker(
       slot,
       createdAt,
       blob: {
-        v: 1,
+        v: 2,
         client_id: clientId,
         contexts: {
+          [key]: 0,
           [`ov_s:${key}`]: set,
           [`ov_c:${key}`]: clear,
           [`ov_b:${key}`]: baseline,
@@ -1783,7 +1797,8 @@ describe("NIP-RS shared vectors: owner", () => {
     await owner.ready;
     await owner.refresh();
     expect(owner.state().frontiers).toEqual(v?.frontiers);
-    expect(owner.state().overrides.side).toBeDefined();
+    // A version-1 group is never imported (version-2 unread state only).
+    expect(owner.state().overrides.side).toBeUndefined();
     // Full-state loads never use `since`: an old carrier is still current.
     for (const [filters] of f.reader.read.mock.calls as unknown as [
       Record<string, unknown>[],
@@ -2141,10 +2156,12 @@ describe("publication fences", () => {
     expect(ownerStatus(owner)).toBe("reconciled");
     const [primary] = Object.values(f.own());
     expect(primary?.room).toBe(T);
-    // Last published groups (none), never a truncated merged set.
+    // Version 1 never carries groups; version 2 keeps the last published
+    // groups (none), never a truncated merged set.
     expect(
       Object.keys(primary ?? {}).some((key) => key.startsWith("ov_")),
     ).toBe(false);
+    expect(f.unread()).toBeUndefined();
     await expect(owner.markLocalUnread("other", () => true)).rejects.toThrow(
       "capacity reached",
     );
@@ -2160,7 +2177,7 @@ describe("publication fences", () => {
       "pending",
     );
     await owner.flush();
-    const live = () => Object.values(f.own())[0]?.["ov_s:room"];
+    const live = () => f.unread()?.["ov_s:room"];
     expect(live()).toBeDefined();
     // Peer groups now overfill the primary.
     for (let n = 0; n < 150; n++)
@@ -2217,11 +2234,10 @@ describe("publication fences", () => {
       await owner.markLocalUnread(key, () => true);
       await owner.flush();
       expect(ownerStatus(owner)).toBe("reconciled");
-      // The final signed plaintext of this device's primary.
-      const [primary] = Object.values(f.own());
-      expect(primary).toMatchObject({
+      // The final signed plaintext of this device's version-2 record.
+      expect(f.unread()).toEqual({
         [key]: frontier,
-        [`ov_s:${key}`]: 1,
+        [`ov_s:${key}`]: T,
         [`ov_c:${key}`]: 0,
         [`ov_b:${key}`]: frontier,
       });
@@ -2494,5 +2510,324 @@ describe("resume after a continuous membership replay", () => {
     expect(f.reader.read).toHaveBeenCalledTimes(2);
     expect(owner.state().frontiers.room).toBe(12);
     expect(owner.snapshot().status).toBe("reconciled");
+  });
+});
+
+describe("expiring unread (version 2)", () => {
+  const T = 1800000000;
+  const H = 30 * 24 * 60 * 60;
+  const complete = (
+    f: ReturnType<typeof fixture>,
+    overrides: Parameters<typeof f.make>[0] = {},
+  ) =>
+    f.make({
+      host: { ...f.host, communityId: "test-community" },
+      reader: { ...f.reader, readStateSnapshot: () => f.reader.read() },
+      ...overrides,
+    });
+  async function started(f: ReturnType<typeof fixture>) {
+    const owner = complete(f);
+    await owner.ready;
+    await owner.refresh();
+    return owner;
+  }
+  const active = (owner: ReturnType<typeof createReadState>, key = "room") => {
+    const group = owner.state().overrides[key];
+    return !!group && group.set > group.clear;
+  };
+  const held = (f: ReturnType<typeof fixture>) =>
+    f.journal()?.unread?.held ?? {};
+
+  it("stamps a mark with now, publishes it in its own record, and expires it one second past the lifetime", async () => {
+    const f = fixture(T);
+    const owner = await started(f);
+    await owner.markLocalUnread("room", () => true);
+    await owner.flush();
+    expect(f.unread()).toEqual({
+      room: 0,
+      "ov_s:room": T,
+      "ov_c:room": 0,
+      "ov_b:room": 0,
+    });
+    // Version 1 carries only read positions.
+    for (const contexts of Object.values(f.own()))
+      expect(Object.keys(contexts).some((k) => k.startsWith("ov_"))).toBe(
+        false,
+      );
+    f.setNow(T + H);
+    await owner.upkeep();
+    expect(active(owner)).toBe(true);
+    f.setNow(T + H + 1);
+    await owner.upkeep();
+    expect(active(owner)).toBe(false);
+    // Saved: the durable watermark moved with expiry.
+    expect(f.journal()?.unread?.watermark).toBe(T + H + 1);
+    expect(f.journal()?.state.overrides.room).toEqual({
+      set: 0,
+      clear: T,
+      baseline: 0,
+    });
+  });
+
+  it("keeps a tombstone through the discard guard and drops it one second later, across restarts", async () => {
+    const f = fixture(T);
+    let owner = await started(f);
+    await owner.markLocalUnread("room", () => true);
+    f.setNow(T + 1);
+    await owner.read("room", T + 1, () => true, true);
+    // Read past its baseline: dead at K = max(S, C), with no new stamp.
+    expect(f.journal()?.state.overrides.room).toEqual({
+      set: 0,
+      clear: T,
+      baseline: 0,
+    });
+    owner.dispose();
+    f.setNow(T + H + 600);
+    owner = complete(f);
+    await owner.ready;
+    expect(f.journal()?.state.overrides.room).toBeDefined();
+    owner.dispose();
+    f.setNow(T + H + 601);
+    owner = complete(f);
+    await owner.ready;
+    expect(f.journal()?.state.overrides.room).toBeUndefined();
+  });
+
+  it("refuses a stamp more than 60 s ahead and holds back a group more than 660 s ahead", async () => {
+    const f = fixture(T);
+    f.addRemote(
+      await peerUnreadMarker(f, "ahead", 0, {
+        createdAt: T,
+        clear: T + 60,
+        set: 0,
+      }),
+    );
+    f.addRemote(
+      await peerUnreadMarker(f, "far", 0, {
+        createdAt: T,
+        set: T + 661,
+        slot: "c".repeat(32),
+        clientId: "far",
+      }),
+    );
+    const owner = await started(f);
+    // Merged at 60 s ahead: a mark would need a stamp past now + 60.
+    expect(owner.state().overrides.ahead?.clear).toBe(T + 60);
+    // Held back, and never merged or shown while held.
+    expect(owner.state().overrides.far).toBeUndefined();
+    expect(held(f).far).toEqual([[T + 661, 0, 0, 0]]);
+    await expect(owner.markLocalUnread("room", () => true)).rejects.toThrow(
+      "ahead of this clock",
+    );
+    // The clock catches up: the group merges, and marks work again.
+    f.setNow(T + 1);
+    await owner.upkeep();
+    expect(held(f)).toEqual({});
+    expect(active(owner, "far")).toBe(true);
+    await owner.markLocalUnread("room", () => true);
+    expect(active(owner)).toBe(true);
+  });
+
+  it("a held group from a repeated delivery is kept once", async () => {
+    const f = fixture(T);
+    const far = await peerUnreadMarker(f, "far", 0, {
+      createdAt: T,
+      set: T + 700,
+    });
+    f.addRemote(far);
+    const owner = await started(f);
+    owner.accept([far]);
+    await owner.refresh();
+    expect(held(f).far).toHaveLength(1);
+  });
+
+  it("a held incoming group gets the incoming cutoff, not the local discard guard", async () => {
+    const f = fixture(T);
+    f.addRemote(
+      await peerUnreadMarker(f, "far", 5, { createdAt: T, set: T + 700 }),
+    );
+    const owner = await started(f);
+    expect(held(f).far).toHaveLength(1);
+    // Past the lifetime but inside the guard a local tombstone would get.
+    f.setNow(T + 700 + H + 300);
+    await owner.upkeep();
+    expect(held(f)).toEqual({});
+    expect(f.journal()?.state.overrides.far).toBeUndefined();
+  });
+
+  it("a held group keeps its old read position across a restart", async () => {
+    const f = fixture(T);
+    const old = T - 40 * 24 * 60 * 60;
+    f.addRemote(
+      await signReadState(
+        {
+          slot: "b".repeat(32),
+          createdAt: T,
+          blob: {
+            v: 2,
+            client_id: "peer",
+            contexts: {
+              far: old,
+              "ov_s:far": T + 700,
+              "ov_c:far": 0,
+              "ov_b:far": old - 10,
+            },
+          },
+        },
+        f.key.secret,
+        T,
+      ),
+    );
+    let owner = await started(f);
+    expect(held(f).far).toEqual([[T + 700, 0, old - 10, old]]);
+    owner.dispose();
+    f.setNow(T + 100);
+    owner = complete(f);
+    await owner.ready;
+    await owner.upkeep();
+    // Read past its baseline: dead, not unread again.
+    expect(active(owner, "far")).toBe(false);
+    expect(f.journal()?.state.overrides.far).toEqual({
+      set: 0,
+      clear: T + 700,
+      baseline: 0,
+    });
+  });
+
+  it("a failed expiry save stays due, idle upkeep saves it, and a clock rollback after restart cannot revive the mark", async () => {
+    const f = fixture(T);
+    let owner = await started(f);
+    await owner.markLocalUnread("room", () => true);
+    const update = vi.mocked(f.storage.update).getMockImplementation();
+    if (!update) throw new Error("Missing fixture storage");
+    const saved = f.journal()?.unread?.watermark;
+    vi.mocked(f.storage.update).mockRejectedValueOnce(new Error("disk full"));
+    f.setNow(T + H + 1);
+    await owner.upkeep();
+    // Shown expired at once; the saved watermark did not move.
+    expect(active(owner)).toBe(false);
+    expect(f.journal()?.unread?.watermark).toBe(saved);
+    expect(saved).toBeLessThan(T + H + 1);
+    await owner.upkeep();
+    expect(f.journal()?.unread?.watermark).toBe(T + H + 1);
+    owner.dispose();
+    f.setNow(T + H - 100);
+    owner = complete(f);
+    await owner.ready;
+    expect(active(owner)).toBe(false);
+  });
+
+  it("a pending unread record is not retried while a group is held back", async () => {
+    const f = fixture(T);
+    const owner = await started(f);
+    await owner.markLocalUnread("room", () => true);
+    f.host.publish.mockRejectedValueOnce(new Error("response lost"));
+    await owner.flush();
+    const pending = f.journal()?.pending?.event;
+    expect(pending?.tags[0]?.[1]).toMatch(/^read-state-unread-v2:/);
+    const far = await peerUnreadMarker(f, "far", 0, {
+      createdAt: T,
+      set: T + 700,
+      slot: "c".repeat(32),
+      clientId: "far",
+    });
+    owner.accept([far]);
+    await owner.refresh();
+    f.host.publish.mockClear();
+    await owner.flush();
+    expect(f.host.publish).not.toHaveBeenCalled();
+    expect(f.journal()?.pending?.event).toEqual(pending);
+    expect(owner.snapshot().status).toBe("error");
+    // Released: the exact saved bytes go out, never re-stamped.
+    f.setNow(T + 100);
+    await owner.upkeep();
+    await owner.flush();
+    expect(f.host.publish).toHaveBeenCalledWith(pending, expect.anything());
+  });
+
+  it("a group admitted during signing refuses that send, and the next pass rebuilds it without re-stamping", async () => {
+    const f = fixture(T);
+    const owner = await started(f);
+    await owner.markLocalUnread("room", () => true);
+    const sign = f.host.sign.getMockImplementation();
+    let injected = false;
+    f.host.sign.mockImplementation(async (intent) => {
+      if (intent.blob.v === 2 && !injected) {
+        injected = true;
+        // Another window admits a peer group into the shared journal.
+        const current = f.journal();
+        if (!current) throw new Error("Missing journal");
+        f.setJournal({
+          ...current,
+          state: {
+            ...current.state,
+            overrides: {
+              ...current.state.overrides,
+              peer: { set: T - 5, clear: 0, baseline: 0 },
+            },
+          },
+        });
+      }
+      return sign?.(intent) as ReturnType<NonNullable<typeof sign>>;
+    });
+    await owner.flush();
+    expect(f.unread()).toBeUndefined();
+    expect(f.journal()?.pending).toBeUndefined();
+    await owner.flush();
+    expect(f.unread()).toMatchObject({ "ov_s:room": T, "ov_s:peer": T - 5 });
+  });
+
+  it("a clear refused while a group is held back shows the notice, even once local", async () => {
+    const f = fixture(T);
+    const owner = await started(f);
+    await owner.read("room", T - 10, () => true);
+    await owner.markLocalUnread("room", () => true);
+    await owner.flush();
+    f.addRemote(
+      await peerUnreadMarker(f, "far", 0, {
+        createdAt: T,
+        set: T + 700,
+        slot: "c".repeat(32),
+        clientId: "far",
+      }),
+    );
+    await owner.refresh();
+    // Nothing new to read: only the clear would end the group.
+    await owner.read("room", T - 10, () => true, true);
+    expect(owner.snapshot()).toMatchObject({
+      status: "error",
+      error: expect.stringContaining("ahead of this clock"),
+    });
+    expect(active(owner)).toBe(true);
+  });
+});
+
+describe("saved expiring unread journal", () => {
+  it("an unexpected saved unread shape starts a fresh record instead of stopping startup", () => {
+    const key = keypair();
+    const journal = readJournal(
+      {
+        ...newReadJournal(),
+        unread: { held: { room: { s: 1 } }, watermark: "x" },
+      },
+      key.pubkey,
+    );
+    expect(journal.unread).toMatchObject({ watermark: 0, held: {} });
+    expect(journal.unread?.slot).toMatch(/^[0-9a-f]{32}$/);
+  });
+  it("a journal from before version 2 keeps read positions and imports no marks", () => {
+    const key = keypair();
+    const { unread: _unread, ...old } = newReadJournal();
+    const journal = readJournal(
+      {
+        ...old,
+        state: {
+          frontiers: { room: 5 },
+          overrides: { room: { set: 2, clear: 0, baseline: 5 } },
+        },
+      },
+      key.pubkey,
+    );
+    expect(journal.state).toEqual({ frontiers: { room: 5 }, overrides: {} });
   });
 });

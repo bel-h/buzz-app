@@ -17,24 +17,33 @@ import {
   packReadState,
   parseReadBlob,
   readBlob,
-  groupBlob,
   readCoordinate,
+  unreadActive,
+  unreadBlob,
+  unreadGroups,
+  unreadReceive,
+  unreadStamp,
+  unreadCoordinate as unreadCoordinateOf,
+  UNREAD_DEFER_AHEAD,
+  UNREAD_LIFETIME,
+  UNREAD_TAG,
   readVersion,
   READ_RETENTION_SECONDS,
   READ_STATE_SLOTS,
   contextId,
   channelContext,
   channelGroups,
-  changeOverride,
-  overrideActive,
   uint32,
   type ReadBlob,
   type ReadState,
   type ParsedReadBlob,
 } from "./read-state-model";
 import {
+  HELD_GROUPS_PER_KEY,
   newReadJournal,
   newSlotId,
+  newUnreadJournal,
+  type HeldGroup,
   type ReadJournal,
   type ReadStateStorage,
 } from "./read-state-storage";
@@ -92,6 +101,10 @@ const dTag = (event: RelayEvent) =>
   event.tags.find(([name]) => name === "d")?.[1] ?? "";
 const errorText = (error: unknown) =>
   error instanceof Error ? error.message : "Read state unavailable";
+const UNREAD_HELD =
+  "Unread state from another device is ahead of this clock; marks wait for it";
+const UNREAD_STALE = "Unread state changed while publishing; retrying";
+const UNREAD_CLOCK = "Unread state is ahead of this clock; try again shortly";
 /** The reader left before the save ran: the caller's intent, not sync health. */
 class ObservationExpired extends Error {
   constructor() {
@@ -124,8 +137,13 @@ const same = (a: unknown, b: unknown): boolean => {
     )
   );
 };
-/** Reserve and journal are disjoint; only own values are published. */
-const localState = (journal: ReadJournal): ReadState => {
+/** The expiry clock: a clock rollback never revives a mark a save expired. */
+const unreadClock = (journal: ReadJournal, now: number) =>
+  Math.max(now, journal.unread?.watermark ?? 0);
+/** Reserve and journal are disjoint; only own values are published. Unread
+ * groups are shown expired and canonical at the expiry clock, so display
+ * never waits for a save. */
+const localState = (journal: ReadJournal, now: number): ReadState => {
   const frontiers: Record<string, number> = {
     ...journal.reserve,
     ...journal.state.frontiers,
@@ -134,9 +152,76 @@ const localState = (journal: ReadJournal): ReadState => {
     frontiers[key] = Math.max(frontiers[key] ?? 0, value);
   return Object.freeze({
     frontiers: Object.freeze(frontiers),
-    overrides: journal.state.overrides,
+    overrides: unreadGroups(
+      journal.state.overrides,
+      (key) => frontiers[key],
+      unreadClock(journal, now),
+    ),
   });
 };
+const heldCount = (journal: ReadJournal | undefined) =>
+  Object.keys(journal?.unread?.held ?? {}).length;
+/** Every save: resolve held groups the clock has reached (incoming cutoff
+ * first, so a stale baseline never merges), expire and drop accepted groups
+ * at the expiry clock (discard guard), and advance the durable watermark. */
+function settleUnread(journal: ReadJournal, now: number): ReadJournal {
+  const unread = journal.unread ?? newUnreadJournal();
+  const clock = Math.max(now, unread.watermark);
+  const held: Record<string, readonly HeldGroup[]> = {};
+  const overrides: Record<string, ReadState["overrides"][string]> = {};
+  const frontiers: Record<string, number> = {};
+  for (const [key, groups] of Object.entries(unread.held)) {
+    const waiting = groups.filter((group) => {
+      const [set, clear, baseline, frontier] = group;
+      const value = { set, clear, baseline };
+      const verdict = unreadReceive(value, now);
+      if (verdict === "defer") return true;
+      // Its read position is not a stamp: it always merges.
+      frontiers[key] = Math.max(frontiers[key] ?? 0, frontier);
+      if (verdict === "merge") {
+        const old = overrides[key];
+        overrides[key] = {
+          set: Math.max(old?.set ?? 0, set),
+          clear: Math.max(old?.clear ?? 0, clear),
+          baseline: Math.max(old?.baseline ?? 0, baseline),
+        };
+      }
+      return false;
+    });
+    if (waiting.length) held[key] = waiting;
+  }
+  const merged = mergeReadStates(journal.state, {
+    frontiers,
+    overrides,
+  });
+  const visible = localState({ ...journal, state: merged }, clock);
+  const state = Object.freeze({
+    frontiers: merged.frontiers,
+    overrides: unreadGroups(
+      merged.overrides,
+      (key) => visible.frontiers[key],
+      clock,
+    ),
+  });
+  // The watermark records the clock only when it expired or dropped something:
+  // what it expired is saved, so a rollback has nothing to revive.
+  const moved = !same(
+    state.overrides,
+    unreadGroups(
+      merged.overrides,
+      (key) => visible.frontiers[key],
+      unread.watermark,
+    ),
+  );
+  const next = Object.freeze({
+    ...unread,
+    watermark: moved ? clock : unread.watermark,
+    held,
+  });
+  // Nothing moved: the journal itself, so an unchanged save stays unchanged.
+  if (same(state, journal.state) && same(next, journal.unread)) return journal;
+  return { ...journal, state, unread: next };
+}
 /** Which broader mark covers a mark, as in `CoveredFrontier`. `home` gives
  * the channel of a message when it is known: from a loaded message, or from
  * a channel saved with the mark. */
@@ -178,6 +263,10 @@ export function createReadState({
   const lifetime = new AbortController();
   const listeners = new Set<() => void>();
   let journal: ReadJournal | undefined;
+  /** Bumped whenever saved unread groups change (an admission, a resolved
+   * held group, a local action): a version-2 record built before it is stale. */
+  let unreadEpoch = 0;
+  let rebuild = false;
   let state: ReadState = EMPTY_READ_STATE;
   // Message evidence (and so ancestry) belongs to unread, which registers this.
   let coverage: MarkCoverage | undefined;
@@ -235,7 +324,8 @@ export function createReadState({
     let next = { ...snapshot, ...patch };
     if (
       blockedClear &&
-      (next.status === "pending" ||
+      (next.status === "local" ||
+        next.status === "pending" ||
         next.status === "accepted" ||
         next.status === "reconciled")
     )
@@ -382,7 +472,7 @@ export function createReadState({
     const saved = await storage.update((current) => {
       if (closed) throw new Error("Read-state session closed");
       const before = current ?? newReadJournal();
-      const next = change(before);
+      const next = settleUnread(change(before), now());
       // Ingest and publication bookkeeping need not advance revision. Even an
       // equal-valued later save must prevent rolling back a newer receipt.
       if (
@@ -395,8 +485,10 @@ export function createReadState({
       return next;
     });
     if (closed) return saved;
+    if (!same(journal?.state.overrides, saved.state.overrides)) unreadEpoch++;
     journal = saved;
-    state = localState(saved);
+    state = localState(saved, now());
+    armUpkeep();
     if (announce) broadcast?.postMessage("changed");
     emit();
     return saved;
@@ -408,7 +500,8 @@ export function createReadState({
     if (!current) return save((current) => current, false);
     if (closed) return;
     journal = current;
-    state = localState(current);
+    state = localState(current, now());
+    armUpkeep();
     emit();
   }
   const ready = queue(async () => {
@@ -573,6 +666,43 @@ export function createReadState({
     }
     return result;
   }
+  /** Incoming groups by the receive rule, at the raw local clock: a group
+   * older than the lifetime is dropped before its baseline merges, one too far
+   * ahead is held back with its paired frontier (or this device's, if
+   * greater), and the rest merge. Read positions always merge. */
+  function receiveGroups(current: ReadJournal, incoming: readonly ReadState[]) {
+    const at = now();
+    const mine = localState(current, at).frontiers;
+    const held: Record<string, HeldGroup[]> = Object.fromEntries(
+      Object.entries(current.unread?.held ?? {}).map(([key, groups]) => [
+        key,
+        [...groups],
+      ]),
+    );
+    const states = incoming.map((state) => {
+      const overrides: Record<string, ReadState["overrides"][string]> = {};
+      for (const [key, value] of Object.entries(state.overrides)) {
+        const verdict = unreadReceive(value, at);
+        if (verdict === "merge") overrides[key] = value;
+        else if (verdict === "defer") {
+          const group: HeldGroup = [
+            value.set,
+            value.clear,
+            value.baseline,
+            Math.max(state.frontiers[key] ?? 0, mine[key] ?? 0),
+          ];
+          const list = held[key] ?? [];
+          if (!list.some((other) => same(other, group))) {
+            if (list.length >= HELD_GROUPS_PER_KEY)
+              throw new Error("Too many unread groups held back");
+            held[key] = [...list, group];
+          }
+        }
+      }
+      return { frontiers: state.frontiers, overrides };
+    });
+    return { states, held };
+  }
   async function ingest(
     events: readonly RelayEvent[],
     signal: AbortSignal,
@@ -599,14 +729,19 @@ export function createReadState({
           owned.includes(readCoordinate(event) ?? "")
         )
           own = advanceOwn(own, parsed.state.frontiers, true);
+      const { states, held } = receiveGroups(
+        current,
+        committed.map(({ parsed }) => parsed.state),
+      );
       return {
         ...current,
         ...retainMarks(
           current,
-          [current.state, ...committed.map(({ parsed }) => parsed.state)],
+          [current.state, ...states],
           current.recent ?? {},
         ),
         ...(own && { own }),
+        unread: { ...(current.unread ?? newUnreadJournal()), held },
       };
     });
     if (closed || generation !== epoch) return;
@@ -708,7 +843,7 @@ export function createReadState({
                   {
                     kinds: [30078],
                     authors: [viewer],
-                    "#t": ["read-state"],
+                    "#t": ["read-state", UNREAD_TAG],
                     limit: 500,
                   },
                 ],
@@ -741,9 +876,11 @@ export function createReadState({
     });
     return refreshing;
   }
-  /** Sets or clears the channel override groups an action covers, per the
-   * Actions of NIP-RS: a set needs a complete load and must fit the primary;
-   * a clear bumps only groups that are still live. Undefined: nothing synced. */
+  /** Sets or clears the channel unread groups an action covers, per the
+   * Actions of NIP-RS: a set needs a complete load, a stamp the clock allows
+   * and room in the one version-2 record; nothing is ever evicted for it. A
+   * clear stamps only groups that are still live. While any incoming group is
+   * held back, neither may run. Undefined: nothing synced. */
   function changeGroups(
     current: ReadJournal,
     key: string,
@@ -751,27 +888,63 @@ export function createReadState({
     clearKeys: readonly string[],
   ): ReadState | undefined {
     if (capability !== "frontier-sync" || unread === undefined) return;
+    const clock = unreadClock(current, now());
     const frontier = (state: ReadState, ctx: string) =>
-      localState({ ...current, state }).frontiers[ctx];
+      localState({ ...current, state }, now()).frontiers[ctx];
+    const fits = (state: ReadState) =>
+      unreadBlob(
+        current.clientId,
+        state.overrides,
+        (ctx) => frontier(state, ctx),
+        clock,
+      );
     let next = current.state;
     if (unread) {
       // Without a complete load the mark stays on this device, labelled so.
       if (!channelContext(key) || snapshot.completeness !== "snapshot") return;
-      next = changeOverride(next, key, true, frontier(next, key) ?? 0);
-      groupBlob(current.clientId, next.overrides, (ctx) => frontier(next, ctx));
+      if (heldCount(current)) throw new Error(UNREAD_HELD);
+      const old = next.overrides[key];
+      const set = unreadStamp(old, now());
+      if (set === null) throw new Error(UNREAD_CLOCK);
+      next = {
+        frontiers: next.frontiers,
+        overrides: {
+          ...next.overrides,
+          [key]: {
+            set,
+            clear: old?.clear ?? 0,
+            baseline: frontier(next, key) ?? 0,
+          },
+        },
+      };
+      fits(next);
       return next;
     }
-    for (const ctx of new Set([key, ...clearKeys]))
-      if (
+    const live = [...new Set([key, ...clearKeys])].filter(
+      (ctx) =>
         channelContext(ctx) &&
-        overrideActive(next.overrides[ctx], frontier(next, ctx))
-      )
-        next = changeOverride(next, ctx, false, 0);
-    if (next === current.state) return;
-    // A clear the primary cannot carry stays unsynced: the read itself still
-    // advances, and the failure shows in the sync notice.
+        unreadActive(next.overrides[ctx], frontier(next, ctx), clock),
+    );
+    if (!live.length) return;
+    // A clear that cannot be stamped or carried stays unsynced: the read
+    // itself still advances, and the failure shows in the sync notice.
+    if (heldCount(current)) {
+      blockedClear = UNREAD_HELD;
+      return;
+    }
+    const overrides = { ...next.overrides };
+    for (const ctx of live) {
+      const old = overrides[ctx];
+      const clear = unreadStamp(old, now());
+      if (!old || clear === null) {
+        blockedClear = UNREAD_CLOCK;
+        return;
+      }
+      overrides[ctx] = { ...old, clear };
+    }
+    next = { frontiers: next.frontiers, overrides };
     try {
-      groupBlob(current.clientId, next.overrides, (ctx) => frontier(next, ctx));
+      fits(next);
     } catch {
       blockedClear = "Channel mark read cannot be synchronized";
       return;
@@ -944,43 +1117,56 @@ export function createReadState({
           }
           if (journal.revision <= journal.acceptedRevision) return;
           const owned = [journal.slot, ...(journal.spill ?? [])];
+          const unreadSlot = (journal.unread ?? newUnreadJournal()).slot;
+          const unreadAt = `read-state-unread-v2:${unreadSlot}`;
           const events = await reader.read(
             [
               {
                 kinds: [30078],
                 authors: [viewer],
-                "#d": owned.map((slot) => `read-state:${slot}`),
-                limit: owned.length,
+                "#d": [...owned.map((slot) => `read-state:${slot}`), unreadAt],
+                limit: owned.length + 1,
               },
             ],
             { signal, priority: "background", fresh: true },
           );
+          // Held groups the clock has reached resolve here, before planning.
           await ingest(events, signal);
           const seen = owned.map((slot) => slots.get(`read-state:${slot}`));
+          const seenUnread = slots.get(unreadAt);
           if (
-            seen.some((own) => own && own.parsed.clientId !== journal?.clientId)
+            [...seen, seenUnread].some(
+              (own) => own && own.parsed.clientId !== journal?.clientId,
+            )
           )
             throw new Error("Read-state slot conflict; publication blocked");
           // The acknowledged revision is the one this plan was packed from;
           // anything saved later, even during the spill save, stays pending.
           const revision = journal.revision;
-          // Own frontiers, and the merged union of every installation's
-          // channel override groups, which only the primary carries.
+          // Own frontiers in version 1; the merged union of every
+          // installation's channel unread groups, with their paired
+          // frontiers, in this installation's one version-2 record.
           const ownFrontiers = advanceOwn(journal.own);
-          const merged = localState(journal);
+          const merged = localState(journal, now());
           const { clientId } = journal;
-          const primary = (overrides: ReadState["overrides"]) =>
-            groupBlob(clientId, overrides, (key) => merged.frontiers[key]);
-          // When the merged groups overfill the primary, republish the last
+          const clock = unreadClock(journal, now());
+          const built = unreadEpoch;
+          const unreadOf = (overrides: ReadState["overrides"]) =>
+            unreadBlob(
+              clientId,
+              overrides,
+              (key) => merged.frontiers[key],
+              clock,
+            );
+          // When the merged groups overfill the record, republish the last
           // published groups, compacted against current frontiers so they can
-          // only shrink: frontiers still publish, and override actions fail
-          // visibly in changeGroups.
+          // only shrink: override actions fail visibly in changeGroups.
           let groups: ReadBlob;
           try {
-            groups = primary(journal.state.overrides);
-            blockedClear = undefined;
+            groups = unreadOf(journal.state.overrides);
+            if (!heldCount(journal)) blockedClear = undefined;
           } catch {
-            groups = primary(seen[0]?.parsed.state.overrides ?? {});
+            groups = unreadOf(seenUnread?.parsed.state.overrides ?? {});
           }
           const plan = packReadState(
             journal.clientId,
@@ -990,10 +1176,15 @@ export function createReadState({
               carried: Object.keys(seen[index]?.parsed.state.frontiers ?? {}),
             })),
             newSlotId,
-            undefined,
-            groups,
           );
-          const primaryGroups = parseReadBlob(groups).state.overrides;
+          const unreadState = parseReadBlob(groups).state;
+          // An empty record is never written in place of no record.
+          const unreadChanged = !same(
+            seenUnread?.parsed.state ?? EMPTY_READ_STATE,
+            unreadState,
+          );
+          // Nothing in version 2 is published while a group is held back.
+          const unreadHeld = unreadChanged && !!heldCount(journal);
           if (plan.length > READ_STATE_SLOTS)
             throw new Error(
               "Read-state publication capacity reached; saved intent retained",
@@ -1012,20 +1203,37 @@ export function createReadState({
             Object.keys(seen[index]?.parsed.state.frontiers ?? {}).some(
               (key) => !(key in (plan[index]?.frontiers ?? {})),
             );
-          const changed = plan
+          const changed: {
+            coordinate: string;
+            slot: string;
+            blob: ReadBlob;
+          }[] = plan
             .map((blob, index) => ({ ...blob, index }))
-            .filter(
-              ({ frontiers, index }) =>
-                Object.entries(frontiers).some(
-                  ([key, value]) =>
-                    (seen[index]?.parsed.state.frontiers[key] ?? -1) < value,
-                ) ||
-                (index === 0 &&
-                  !same(seen[0]?.parsed.state.overrides ?? {}, primaryGroups)),
+            .filter(({ frontiers, index }) =>
+              Object.entries(frontiers).some(
+                ([key, value]) =>
+                  (seen[index]?.parsed.state.frontiers[key] ?? -1) < value,
+              ),
             )
-            .sort((a, b) => Number(drops(a.index)) - Number(drops(b.index)));
+            .sort((a, b) => Number(drops(a.index)) - Number(drops(b.index)))
+            .map(({ slot, frontiers }) => ({
+              coordinate: `read-state:${slot}`,
+              slot,
+              blob: readBlob(
+                journal?.clientId ?? clientId,
+                { frontiers, overrides: {} },
+                () => undefined,
+              ),
+            }));
+          if (unreadChanged && !unreadHeld)
+            changed.push({
+              coordinate: unreadAt,
+              slot: unreadSlot,
+              blob: groups,
+            });
           attemptedRevision = revision;
           if (!changed.length) {
+            if (unreadHeld) throw new Error(UNREAD_HELD);
             const expired = journal.pending?.event.id;
             await save((current) => {
               // An expired envelope whose values the relay already holds
@@ -1040,13 +1248,7 @@ export function createReadState({
             return;
           }
           const signed: RelayEvent[] = [];
-          for (const { slot, frontiers, index } of changed) {
-            const coordinate = `read-state:${slot}`;
-            const state = {
-              frontiers,
-              overrides: index === 0 ? primaryGroups : {},
-            };
-            const payload = readBlob(journal.clientId, state, () => undefined);
+          for (const { coordinate, slot, blob: payload } of changed) {
             // Above every version this installation ever signed, so a
             // successor always supersedes a pending event the relay missed.
             const createdAt = readVersion(
@@ -1083,7 +1285,8 @@ export function createReadState({
           for (const [index, event] of signed.entries()) {
             // Only the last blob acknowledges the revision: a partial
             // publication never marks local intent as synchronized.
-            const last = index === signed.length - 1;
+            // Nor while unread intent is held back.
+            const last = index === signed.length - 1 && !unreadHeld;
             await save((current) => ({
               ...current,
               lastCreatedAt: Math.max(current.lastCreatedAt, event.created_at),
@@ -1095,8 +1298,9 @@ export function createReadState({
             // Saving awaited storage: fence the send itself, not just the plan.
             // Earlier blobs are observed by now, so the basis already holds them.
             admit([event]);
-            await publishPending(signal);
+            await publishPending(signal, false, built);
           }
+          if (unreadHeld) throw new Error(UNREAD_HELD);
         });
       } catch (error) {
         if (!closed) {
@@ -1111,16 +1315,44 @@ export function createReadState({
     });
     publishing = task.finally(() => {
       publishing = undefined;
+      if (rebuild) {
+        rebuild = false;
+        attemptedRevision = -1;
+        schedule();
+      }
       // Peer intent may have arrived during signing/readback, ahead of its broadcast.
       reconcileJournal();
     });
     return publishing;
   }
-  async function publishPending(signal: AbortSignal, recover = false) {
+  async function publishPending(
+    signal: AbortSignal,
+    recover = false,
+    /** The unread epoch an in-pass version-2 record was built at. */
+    built?: number,
+  ) {
     const before = journal;
     const pending = before?.pending;
     if (!pending || !before) return;
     if (!host?.publish) throw new Error("Read-state publication unavailable");
+    // Checked at the send, after every await before it: a group held back
+    // since planning (a live delivery mid-pass) still stops version 2.
+    // A pure check: it never admits or saves. Anything admitted since the
+    // record was built refuses the send; the next pass rebuilds it.
+    if (unreadCoordinateOf(pending.event)) {
+      if (heldCount(journal)) throw new Error(UNREAD_HELD);
+      if (built !== undefined && built !== unreadEpoch) {
+        // Never sent, so it is dropped, not replayed: exact bytes of a
+        // stale record must not reach the relay on a later retry either.
+        await save((current) => {
+          if (current.pending?.event.id !== pending.event.id) return current;
+          const { pending: _stale, ...rest } = current;
+          return rest;
+        }, false);
+        rebuild = true;
+        throw new Error(UNREAD_STALE);
+      }
+    }
     health({ status: "pending", error: undefined });
     let expired = false;
     try {
@@ -1197,8 +1429,62 @@ export function createReadState({
       error: undefined,
     });
   }
+  /** Expiry moves with time, not only with saves: show it then, and save the
+   * watermark (and any held group the clock reached) whenever it moves. The
+   * saved watermark is only ever the one storage returned, so a failed save
+   * stays due and is retried. */
+  function upkeep() {
+    if (closed || !journal) return Promise.resolve();
+    const shown = localState(journal, now());
+    if (!same(shown.overrides, state.overrides)) {
+      state = shown;
+      emit();
+    }
+    const settled = settleUnread(journal, now());
+    if (
+      same(settled.state, journal.state) &&
+      same(settled.unread?.held, journal.unread?.held)
+    ) {
+      armUpkeep();
+      return Promise.resolve();
+    }
+    return queue(async () => {
+      try {
+        await save((current) => current);
+      } catch (error) {
+        health({ status: "error", error: errorText(error) });
+        armUpkeep(60);
+      }
+    });
+  }
+  let upkeepTimer: ReturnType<typeof setTimeout> | undefined;
+  /** The next moment a mark expires or a held group's time comes, if any. */
+  function armUpkeep(retry?: number) {
+    if (upkeepTimer) clearTimeout(upkeepTimer);
+    upkeepTimer = undefined;
+    if (closed || !journal) return;
+    const at = now();
+    const clock = unreadClock(journal, at);
+    const due: number[] = retry === undefined ? [] : [at + retry];
+    for (const [key, value] of Object.entries(journal.state.overrides))
+      if (unreadActive(value, state.frontiers[key], clock))
+        due.push(value.set + UNREAD_LIFETIME + 1);
+    for (const groups of Object.values(journal.unread?.held ?? {}))
+      for (const [set, clear] of groups)
+        due.push(Math.max(set, clear) - UNREAD_DEFER_AHEAD);
+    if (!due.length) return;
+    const wait = Math.min(
+      Math.max(Math.min(...due) - at, 1) * 1000,
+      2 ** 31 - 1,
+    );
+    upkeepTimer = setTimeout(() => {
+      upkeepTimer = undefined;
+      void upkeep();
+    }, wait);
+  }
   return {
     ready,
+    upkeep,
     captureLocalUnread,
     captureLocalUnreadRevision,
     snapshot: () => snapshot,
@@ -1350,7 +1636,7 @@ export function createReadState({
                 },
               };
             }
-            const currentState = localState(current);
+            const currentState = localState(current, now());
             if (
               capability !== "frontier-sync" &&
               messages.some(
@@ -1573,6 +1859,7 @@ export function createReadState({
       epoch++;
       lifetime.abort();
       if (timer) clearTimeout(timer);
+      if (upkeepTimer) clearTimeout(upkeepTimer);
       listeners.clear();
       slots.clear();
       broadcast?.close();

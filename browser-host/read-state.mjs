@@ -3,6 +3,7 @@ import { eventDto } from "../src/features/relay/events.ts";
 import {
   parseReadBlob,
   readCoordinate,
+  unreadCoordinate,
   READ_STATE_EVENT_BYTES,
   READ_STATE_PLAINTEXT_BYTES,
   record,
@@ -55,6 +56,8 @@ export function decodeReadState(
         throw new Error("Read-state plaintext capacity exceeded");
       const blob = JSON.parse(plaintext);
       parseReadBlob(blob);
+      if ((blob.v === 2) !== !!unreadCoordinate(event))
+        throw new Error("Read-state version does not match its coordinate");
       return { eventId: event.id, blob };
     });
   } finally {
@@ -83,10 +86,16 @@ export function signReadState(
       {
         kind: 30078,
         created_at: raw.createdAt,
-        tags: [
-          ["d", `read-state:${raw.slot}`],
-          ["t", "read-state"],
-        ],
+        tags:
+          raw.blob.v === 2
+            ? [
+                ["d", `read-state-unread-v2:${raw.slot}`],
+                ["t", "read-state-unread-v2"],
+              ]
+            : [
+                ["d", `read-state:${raw.slot}`],
+                ["t", "read-state"],
+              ],
         content: nip44.v2.encrypt(plaintext, key),
       },
       secret,

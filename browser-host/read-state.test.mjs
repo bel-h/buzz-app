@@ -119,6 +119,58 @@ describe("host-only read-state codec", () => {
   });
 });
 
+describe("host-only expiring unread codec", () => {
+  const unread = {
+    v: 2,
+    client_id: "fixture",
+    contexts: { room: 0, "ov_s:room": 100, "ov_c:room": 0, "ov_b:room": 0 },
+  };
+  it("signs version 2 under its own paired prefix and tag, and roundtrips", () => {
+    const event = signReadState({ ...intent, blob: unread }, secret, 100);
+    expect(event.tags).toEqual([
+      ["d", `read-state-unread-v2:${"a".repeat(32)}`],
+      ["t", "read-state-unread-v2"],
+    ]);
+    expect(decodeReadState([event], secret)).toEqual([
+      { eventId: event.id, blob: unread },
+    ]);
+  });
+  it("rejects a version that does not match its coordinate", () => {
+    const key = nip44.v2.utils.getConversationKey(secret, getPublicKey(secret));
+    const crossed = (blob, d, t) =>
+      finalizeEvent(
+        {
+          kind: 30078,
+          created_at: 100,
+          tags: [
+            ["d", d],
+            ["t", t],
+          ],
+          content: nip44.v2.encrypt(JSON.stringify(blob), key),
+        },
+        secret,
+      );
+    const slot = "a".repeat(32);
+    expect(() =>
+      decodeReadState(
+        [crossed(unread, `read-state:${slot}`, "read-state")],
+        secret,
+      ),
+    ).toThrow();
+    expect(() =>
+      decodeReadState(
+        [crossed(blob, `read-state-unread-v2:${slot}`, "read-state-unread-v2")],
+        secret,
+      ),
+    ).toThrow();
+    expect(() =>
+      decodeReadState(
+        [crossed(unread, `read-state-unread-v2:${slot}`, "read-state")],
+        secret,
+      ),
+    ).toThrow();
+  });
+});
 describe("host-only thread-follows codec", () => {
   const payload = {
     v: 1,

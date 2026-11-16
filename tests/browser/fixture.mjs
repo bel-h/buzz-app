@@ -2118,7 +2118,13 @@ export const test = base.extend({
           .set(event.tags.find(([key]) => key === "d")?.[1], event);
         return;
       }
-      expect(event.tags).toContainEqual(["t", "read-state"]);
+      // Read positions, or the version-2 unread record: each prefix with its tag.
+      const namespace = event.tags
+        .find(([key]) => key === "d")?.[1]
+        ?.startsWith("read-state-unread-v2:")
+        ? "read-state-unread-v2"
+        : "read-state";
+      expect(event.tags).toContainEqual(["t", namespace]);
       const blob = JSON.parse(
         nip44.v2.decrypt(
           event.content,
@@ -2126,7 +2132,8 @@ export const test = base.extend({
         ),
       );
       const coordinate = event.tags.find(([key]) => key === "d")?.[1];
-      expect(coordinate).toMatch(/^read-state:[0-9a-f]{32}$/);
+      expect(coordinate).toMatch(/^read-state(-unread-v2)?:[0-9a-f]{32}$/);
+      expect(blob.v).toBe(namespace === "read-state" ? 1 : 2);
       const previous = readEvents.get(community).get(coordinate);
       if (
         !previous ||

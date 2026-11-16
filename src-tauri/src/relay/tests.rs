@@ -3466,6 +3466,63 @@ async fn read_state_codec_round_trips_and_rejects_foreign_intent() {
 }
 
 #[tokio::test]
+async fn read_state_unread_v2_codec_is_its_own_paired_shape() {
+    let host = IdentityHost::fixture();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let blob = serde_json::json!({"v":2,"client_id":"fixture",
+        "contexts":{"room":0,"ov_s:room":now,"ov_c:room":0,"ov_b:room":0}});
+    let signed = host
+        .sign_read_state("c".repeat(32), now, blob.clone())
+        .await
+        .unwrap();
+    verify(&signed);
+    assert_eq!(
+        signed["tags"],
+        serde_json::json!([
+            ["d", format!("read-state-unread-v2:{}", "c".repeat(32))],
+            ["t", "read-state-unread-v2"]
+        ])
+    );
+    let decoded = host.decode_read_state(vec![signed.clone()]).await.unwrap();
+    assert_eq!(decoded[0]["blob"], blob);
+    // Only 32 lowercase hex slots, and only versions 1 and 2.
+    assert!(host
+        .sign_read_state("C".repeat(32), now, blob.clone())
+        .await
+        .is_err());
+    assert!(host
+        .sign_read_state(
+            "c".repeat(32),
+            now,
+            serde_json::json!({"v":3,"client_id":"f","contexts":{}})
+        )
+        .await
+        .is_err());
+    // Neither cross pair of prefix and tag decodes.
+    for tags in [
+        serde_json::json!([
+            ["d", format!("read-state-unread-v2:{}", "c".repeat(32))],
+            ["t", "read-state"]
+        ]),
+        serde_json::json!([
+            ["d", format!("read-state:{}", "c".repeat(32))],
+            ["t", "read-state-unread-v2"]
+        ]),
+        serde_json::json!([
+            ["d", format!("read-state:{}", "c".repeat(32))],
+            ["t", "read-state"]
+        ]),
+    ] {
+        let mut crossed = signed.clone();
+        crossed["tags"] = tags;
+        assert!(host.decode_read_state(vec![crossed]).await.is_err());
+    }
+}
+
+#[tokio::test]
 async fn thread_follows_codec_is_a_separate_exact_shape() {
     let host = IdentityHost::fixture();
     let now = std::time::SystemTime::now()

@@ -2,7 +2,9 @@ import { eventDto, type RelayEvent } from "./events";
 import { parseStoredFollows, type StoredFollows } from "./follow-manager";
 import {
   EMPTY_READ_STATE,
+  channelContext,
   contextId,
+  READ_STATE_KEYS,
   parseReadBlob,
   readCoordinate,
   READ_STATE_SLOTS,
@@ -53,7 +55,28 @@ export type ReadJournal = Readonly<{
   pending?: Readonly<{ event: RelayEvent; revision: number }>;
   /** Synced thread follow choices, saved in these same transactions. */
   follows?: StoredFollows;
+  /** Expiring unread (version 2). Absent on a journal saved before it: its
+   * version-1 override groups are never imported. */
+  unread?: UnreadJournal;
 }>;
+/** One held-back incoming contribution: [S, C, B, F], F its paired frontier
+ * (or this device's, if greater) at the time it was held. Never admitted, so
+ * it gets the incoming cutoff, not the local discard guard, when it resolves. */
+export type HeldGroup = readonly [number, number, number, number];
+export type UnreadJournal = Readonly<{
+  /** This installation's one version-2 coordinate. */
+  slot: string;
+  /** The greatest expiry clock any successful save used: a clock rollback
+   * never makes an expired mark live again. */
+  watermark: number;
+  held: Readonly<Record<string, readonly HeldGroup[]>>;
+}>;
+export const HELD_GROUPS_PER_KEY = 8;
+export const newUnreadJournal = (): UnreadJournal => ({
+  slot: newSlotId(),
+  watermark: 0,
+  held: {},
+});
 /** Mutations run against the latest record in one strict transaction (including other tabs). */
 export interface ReadStateStorage {
   update(
@@ -77,7 +100,41 @@ export function newReadJournal(): ReadJournal {
     revision: 0,
     acceptedRevision: 0,
     lastCreatedAt: 0,
+    unread: newUnreadJournal(),
   };
+}
+function readUnread(raw: unknown, slots: readonly string[]): UnreadJournal {
+  if (
+    !record(raw) ||
+    !slotId(raw.slot) ||
+    slots.includes(raw.slot) ||
+    !uint32(raw.watermark) ||
+    !record(raw.held) ||
+    Object.keys(raw.held).length > READ_STATE_KEYS / 3
+  )
+    throw new Error("Invalid saved unread state");
+  const held: Record<string, readonly HeldGroup[]> = {};
+  for (const [key, groups] of Object.entries(raw.held)) {
+    if (
+      !channelContext(key) ||
+      !Array.isArray(groups) ||
+      groups.length < 1 ||
+      groups.length > HELD_GROUPS_PER_KEY ||
+      !groups.every(
+        (group) =>
+          Array.isArray(group) && group.length === 4 && group.every(uint32),
+      )
+    )
+      throw new Error("Invalid saved held unread group");
+    held[key] = Object.freeze(
+      groups.map((group) => Object.freeze([...group]) as unknown as HeldGroup),
+    );
+  }
+  return Object.freeze({
+    slot: raw.slot,
+    watermark: raw.watermark,
+    held: Object.freeze(held),
+  });
 }
 /** Storage is untrusted. Corrupt intent is an error, never an empty journal to overwrite. */
 export function readJournal(raw: unknown, viewer: string): ReadJournal {
@@ -121,7 +178,7 @@ export function readJournal(raw: unknown, viewer: string): ReadJournal {
     contexts[`ov_c:${key}`] = value.clear;
     contexts[`ov_b:${key}`] = value.baseline;
   }
-  const parsed = parseReadBlob({ v: 1, client_id: raw.clientId, contexts });
+  const parsed = parseReadBlob({ v: 2, client_id: raw.clientId, contexts });
   if (
     Object.keys(parsed.state.frontiers).length !==
       Object.keys(raw.state.frontiers).length ||
@@ -189,6 +246,15 @@ export function readJournal(raw: unknown, viewer: string): ReadJournal {
     new Set([raw.slot, ...spill]).size !== spill.length + 1
   )
     throw new Error("Invalid saved read slots");
+  // An unexpected saved unread shape (an earlier draft) starts a fresh
+  // version-2 record rather than stopping startup.
+  let unread: UnreadJournal | undefined;
+  if (raw.unread !== undefined)
+    try {
+      unread = readUnread(raw.unread, [raw.slot, ...(spill as string[])]);
+    } catch {
+      unread = newUnreadJournal();
+    }
   // Before own values were kept apart, the journal published everything it held.
   const own =
     (raw.own as Record<string, number> | undefined) ??
@@ -221,9 +287,10 @@ export function readJournal(raw: unknown, viewer: string): ReadJournal {
     const event = eventDto(raw.pending.event);
     if (
       event.pubkey !== viewer ||
-      ![raw.slot, ...spill].some(
-        (slot) => readCoordinate(event) === `read-state:${slot}`,
-      ) ||
+      ![
+        ...[raw.slot, ...spill].map((slot) => `read-state:${slot}`),
+        ...(unread ? [`read-state-unread-v2:${unread.slot}`] : []),
+      ].includes(readCoordinate(event) ?? "") ||
       event.created_at > raw.lastCreatedAt
     )
       throw new Error("Saved read operation identity mismatch");
@@ -233,7 +300,10 @@ export function readJournal(raw: unknown, viewer: string): ReadJournal {
     version: 1,
     slot: raw.slot,
     clientId: raw.clientId,
-    state: parsed.state,
+    // A journal from before version 2 holds only version-1 marks: not imported.
+    state: unread
+      ? parsed.state
+      : Object.freeze({ frontiers: parsed.state.frontiers, overrides: {} }),
     localUnread: Object.freeze({ ...raw.localUnread }) as Readonly<
       Record<string, number>
     >,
@@ -258,6 +328,7 @@ export function readJournal(raw: unknown, viewer: string): ReadJournal {
     ...(raw.follows !== undefined && {
       follows: parseStoredFollows(raw.follows, viewer),
     }),
+    unread: unread ?? newUnreadJournal(),
   };
 }
 function openDatabase() {

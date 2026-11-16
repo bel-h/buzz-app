@@ -68,11 +68,16 @@ export type ReadState = Readonly<{
   overrides: Readonly<Record<string, Override>>;
 }>;
 export type ReadBlob = Readonly<{
-  v: 1;
+  v: 1 | 2;
   client_id: string;
   contexts: Readonly<Record<string, number>>;
 }>;
-export type ParsedReadBlob = Readonly<{ clientId: string; state: ReadState }>;
+export type ParsedReadBlob = Readonly<{
+  clientId: string;
+  /** 1: read positions; 2: expiring channel unread groups with paired frontiers. */
+  version?: 1 | 2;
+  state: ReadState;
+}>;
 export const EMPTY_READ_STATE: ReadState = Object.freeze({
   frontiers: Object.freeze({}),
   overrides: Object.freeze({}),
@@ -97,14 +102,32 @@ export function readCoordinate(
     coordinate &&
     /^read-state:[0-9a-f]{32}$/.test(coordinate)
     ? coordinate
+    : unreadCoordinate(event);
+}
+/** The version-2 expiring unread record: its own prefix, paired with its tag. */
+export function unreadCoordinate(
+  event: Pick<RelayEvent, "kind" | "tags">,
+): string | undefined {
+  if (event.kind !== 30078) return;
+  const ds = event.tags.filter(([name]) => name === "d");
+  const ts = event.tags.filter(
+    ([name, value]) => name === "t" && value === UNREAD_TAG,
+  );
+  const coordinate = ds[0]?.[1];
+  return ds.length === 1 &&
+    ts.length === 1 &&
+    coordinate &&
+    /^read-state-unread-v2:[0-9a-f]{32}$/.test(coordinate)
+    ? coordinate
     : undefined;
 }
+export const UNREAD_TAG = "read-state-unread-v2";
 
 /** Groups override siblings BEFORE invalid-entry dropping. Unknown versions fail closed. */
 export function parseReadBlob(raw: unknown): ParsedReadBlob {
   if (
     !record(raw) ||
-    raw.v !== 1 ||
+    (raw.v !== 1 && raw.v !== 2) ||
     typeof raw.client_id !== "string" ||
     [...raw.client_id].length < 1 ||
     [...raw.client_id].length > 64 ||
@@ -153,8 +176,11 @@ export function parseReadBlob(raw: unknown): ParsedReadBlob {
         }),
       );
   }
+  // Version-1 override keys are never imported, merged or carried.
+  if (raw.v === 1) overrides.clear();
   return Object.freeze({
     clientId: raw.client_id,
+    version: raw.v,
     state: freezeState(frontiers, overrides),
   });
 }
@@ -227,27 +253,6 @@ export function advanceRead(
     overrides: {},
   });
 }
-/** Requires a complete snapshot at the command boundary; this pure function cannot prove it. */
-export function changeOverride(
-  state: ReadState,
-  key: string,
-  unread: boolean,
-  frontier: number,
-): ReadState {
-  if (!contextId(`ov_s:${key}`) || !uint32(frontier))
-    throw new Error("Invalid read override");
-  const old = state.overrides[key];
-  const next = Math.max(old?.set ?? 0, old?.clear ?? 0) + 1;
-  if (!uint32(next)) throw new Error("Read override counter exhausted");
-  return mergeReadStates(state, {
-    frontiers: {},
-    overrides: {
-      [key]: unread
-        ? { set: next, clear: 0, baseline: frontier }
-        : { set: 0, clear: next, baseline: 0 },
-    },
-  });
-}
 /** Code-unit order, so every client sorts keys identically. */
 const byKey = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 /** Canonical floors are permanent. Never call on a partial snapshot for publication. */
@@ -284,22 +289,6 @@ export function readBlob(
       "Read-state publication capacity reached; saved intent retained",
     );
   return blob;
-}
-/** The primary's override part: every channel group with its merged stored
- * frontier (0 when never read), which travel together whether or not this
- * installation owns that frontier. Throws when they cannot fit in one blob. */
-export function groupBlob(
-  clientId: string,
-  groups: ReadState["overrides"],
-  frontier: (key: string) => number | undefined,
-): ReadBlob {
-  const overrides = Object.fromEntries(
-    Object.entries(groups).filter(([key]) => channelContext(key)),
-  );
-  const frontiers = Object.fromEntries(
-    Object.keys(overrides).map((key) => [key, frontier(key) ?? 0]),
-  );
-  return readBlob(clientId, { frontiers, overrides }, frontier);
 }
 export type ReadSlotPlan = Readonly<{
   slot: string;
@@ -381,4 +370,82 @@ export function readVersion(now: number, previous: number): number {
       "Read-state clock is ahead; retry when the clock catches up",
     );
   return next;
+}
+
+// Expiring unread state (version 2). Stamps are uint32 Unix seconds.
+export const UNREAD_LIFETIME = READ_RETENTION_SECONDS;
+export const UNREAD_DISCARD_GUARD = 600;
+export const UNREAD_DEFER_AHEAD = 660;
+export const UNREAD_ALLOCATE_AHEAD = 60;
+const stamp = (value: Override) => Math.max(value.set, value.clear);
+/** Live at `S == clock - lifetime`; `clock` is max(now, durable watermark). */
+export function unreadActive(
+  value: Override | undefined,
+  frontier: number | undefined,
+  clock: number,
+): boolean {
+  return (
+    overrideActive(value, frontier) &&
+    (value as Override).set >= clock - UNREAD_LIFETIME
+  );
+}
+export const unreadExpired = (value: Override, clock: number) =>
+  stamp(value) < clock - UNREAD_LIFETIME;
+/** Retained at equality with the guard. */
+export const unreadDiscardable = (value: Override, clock: number) =>
+  stamp(value) < clock - UNREAD_LIFETIME - UNREAD_DISCARD_GUARD;
+/** A dead group is the tombstone `C = K = max(S, C)`. */
+export function unreadCanonical(
+  value: Override,
+  frontier: number | undefined,
+  clock: number,
+): Override {
+  return unreadActive(value, frontier, clock) ||
+    (value.set === 0 && value.baseline === 0)
+    ? value
+    : Object.freeze({ set: 0, clear: stamp(value), baseline: 0 });
+}
+/** Raw local `now`, never advanced by received stamps. Null: refused. */
+export function unreadStamp(value: Override | undefined, now: number) {
+  const next = Math.max(now, (value ? stamp(value) : 0) + 1);
+  return next > now + UNREAD_ALLOCATE_AHEAD || !uint32(next) ? null : next;
+}
+/** An incoming group, before its baseline may merge. Checks max(S,C) only. */
+export function unreadReceive(value: Override, now: number) {
+  const greatest = stamp(value);
+  return greatest < now - UNREAD_LIFETIME
+    ? ("drop" as const)
+    : greatest > now + UNREAD_DEFER_AHEAD
+      ? ("defer" as const)
+      : ("merge" as const);
+}
+/** Canonical groups with discardable ones removed, expiry applied at `clock`. */
+export function unreadGroups(
+  groups: ReadState["overrides"],
+  frontier: (key: string) => number | undefined,
+  clock: number,
+): ReadState["overrides"] {
+  const kept: Record<string, Override> = {};
+  for (const [key, value] of Object.entries(groups)) {
+    if (!channelContext(key) || unreadDiscardable(value, clock)) continue;
+    kept[key] = unreadCanonical(value, frontier(key), clock);
+  }
+  return Object.freeze(kept);
+}
+/** The version-2 plaintext: each group with its merged stored frontier, 0
+ * when never read. Throws rather than evict when it cannot fit. */
+export function unreadBlob(
+  clientId: string,
+  groups: ReadState["overrides"],
+  frontier: (key: string) => number | undefined,
+  clock: number,
+): ReadBlob {
+  const canonical = unreadGroups(groups, frontier, clock);
+  const frontiers = Object.fromEntries(
+    Object.keys(canonical).map((key) => [key, frontier(key) ?? 0]),
+  );
+  const blob = readBlob(clientId, { frontiers, overrides: canonical }, (key) =>
+    frontier(key),
+  );
+  return Object.freeze({ ...blob, v: 2 as const });
 }

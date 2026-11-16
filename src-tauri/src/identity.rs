@@ -806,23 +806,43 @@ pub(crate) fn sidebar_coordinate(value: &str) -> bool {
     )
 }
 
-fn valid_read_coordinate(value: &str) -> bool {
-    value.strip_prefix("read-state:").is_some_and(|slot| {
-        slot.len() == 32
-            && slot
-                .bytes()
-                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+/// The two exact read-state shapes: version 1 read positions and the version 2
+/// expiring unread record. Each pairs its d prefix with its own t tag.
+fn read_namespace(version: u64) -> &'static str {
+    if version == 2 {
+        "read-state-unread-v2"
+    } else {
+        "read-state"
+    }
+}
+
+/// The blob version a coordinate holds, or None when it is neither shape.
+fn read_coordinate_version(value: &str) -> Option<u64> {
+    [1, 2].into_iter().find(|&version| {
+        value
+            .strip_prefix(read_namespace(version))
+            .and_then(|rest| rest.strip_prefix(':'))
+            .is_some_and(valid_read_slot)
     })
 }
 
-fn validate_read_blob(blob: &serde_json::Value) -> Result<()> {
+fn valid_read_slot(slot: &str) -> bool {
+    slot.len() == 32
+        && slot
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+
+/// Returns the blob's version, 1 or 2.
+fn validate_read_blob(blob: &serde_json::Value) -> Result<u64> {
     let contexts = blob["contexts"]
         .as_object()
         .ok_or("Unsupported read-state blob")?;
     let client = blob["client_id"]
         .as_str()
         .ok_or("Unsupported read-state blob")?;
-    if blob["v"] != 1
+    let version = blob["v"].as_u64().filter(|v| *v == 1 || *v == 2);
+    if version.is_none()
         || client.is_empty()
         || client.chars().count() > 64
         || contexts.len() > 10_000
@@ -833,7 +853,7 @@ fn validate_read_blob(blob: &serde_json::Value) -> Result<()> {
     {
         return Err("Unsupported read-state blob".into());
     }
-    Ok(())
+    Ok(version.unwrap_or(1))
 }
 
 // Buzz Thread Follow Choices: a second exact own-slot shape, checked on its own
@@ -1099,14 +1119,16 @@ impl IdentityHost {
                 // Inspect raw tag arrays before deserialization; normalization must not discard duplicate selectors.
                 let tags = raw["tags"].as_array().ok_or("Invalid read-state event")?;
                 let ds: Vec<_> = tags.iter().filter(|tag| tag[0] == "d").collect();
+                let version = match ds.as_slice() {
+                    [d] => d[1].as_str().and_then(read_coordinate_version),
+                    _ => None,
+                }
+                .ok_or("Invalid read-state event")?;
                 let ts: Vec<_> = tags
                     .iter()
-                    .filter(|tag| tag[0] == "t" && tag[1] == "read-state")
+                    .filter(|tag| tag[0] == "t" && tag[1] == read_namespace(version))
                     .collect();
-                if ds.len() != 1
-                    || ts.len() != 1
-                    || !ds[0][1].as_str().is_some_and(valid_read_coordinate)
-                {
+                if ts.len() != 1 {
                     return Err("Invalid read-state event".into());
                 }
                 let event: Event =
@@ -1122,7 +1144,9 @@ impl IdentityHost {
                 }
                 let blob: serde_json::Value =
                     serde_json::from_str(&plaintext).map_err(|_| "Invalid read-state event")?;
-                validate_read_blob(&blob)?;
+                if validate_read_blob(&blob)? != version {
+                    return Err("Invalid read-state event".into());
+                }
                 result.push(serde_json::json!({"eventId": event.id.to_hex(), "blob": blob}));
             }
             Ok(serde_json::Value::Array(result))
@@ -1146,13 +1170,13 @@ impl IdentityHost {
                 .duration_since(std::time::UNIX_EPOCH)
                 .map_err(|_| "System clock is unavailable")?
                 .as_secs();
-            if !valid_read_coordinate(&format!("read-state:{slot}"))
+            if !valid_read_slot(&slot)
                 || created_at > u32::MAX as u64
                 || now.abs_diff(created_at) > 60
             {
                 return Err("Invalid read-state signing intent".into());
             }
-            validate_read_blob(&blob)?;
+            let namespace = read_namespace(validate_read_blob(&blob)?);
             let plaintext =
                 serde_json::to_string(&blob).map_err(|_| "Invalid read-state signing intent")?;
             if plaintext.len() > 40 * 1024 {
@@ -1173,8 +1197,8 @@ impl IdentityHost {
                 kind: 30078,
                 content,
                 tags: vec![
-                    vec!["d".into(), format!("read-state:{slot}")],
-                    vec!["t".into(), "read-state".into()],
+                    vec!["d".into(), format!("{namespace}:{slot}")],
+                    vec!["t".into(), namespace.into()],
                 ],
             })
         })

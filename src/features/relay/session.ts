@@ -204,11 +204,19 @@ function isOwnReadStateFilter(filter: ReadFilter, viewer: string | undefined) {
     filter.authors[0] === viewer &&
     (filter["#t"] === undefined ||
       (filter["#t"].length === 1 &&
-        ["read-state", "thread-follows"].includes(filter["#t"][0] ?? ""))) &&
+        ["read-state", "read-state-unread-v2", "thread-follows"].includes(
+          filter["#t"][0] ?? "",
+        )) ||
+      // Both read-state shapes in one read.
+      (filter["#t"].length === 2 &&
+        filter["#t"][0] === "read-state" &&
+        filter["#t"][1] === "read-state-unread-v2")) &&
     (filter["#d"] === undefined ||
       (filter["#d"].length > 0 &&
         filter["#d"].every((coordinate) =>
-          /^(read-state|thread-follows):[0-9a-f]{32}$/.test(coordinate),
+          /^(read-state|read-state-unread-v2|thread-follows):[0-9a-f]{32}$/.test(
+            coordinate,
+          ),
         ))) &&
     Object.keys(filter).every((key) =>
       ["kinds", "authors", "limit", "#t", "#d"].includes(key),
