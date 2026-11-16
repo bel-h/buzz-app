@@ -692,27 +692,53 @@ it("names the tab a page's own close leaves shown", () => {
   });
 });
 
-it("gives an opening made before a close's return lands its visit after it", async () => {
-  // Browser history returns from a dismissal a task later.
+const hidePane = () => {
+  for (const button of screen.getAllByRole("button", {
+    name: "Toggle tab pane",
+  }))
+    if (button.getAttribute("aria-expanded") === "true")
+      fireEvent.click(button);
+};
+// Browser history retires visits at once but lands its one return a task
+// later, past every visit retired meanwhile.
+function deferredReturns() {
   const memory = createMemoryHistory(switchboard);
-  const returns: (() => void)[] = [];
+  const pending: Parameters<NavigationHistory["dismiss"]>[] = [];
   const driver: NavigationHistory = {
     ...memory,
-    dismiss: (visits, fallback) => {
-      returns.push(() => memory.dismiss(visits, fallback));
+    dismiss: (...dismissal) => {
+      pending.push(dismissal);
     },
   };
-  const page = fixture(undefined, "tabs", switchboard, driver);
+  const land = () =>
+    act(async () => {
+      const retired = pending.map(([visits]) => visits);
+      memory.dismiss(
+        (visit) =>
+          retired.some((visits) =>
+            typeof visits === "function" ? visits(visit) : false,
+          ),
+        pending.at(-1)?.[1] ?? switchboard,
+      );
+      pending.length = 0;
+      await Promise.resolve();
+    });
+  return { driver, pending, land };
+}
+
+it("gives an opening made before a close's return lands its visit after it", async () => {
+  const returns = deferredReturns();
+  const page = fixture(undefined, "tabs", switchboard, returns.driver);
   page.open({ channelId: "alpha", threadId: "root" });
   page.open({ channelId: "beta" }, { keep: true });
+  const closing = page.navigation.snapshot().entry;
   page.close({ channelId: "beta" });
+  page.open({ channelId: "dm" }, { keep: true });
   page.close({ channelId: "alpha", threadId: "root" });
-  page.open({ channelId: "dm" });
-  expect(returns).toHaveLength(2);
-  await act(async () => {
-    for (const land of returns) land();
-    await Promise.resolve();
-  });
+  expect(returns.pending).toHaveLength(2);
+  // The opening waits for the return rather than pushing past it.
+  expect(page.navigation.snapshot().entry).toBe(closing);
+  await returns.land();
   expect(page.navigation.snapshot().entry.target).toEqual({
     ...switchboard,
     route: { version: 1, params: { tab: "conversation:dm" } },
@@ -720,6 +746,59 @@ it("gives an opening made before a close's return lands its visit after it", asy
   expect(screen.getByText("conversation in Alice")).toBeVisible();
   traverse(page, "back");
   expect(page.navigation.snapshot().entry.target).toEqual(switchboard);
+});
+
+it("visits an opening made while a close returns once the return lands", async () => {
+  const returns = deferredReturns();
+  const page = fixture(undefined, "tabs", switchboard, returns.driver);
+  page.open({ channelId: "alpha", threadId: "root" });
+  page.open({ channelId: "beta" }, { keep: true });
+  page.close({ channelId: "beta" });
+  page.open({ channelId: "dm" }, { keep: true });
+  await returns.land();
+  expect(page.navigation.snapshot().entry.target).toEqual({
+    ...switchboard,
+    route: { version: 1, params: { tab: "conversation:dm" } },
+  });
+  expect(screen.getByText("conversation in Alice")).toBeVisible();
+  traverse(page, "back");
+  expect(page.navigation.snapshot().entry.target).toEqual({
+    ...switchboard,
+    route: { version: 1, params: { tab: "thread:alpha:root" } },
+  });
+});
+
+it("lands a return as the last close before it leaves the page", async () => {
+  const returns = deferredReturns();
+  const page = fixture(undefined, "tabs", switchboard, returns.driver);
+  page.open({ channelId: "alpha" }, { keep: true });
+  page.open({ channelId: "alpha", threadId: "root" }, { keep: true });
+  page.open({ channelId: "beta" }, { keep: true });
+  page.close({ channelId: "beta" });
+  hidePane();
+  page.close({ channelId: "alpha", threadId: "root" });
+  await returns.land();
+  expect(page.navigation.snapshot().entry.target).toEqual({
+    ...switchboard,
+    route: { version: 1, params: { tab: "conversation:alpha" } },
+  });
+  expect(paneShown()).toBe(false);
+});
+
+it("leaves a hidden tab pane hidden when a close's return lands", async () => {
+  const returns = deferredReturns();
+  const page = fixture(undefined, "tabs", switchboard, returns.driver);
+  page.open({ channelId: "alpha" }, { keep: true });
+  page.open({ channelId: "beta" }, { keep: true });
+  hidePane();
+  expect(paneShown()).toBe(false);
+  page.close({ channelId: "beta" });
+  await returns.land();
+  expect(page.navigation.snapshot().entry.target).toEqual({
+    ...switchboard,
+    route: { version: 1, params: { tab: "conversation:alpha" } },
+  });
+  expect(paneShown()).toBe(false);
 });
 
 it("reopens a tab with Back without taking focus to its composer", () => {

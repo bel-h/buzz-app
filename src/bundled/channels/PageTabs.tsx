@@ -197,20 +197,18 @@ export function PageTabs({
     const kept = selectedTabId(tabState.getSelected(), survivors) || undefined;
     const fallback = pageTarget(kept);
     if (!fallback || !ids.length) return;
-    const { id } = navigator.snapshot().entry;
-    // A later close before the return lands keeps an opening that waits.
-    pendingReturn.current = {
-      from: id,
-      kept,
-      paneOpen: tabState.paneOpen,
-      ...(returning() &&
-        pendingReturn.current?.open && { open: pendingReturn.current.open }),
-    };
-    navigator.dismiss(
-      (visit) => ids.includes(tabOfVisit(visit)?.tab ?? ""),
-      fallback,
-    );
-    if (navigator.snapshot().entry.id === id) pendingReturn.current = undefined;
+    const { id, target } = navigator.snapshot().entry;
+    const retires = (visit: OpenTarget) =>
+      ids.includes(tabOfVisit(visit)?.tab ?? "");
+    // Only retiring the current visit returns; browser history lands that
+    // return a task later, so it stays pending until the entry changes. A
+    // later close before then names what the return leaves shown, an
+    // opening that waits included, since that opening is selected.
+    pendingReturn.current =
+      retires(target) || returning()
+        ? { from: id, kept, paneOpen: tabState.paneOpen }
+        : undefined;
+    navigator.dismiss(retires, fallback);
   };
   const secondary = useConversationTabs({
     state: tabState,
