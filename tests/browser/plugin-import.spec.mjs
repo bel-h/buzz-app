@@ -380,6 +380,36 @@ test("scrolling a long update review keeps its heading readable", async ({
     path: info.outputPath("update-review-scrolled.png"),
   });
   expect(after.equals(before)).toBe(true);
+  const material = review.locator(
+    ".buzz-dialog-header > .buzz-dialog-bar-material",
+  );
+  const bounds = await material.boundingBox();
+  expect(bounds).not.toBeNull();
+  const clip = {
+    x: bounds.x + 4,
+    y: bounds.y + bounds.height - 3,
+    width: 20,
+    height: 2,
+  };
+  const body = review.locator(":scope > .buzz-dialog-content");
+  for (const colorScheme of ["light", "dark"]) {
+    await page.emulateMedia({ colorScheme });
+    await body.evaluate((node) => {
+      node.style.background = "rgb(255, 0, 0)";
+    });
+    const red = await page.screenshot({ clip });
+    await body.evaluate((node) => {
+      node.style.background = "rgb(0, 0, 255)";
+    });
+    const blue = await page.screenshot({ clip });
+    expect(
+      blue.equals(red),
+      `${colorScheme} header gutter fades into its body`,
+    ).toBe(false);
+    await body.evaluate((node) => {
+      node.style.removeProperty("background");
+    });
+  }
   await review.getByRole("button", { name: "Close", exact: true }).click();
   await expect(review).toHaveCount(0);
 });
