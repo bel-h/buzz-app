@@ -90,6 +90,7 @@ function fake(
   const client: BuzzClient = {
     key: me,
     pubkey: me,
+    community: "https://relay.example",
     effectiveEdit: vi.fn(async (id: string) => {
       const found = events.find((event) => event.id === id);
       if (!found) throw new Error("No effective edit fixture");
@@ -894,6 +895,10 @@ it.each([
   ["explicit thread", { thread: nested }],
   ["message link", { message_url: `buzz://message?channel=chan&id=${nested}` }],
   [
+    "shared link",
+    { message_url: `https://relay.example/channel/chan/${nested}` },
+  ],
+  [
     "message search",
     { message_url: `buzz://message?channel=chan&id=${nested}`, q: "hello" },
   ],
@@ -957,6 +962,23 @@ it.each([
     expect(message.sig).toBe(signature);
   },
 );
+
+it("reads a shared https link only from the community it names", async () => {
+  const { client } = fake(community);
+  for (const message_url of [
+    `https://other.example/channel/chan/${nested}`,
+    `https://relay.example:8443/channel/chan/${nested}`,
+  ])
+    await expect(
+      callTool(client, { channel: "chan", root }, "read", { message_url }),
+    ).rejects.toThrow("another community");
+  const unknown = { ...client, community: undefined };
+  await expect(
+    callTool(unknown, { channel: "chan", root }, "read", {
+      message_url: `https://relay.example/channel/chan/${nested}`,
+    }),
+  ).rejects.toThrow("another community");
+});
 
 const reply = (id: string, created_at: number) =>
   event({
