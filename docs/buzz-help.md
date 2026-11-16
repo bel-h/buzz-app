@@ -1253,9 +1253,10 @@ available rather than silently discarding it.
   **Newest** or **Name**, with **Best match** while searching. Each card shows
   who shared it, the start of its instructions, how many people imported it
   from the Marketplace, and a star button: one star per person, and starring
-  again removes yours. Click a card to open it in the side panel, with its full
-  instructions and **Import**. Stars and imports are public to the community;
-  an owner's own imports aren't counted.
+  again removes yours. Click the import count to import the agent, or **More**
+  to open it in the side panel, with its full instructions and **Import**.
+  Search matches are highlighted. Stars and imports are public to the
+  community; an owner's own imports aren't counted.
 - A shared agent image in a desktop conversation shows **Add agent** beneath
   its name. Choose it to review and import the agent; the preview omits the model.
 - An agent card link, `buzz://agent/new?card=<id>` (a Builderlab card's
