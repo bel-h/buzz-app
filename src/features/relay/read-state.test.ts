@@ -2628,10 +2628,36 @@ describe("expiring unread (version 2)", () => {
     expect(active(owner)).toBe(true);
   });
 
-  it.each(["upkeep", "a live ingest", "learnHomes"] as const)(
-    "a group released by %s wakes exactly one send",
-    async (by) => {
+  it.each(
+    (["upkeep", "a live ingest", "learnHomes"] as const).flatMap((by) =>
+      [false, true].map((pending) => ({ by, pending })),
+    ),
+  )(
+    "a group released by $by wakes exactly one send (failed pending send: $pending)",
+    async ({ by, pending }) => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
       const f = fixture(T);
+      const owner = complete(f, { debounceMs: 10 });
+      await owner.ready;
+      await owner.refresh();
+      const v2 = () =>
+        f.host.publish.mock.calls
+          .map(([event]) => event)
+          .filter((event) =>
+            event.tags.some(
+              ([n, v]) => n === "t" && v === "read-state-unread-v2",
+            ),
+          );
+      let original: RelayEvent | undefined;
+      if (pending) {
+        // The send's outcome is unknown, so its exact bytes stay pending.
+        f.host.publish.mockRejectedValueOnce(new Error("response lost"));
+        await owner.markLocalUnread("room", () => true);
+        await owner.flush();
+        original = f.journal()?.pending?.event;
+        expect(original).toBeDefined();
+        expect(v2()).toHaveLength(1);
+      }
       f.addRemote(
         await peerUnreadMarker(f, "far", 0, {
           createdAt: T,
@@ -2640,48 +2666,58 @@ describe("expiring unread (version 2)", () => {
           clientId: "far",
         }),
       );
-      const owner = complete(f, { debounceMs: 10 });
-      await owner.ready;
       await owner.refresh();
       await owner.flush();
-      expect(f.unread()).toBeUndefined();
+      expect(held(f).far).toHaveLength(1);
+      // A held group refuses the send, including the pending retry.
+      expect(v2()).toHaveLength(pending ? 1 : 0);
+      const revision = f.journal()?.revision ?? 0;
       f.setNow(T + 1);
       // Whichever save settles the release first; upkeep then finds nothing.
       if (by === "upkeep") await owner.upkeep();
       else if (by === "learnHomes") await owner.learnHomes({});
-      else {
+      else
         owner.accept([
           await signReadState(
             {
               slot: "d".repeat(32),
               createdAt: T + 1,
-              blob: { v: 1, client_id: "x", contexts: { room: T } },
+              blob: { v: 1, client_id: "x", contexts: { unrelated: T } },
             },
             f.key.secret,
             T + 1,
           ),
         ]);
-        await vi.waitFor(() => expect(held(f)).toEqual({}));
-      }
+      // Queued behind the ingest, as the timer's upkeep would be.
+      await owner.upkeep();
       expect(held(f)).toEqual({});
-      await owner.upkeep();
+      expect(f.journal()?.revision).toBe(revision + 1);
+      const bytes = (event?: RelayEvent) => JSON.stringify(event);
+      if (original)
+        expect(bytes(f.journal()?.pending?.event)).toBe(bytes(original));
       // No explicit flush: the release itself starts the send.
-      await vi.waitFor(() =>
-        expect(f.unread()).toEqual({
-          far: 0,
-          "ov_s:far": T + 661,
-          "ov_c:far": 0,
-          "ov_b:far": 0,
-        }),
-      );
-      // One send across repeated debounce intervals and another upkeep.
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      await vi.advanceTimersByTimeAsync(10);
+      const sends = v2();
+      if (original) {
+        // The original bytes go out once more, then one newer envelope.
+        expect(sends).toHaveLength(3);
+        expect(bytes(sends[1])).toBe(bytes(original));
+        expect(sends[2]?.id).not.toBe(original.id);
+      } else expect(sends).toHaveLength(1);
+      // The pending mark keeps its stamp; the released group joins it.
+      expect(f.unread()).toMatchObject({
+        ...(pending && { "ov_s:room": T }),
+        far: 0,
+        "ov_s:far": T + 661,
+        "ov_c:far": 0,
+        "ov_b:far": 0,
+      });
+      expect(f.journal()?.pending).toBeUndefined();
+      // Nothing more across further debounce intervals and another upkeep.
+      await vi.advanceTimersByTimeAsync(70);
       await owner.upkeep();
-      await new Promise((resolve) => setTimeout(resolve, 100));
-      const sends = f.host.publish.mock.calls.filter(([event]) =>
-        event.tags.some(([n, v]) => n === "t" && v === "read-state-unread-v2"),
-      );
-      expect(sends).toHaveLength(1);
+      await vi.advanceTimersByTimeAsync(70);
+      expect(v2()).toHaveLength(sends.length);
     },
   );
 
