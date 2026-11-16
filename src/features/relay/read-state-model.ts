@@ -186,7 +186,7 @@ export function parseReadBlob(raw: unknown, journal = false): ParsedReadBlob {
     const contexts = raw.contexts;
     frontiers.clear();
     for (const key of [...overrides.keys()]) {
-      const frontier = contexts[key];
+      const frontier = contexts[escapeContext(key)];
       if (channelContext(key) && uint32(frontier)) frontiers.set(key, frontier);
       else overrides.delete(key);
     }

@@ -469,10 +469,16 @@ export function createReadState({
     announce = true,
   ) {
     if (closed) throw new Error("Read-state session closed");
+    let released = false;
     const saved = await storage.update((current) => {
       if (closed) throw new Error("Read-state session closed");
       const before = current ?? newReadJournal();
-      const next = settleUnread(change(before), now());
+      const changed = change(before);
+      let next = settleUnread(changed, now());
+      // A released held group is new publishable intent, whichever save
+      // settles it: bump once here and wake one publish pass after commit.
+      released = heldCount(next) < heldCount(changed);
+      if (released) next = { ...next, revision: next.revision + 1 };
       // Ingest and publication bookkeeping need not advance revision. Even an
       // equal-valued later save must prevent rolling back a newer receipt.
       if (
@@ -489,6 +495,7 @@ export function createReadState({
     journal = saved;
     state = localState(saved, now());
     armUpkeep();
+    if (released) schedule();
     if (announce) broadcast?.postMessage("changed");
     emit();
     return saved;
@@ -1450,16 +1457,7 @@ export function createReadState({
     }
     return queue(async () => {
       try {
-        // A released group is new publishable intent: one pass sends it.
-        let released = false;
-        await save((current) => {
-          released =
-            heldCount(settleUnread(current, now())) < heldCount(current);
-          return released
-            ? { ...current, revision: current.revision + 1 }
-            : current;
-        });
-        if (released) schedule();
+        await save((current) => current);
       } catch (error) {
         health({ status: "error", error: errorText(error) });
         armUpkeep(60);

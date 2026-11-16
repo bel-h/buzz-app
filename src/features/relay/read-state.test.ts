@@ -2628,34 +2628,62 @@ describe("expiring unread (version 2)", () => {
     expect(active(owner)).toBe(true);
   });
 
-  it("a released group schedules one publish pass that sends it", async () => {
-    const f = fixture(T);
-    f.addRemote(
-      await peerUnreadMarker(f, "far", 0, {
-        createdAt: T,
-        set: T + 661,
-        slot: "c".repeat(32),
-        clientId: "far",
-      }),
-    );
-    const owner = complete(f, { debounceMs: 10 });
-    await owner.ready;
-    await owner.refresh();
-    await owner.flush();
-    expect(f.unread()).toBeUndefined();
-    f.setNow(T + 1);
-    await owner.upkeep();
-    expect(held(f)).toEqual({});
-    // No explicit flush: the release itself starts the send.
-    await vi.waitFor(() =>
-      expect(f.unread()).toEqual({
-        far: 0,
-        "ov_s:far": T + 661,
-        "ov_c:far": 0,
-        "ov_b:far": 0,
-      }),
-    );
-  });
+  it.each(["upkeep", "a live ingest", "learnHomes"] as const)(
+    "a group released by %s wakes exactly one send",
+    async (by) => {
+      const f = fixture(T);
+      f.addRemote(
+        await peerUnreadMarker(f, "far", 0, {
+          createdAt: T,
+          set: T + 661,
+          slot: "c".repeat(32),
+          clientId: "far",
+        }),
+      );
+      const owner = complete(f, { debounceMs: 10 });
+      await owner.ready;
+      await owner.refresh();
+      await owner.flush();
+      expect(f.unread()).toBeUndefined();
+      f.setNow(T + 1);
+      // Whichever save settles the release first; upkeep then finds nothing.
+      if (by === "upkeep") await owner.upkeep();
+      else if (by === "learnHomes") await owner.learnHomes({});
+      else {
+        owner.accept([
+          await signReadState(
+            {
+              slot: "d".repeat(32),
+              createdAt: T + 1,
+              blob: { v: 1, client_id: "x", contexts: { room: T } },
+            },
+            f.key.secret,
+            T + 1,
+          ),
+        ]);
+        await vi.waitFor(() => expect(held(f)).toEqual({}));
+      }
+      expect(held(f)).toEqual({});
+      await owner.upkeep();
+      // No explicit flush: the release itself starts the send.
+      await vi.waitFor(() =>
+        expect(f.unread()).toEqual({
+          far: 0,
+          "ov_s:far": T + 661,
+          "ov_c:far": 0,
+          "ov_b:far": 0,
+        }),
+      );
+      // One send across repeated debounce intervals and another upkeep.
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      await owner.upkeep();
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      const sends = f.host.publish.mock.calls.filter(([event]) =>
+        event.tags.some(([n, v]) => n === "t" && v === "read-state-unread-v2"),
+      );
+      expect(sends).toHaveLength(1);
+    },
+  );
 
   it("a held group from a repeated delivery is kept once", async () => {
     const f = fixture(T);

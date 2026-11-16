@@ -135,6 +135,19 @@ describe("NIP-RS read-state algebra", () => {
       overrides: { side: { set: 5, clear: 0, baseline: 0 } },
     });
   });
+  it("a version-2 record pairs a group with its escaped frontier key", () => {
+    expect(
+      wire({
+        "esc:ov_room": 4,
+        "ov_s:ov_room": 5,
+        "ov_c:ov_room": 0,
+        "ov_b:ov_room": 4,
+      }),
+    ).toEqual({
+      frontiers: { ov_room: 4 },
+      overrides: { ov_room: { set: 5, clear: 0, baseline: 4 } },
+    });
+  });
   it("a version-2 record keeps a tombstone with its paired frontier, and version 1 keeps frontiers", () => {
     expect(wire({ room: 7, "ov_c:room": 3, other: 9 })).toEqual({
       frontiers: { room: 7 },
