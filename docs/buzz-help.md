@@ -443,6 +443,10 @@ and are asked to sign in again in Buzz.
   without sharable attachment metadata (including custom emoji), show an
   explanation before sending. Forward and Copy as forward are disabled; **Copy link** is available
   in the dialog. A link still requires access to the original conversation.
+- A link to a Buzz message shows that message as a card below the bubble:
+  its author, channel, time and text, or why it can't be shown. Clicking the
+  card opens the message. A message shows cards for its first three message
+  links. Write the link as `<buzz://message?…>` to leave out its card.
 - Select text in a message, such as by double-clicking a word, then right-click
   the highlight and choose **Quote highlight** (or press Q) to add it to that
   conversation's draft as a quote, ready for your reply below it. Published

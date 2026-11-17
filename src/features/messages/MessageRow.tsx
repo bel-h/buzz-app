@@ -102,7 +102,8 @@ import {
 } from "../relay/message-content";
 import styles from "./Messages.module.css";
 import { LinkPreviews } from "./LinkPreviews";
-import { previewLinks } from "./preview-links";
+import { previewLinks, previewMessageLinks } from "./preview-links";
+import { MessageLinkCards } from "./MessageLinkCards";
 import { usesLargeEmojiPresentation } from "./emoji-size";
 import { separateChatCards } from "./chat-cards";
 import { MessageReactionControls, MessageReactions } from "./MessageReactions";
@@ -721,6 +722,13 @@ function MessageRowContent({
       displayRow.content,
       row.attachments,
     ],
+  );
+  const messageLinkUrls = useMemo(
+    () =>
+      session && markdownBody && !row.agentEnvelope
+        ? previewMessageLinks(displayRow.content)
+        : [],
+    [session, markdownBody, row.agentEnvelope, displayRow.content],
   );
   const claimed = (attachment: ChannelMessage["attachments"][number]) => {
     try {
@@ -1758,6 +1766,15 @@ function MessageRowContent({
                   {reactionsInBubble && reactionContent}
                 </div>
               )}
+              {session && messageLinkUrls.length > 0 && (
+                <MessageLinkCards
+                  urls={messageLinkUrls}
+                  session={session}
+                  scope={scope}
+                  onOpenLink={openLink}
+                />
+              )}
+
               {previewUrls.length > 0 && (
                 <LinkPreviews
                   urls={previewUrls}
