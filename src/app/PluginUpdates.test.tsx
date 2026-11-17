@@ -703,6 +703,11 @@ it.each([
     await waitFor(() =>
       expect(f.installRequests.updates?.getSnapshot().status).toBe("fresh"),
     );
+    const capability = f.installRequests.updates;
+    const staleToken = capability?.getSnapshot().candidates[0]?.token;
+    if (!capability || !staleToken)
+      throw new Error("Expected a fresh update token");
+    f.plugin.revision = "changed while refresh runs";
 
     let releaseCheck!: () => void;
     f.imports.checkGit.mockImplementationOnce(
@@ -711,23 +716,40 @@ it.each([
           releaseCheck = () => resolve(f.discovered);
         }),
     );
-    const refresh = f.installRequests.updates?.refresh();
-    if (!refresh) throw new Error("Expected an update capability");
-    await waitFor(() => expect(f.imports.checkGit).toHaveBeenCalledTimes(2));
-    expect(f.imports.checkGit).toHaveBeenLastCalledWith(
-      repository,
-      "main",
-      undefined,
-      { commit: undefined, path },
-    );
+    const refresh = capability.refresh();
+    try {
+      await waitFor(() => {
+        expect(f.imports.checkGit).toHaveBeenCalledTimes(2);
+        expect(releaseCheck).toBeTypeOf("function");
+      });
+      expect(f.imports.checkGit).toHaveBeenLastCalledWith(
+        repository,
+        "main",
+        undefined,
+        { commit: undefined, path },
+      );
 
-    fireEvent.click(update);
-    await act(async () => {
-      releaseCheck();
-      await refresh;
-    });
+      fireEvent.click(update);
+      expect(f.installImport).not.toHaveBeenCalled();
+    } finally {
+      await act(async () => {
+        releaseCheck();
+        await refresh;
+      });
+    }
 
     expect(f.imports.checkGit).toHaveBeenCalledTimes(2);
+    expect(capability.getSnapshot()).toMatchObject({
+      status: "fresh",
+      candidates: [
+        {
+          id: "example.notes",
+          installedRevision: "changed while refresh runs",
+          candidateRevision: "new",
+        },
+      ],
+    });
+    expect(capability.getSnapshot().candidates[0]?.token).not.toBe(staleToken);
     const confirm = await screen.findByRole("button", {
       name: /^Update$/,
     });
@@ -735,6 +757,11 @@ it.each([
     if (!review) throw new Error("Expected the update review dialog");
     expect(review).toHaveAccessibleName("Update Notes");
     expect(confirm).toBeEnabled();
+    expect(f.plugin.enabled).toBe(true);
+    expect(f.plugin.updateChecks).toBeUndefined();
+    expect(f.plugin.updateSource).toBe(f.source);
+    expect(f.manager.change).not.toHaveBeenCalled();
+    expect(f.navigation.open).not.toHaveBeenCalled();
     expect(f.installImport).not.toHaveBeenCalled();
   },
 );
