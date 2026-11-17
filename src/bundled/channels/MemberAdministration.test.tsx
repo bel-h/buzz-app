@@ -63,7 +63,7 @@ async function setup(
   messageNavigation = true,
   initialReads?: { names?: Promise<void>; roster?: Promise<void> },
   ownership?: "own" | "other" | "invalid",
-  visibility: "private" | "public" = "private",
+  visibility: "private" | "public" | "solo" = "private",
   targetPicture?: string,
   targetProfiled = true,
 ) {
@@ -116,7 +116,13 @@ async function setup(
       kind: 39000,
       created_at: tick,
       content: "",
-      tags: [["d", id], ["t", "stream"], [visibility], ["name", "Design"]],
+      tags: [
+        ["d", id],
+        ["t", "stream"],
+        [visibility === "solo" ? "private" : visibility],
+        ...(visibility === "solo" ? [["t", "buzz.solo"]] : []),
+        ["name", "Design"],
+      ],
     }),
     signed(relay, {
       kind: 39001,
@@ -773,6 +779,55 @@ it("keeps resolved rows and focus while refreshing, and reopens warm without a s
   }
 });
 
+it.each([
+  ["owner", true, true],
+  ["owner", false, false],
+  ["admin", true, false],
+] as const)(
+  "Solo %s sees agent=%s role controls only when permitted",
+  async (actor, agent, allowed) => {
+    const t = await setup(
+      actor,
+      "admin",
+      true,
+      undefined,
+      agent,
+      undefined,
+      false,
+      true,
+      undefined,
+      undefined,
+      "solo",
+    );
+    await t.user.click(
+      screen.getByRole("button", { name: /^Actions for Morgan$/ }),
+    );
+    await screen.findByRole("menuitem", { name: "View profile" });
+    expect(screen.queryAllByRole("menuitemradio")).toHaveLength(
+      allowed ? 3 : 0,
+    );
+    expect(
+      screen.queryByRole("menuitem", { name: "Transfer ownership" }),
+    ).not.toBeInTheDocument();
+    if (!allowed) return;
+    await t.user.click(
+      screen.getByRole("menuitemradio", { name: "Viewing only" }),
+    );
+    const dialog = await screen.findByRole("dialog", {
+      name: "Change access to Viewing only?",
+    });
+    expect(t.publish).not.toHaveBeenCalled();
+    await t.user.click(
+      within(dialog).getByRole("button", { name: "Set to viewing only" }),
+    );
+    await vi.waitFor(() =>
+      expect(
+        t.session.memberAdministration.snapshot(id).operation?.status,
+      ).toBe("confirmed"),
+    );
+    expect(t.publish).toHaveBeenCalledOnce();
+  },
+);
 it("presents verified roles, protects owners/self, and confirms a separate deliberate role intent", async () => {
   const t = await setup();
   await expectProfileOnly(t.user, "Carl");

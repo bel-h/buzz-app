@@ -472,6 +472,9 @@ and are asked to sign in again in Buzz.
   the chat; anyone else outside the chat is only named: not added and not
   notified, and the picker row says so. People already in the chat are notified
   as usual. The toolbar's agent menu lists agents only.
+  A Solo chat owner can open an existing agent’s menu in **Share access**,
+  choose **Admin**, **Participating** or **Viewing only**, and confirm. These
+  role choices apply only to agents already in the chat.
   New chats start **Ongoing** unless **Chat settings** chooses **Temporary**,
   which archives the chat after a set time without activity. To start every new
   chat temporary, open the community's **Settings → Local settings** and choose

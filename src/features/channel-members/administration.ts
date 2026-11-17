@@ -10,6 +10,7 @@ import { lifecycleChannelId } from "../relay/channel-lifecycle-protocol";
 import {
   authorizeMemberChange,
   canRemoveMember,
+  canManageMember,
   memberAdministrationTemplate,
   memberAuthority,
   memberChangeConfirmed,
@@ -34,6 +35,7 @@ const empty: MemberAdministrationState = Object.freeze({
   authority: Object.freeze({
     roles: Object.freeze({}),
     canManage: false,
+    canManageAgents: false,
     canRemove: false,
     canRemoveOwnedAgent: false,
     system: false,
@@ -241,6 +243,18 @@ export function createMemberAdministration({
               agent =
                 !event || !!foldProfiles([event]).get(change.pubkey)?.isAgent;
               if (agent) throw new Error(transferRefusal);
+            }
+            if (
+              authority.canManageAgents &&
+              change.role !== "remove" &&
+              change.role !== "owner" &&
+              canManageMember(authority, viewer, change.pubkey, true)
+            ) {
+              // A fresh signed profile must confirm the Solo-only exception
+              // on both preflights; roster roles and display hints aren't proof.
+              const event = await profile();
+              agent =
+                !!event && !!foldProfiles([event]).get(change.pubkey)?.isAgent;
             }
             authorizeMemberChange(authority, viewer, change, owner, agent);
           };

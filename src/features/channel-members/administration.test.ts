@@ -441,7 +441,7 @@ it("lets a Solo chat owner remove a participant", async () => {
     ],
   });
 });
-it("never lets a Solo chat owner change roles", async () => {
+it("never lets a Solo chat owner change a person's role", async () => {
   const h = soloHarness();
   await h.owner.capability.run(id, change);
   expect(h.sign).not.toHaveBeenCalled();
@@ -552,6 +552,7 @@ it.each(["ack", "lost", "read"])(
       authority: {
         roles: {},
         canManage: false,
+        canManageAgents: false,
         canRemove: false,
         canRemoveOwnedAgent: false,
         system: false,
@@ -593,6 +594,7 @@ it.each(["access", "invalid ID"])(
       authority: {
         roles: {},
         canManage: false,
+        canManageAgents: false,
         canRemove: false,
         canRemoveOwnedAgent: false,
         system: false,
@@ -620,6 +622,7 @@ it.each(["clear", "dispose"] as const)(
       authority: {
         roles: {},
         canManage: false,
+        canManageAgents: false,
         canRemove: false,
         canRemoveOwnedAgent: false,
         system: false,
@@ -808,6 +811,7 @@ it.each(["cache", "access"] as const)(
         authority: {
           roles: {},
           canManage: false,
+          canManageAgents: false,
           canRemove: false,
           canRemoveOwnedAgent: false,
           system: false,
@@ -823,6 +827,7 @@ it.each(["cache", "access"] as const)(
       expect(admin.snapshot(id).authority).toEqual({
         roles: {},
         canManage: false,
+        canManageAgents: false,
         canRemove: false,
         canRemoveOwnedAgent: false,
         system: false,
@@ -1175,6 +1180,79 @@ function transferHarness(
   h.setProfiles(profiles);
   return h;
 }
+function soloAgent(actor = "owner", role = "bot", profiles = [agentProfile()]) {
+  const h = transferHarness(actor, role, profiles);
+  h.setEvents([
+    h.record(39000, [
+      ["d", id],
+      ["t", "stream"],
+      ["t", SOLO_LABEL],
+    ]),
+    ...h.events().slice(1),
+  ]);
+  return h;
+}
+it("lets the chat owner edit another owner's agent without granting identity-less authority", async () => {
+  const h = soloAgent("owner", "bot", [agentProfile(relayKey)]);
+  const intent = { ...change, expectedRole: "bot" } as const;
+  const state = memberAuthority(h.events(), id, viewer, author);
+  expect(() => authorizeMemberChange(state, viewer, intent)).toThrow();
+  await h.owner.capability.run(id, intent);
+  expect(h.publish).toHaveBeenCalledOnce();
+});
+it.each([
+  ["bot", "admin"],
+  ["admin", "member"],
+  ["admin", "guest"],
+] as const)(
+  "lets a Solo owner change an agent from %s to %s",
+  async (before, role) => {
+    const h = soloAgent("owner", before);
+    await h.owner.capability.run(id, { ...change, expectedRole: before, role });
+    expect(h.publish).toHaveBeenCalledOnce();
+    expect(h.owner.capability.snapshot(id).operation?.status).toBe("confirmed");
+  },
+);
+it.each(["admin", "member", "guest"])(
+  "denies a Solo %s an agent role edit",
+  async (actor) => {
+    const h = soloAgent(actor);
+    await h.owner.capability.run(id, { ...change, expectedRole: "bot" });
+    expect(h.sign).not.toHaveBeenCalled();
+  },
+);
+it.each(["person", "missing", "transfer", "addition"])(
+  "keeps Solo %s restrictions",
+  async (failure) => {
+    const h = soloAgent(
+      "owner",
+      "member",
+      failure === "person"
+        ? [personProfile()]
+        : failure === "missing"
+          ? []
+          : [agentProfile()],
+    );
+    await h.owner.capability.run(id, {
+      ...change,
+      ...(failure === "transfer" ? { role: "owner" } : {}),
+      ...(failure === "addition"
+        ? { pubkey: author, expectedRole: "absent" }
+        : {}),
+    });
+    expect(h.sign).not.toHaveBeenCalled();
+  },
+);
+it("rechecks the Solo target profile after signing", async () => {
+  const h = soloAgent();
+  h.sign.mockImplementationOnce(async (template) => {
+    h.setProfiles([personProfile()]);
+    return finalizeEvent(structuredClone(template), key);
+  });
+  await h.owner.capability.run(id, { ...change, expectedRole: "bot" });
+  expect(h.sign).toHaveBeenCalledOnce();
+  expect(h.publish).not.toHaveBeenCalled();
+});
 it("transfers ownership in one event that steps the viewer down to admin", async () => {
   const h = transferHarness();
   await h.owner.capability.run(id, transfer);
@@ -1202,6 +1280,7 @@ it("never offers a transfer to a co-owner", () => {
   const state = {
     roles: { [viewer]: "owner" as const, [target]: "owner" as const },
     canManage: true,
+    canManageAgents: false,
     canRemove: true,
     canRemoveOwnedAgent: false,
     system: false,
@@ -1231,6 +1310,7 @@ it("authorizes a system-channel add only for a non-member other than the viewer 
   const state = {
     roles: { [viewer]: "owner" as const, [author]: "member" as const },
     canManage: true,
+    canManageAgents: false,
     canRemove: true,
     canRemoveOwnedAgent: false,
     system: true,

@@ -317,7 +317,8 @@ export function MemberRow({
   const permitted =
     !invitationAction && capability.available && state.status === "ready";
   const canEdit =
-    permitted && canManageMember(state.authority, session.viewer ?? "", pubkey);
+    permitted &&
+    canManageMember(state.authority, session.viewer ?? "", pubkey, agent);
   const canTransfer =
     permitted &&
     canTransferOwnership(state.authority, session.viewer ?? "", pubkey, agent);

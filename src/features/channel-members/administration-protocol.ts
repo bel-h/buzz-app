@@ -22,6 +22,8 @@ export type MemberChange = Readonly<{
 export type MemberAuthority = Readonly<{
   roles: Readonly<Record<string, MemberRole>>;
   canManage: boolean;
+  /** Solo owners may edit existing agents, without enabling other role changes. */
+  canManageAgents: boolean;
   canRemove: boolean;
   canRemoveOwnedAgent: boolean;
   /** A NIP-CL system channel, where administration may also add members. */
@@ -95,11 +97,12 @@ export function memberAuthority(
       "Member roles are inconsistent. Refresh members and roles.",
     );
   const activeChannel = type !== "dm" && archived !== "true";
-  // In Solo chats only owners and admins remove people; nobody changes roles.
+  // Solo role edits are limited to the owner's existing agent participants.
   const solo = !!soloLabels(channelIdentity(metadata).labels);
   return Object.freeze({
     roles: Object.freeze(roles),
     canManage: activeChannel && !solo && elevated.has(viewer),
+    canManageAgents: activeChannel && solo && elevated.get(viewer) === "owner",
     canRemove: activeChannel && elevated.has(viewer),
     canRemoveOwnedAgent:
       activeChannel && !solo && !!roles[viewer] && roles[viewer] !== "unknown",
@@ -111,10 +114,11 @@ export function canManageMember(
   state: MemberAuthority,
   viewer: string,
   key: string,
+  agent = false,
 ) {
   const role = state.roles[key];
   return (
-    state.canManage &&
+    (state.canManage || (state.canManageAgents && agent)) &&
     key !== viewer &&
     !!role &&
     role !== "owner" &&
@@ -163,8 +167,8 @@ export function authorizeMemberChange(
   viewer: string,
   change: MemberChange,
   owner?: string,
-  /** Whether `change.pubkey` is an agent; unknown counts as one. */
-  agent = true,
+  /** Verified target identity; unknown cannot grant access or receive ownership. */
+  agent?: boolean,
 ) {
   if (change.expectedRole === "none") {
     // This sentinel is reserved for the system-channel setup path.
@@ -190,8 +194,8 @@ export function authorizeMemberChange(
       : change.role === "remove"
         ? canRemoveMember(state, viewer, change.pubkey, owner)
         : change.role === "owner"
-          ? canTransferOwnership(state, viewer, change.pubkey, agent)
-          : canManageMember(state, viewer, change.pubkey) &&
+          ? canTransferOwnership(state, viewer, change.pubkey, agent !== false)
+          : canManageMember(state, viewer, change.pubkey, agent === true) &&
             isEditableMemberRole(change.role)) ||
     (change.expectedRole !== "absent" &&
       state.roles[change.pubkey] !== change.expectedRole) ||

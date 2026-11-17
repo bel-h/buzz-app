@@ -67,6 +67,7 @@ export const test = base.extend({
   sortingSidebar: [false, { option: true }],
   initialSidebarSort: [{}, { option: true }],
   channelLifecycle: [false, { option: true }],
+  memberRoleChanges: [false, { option: true }],
   leaveRosterBeforeAck: [false, { option: true }],
   guestPermalinks: [false, { option: true }],
   lifecycleRole: ["owner", { option: true }],
@@ -161,6 +162,7 @@ export const test = base.extend({
       sortingSidebar,
       initialSidebarSort,
       channelLifecycle,
+      memberRoleChanges,
       leaveRosterBeforeAck,
       guestPermalinks,
       lifecycleRole,
@@ -2171,13 +2173,17 @@ export const test = base.extend({
           // The production broker advertises read-state writes for every session,
           // not only tests opting into complete snapshot reads.
           acceptPublication: acceptReadPublication,
-          ...(actionProfile || channelLifecycle
+          ...(actionProfile || channelLifecycle || memberRoleChanges
             ? {
                 latencyMs: 40,
                 holdOlder: false,
                 acceptPublication: (community, event) => {
                   expect(verifyEvent(event)).toBe(true);
                   expect(event.pubkey).toBe(viewer);
+                  if (memberRoleChanges && event.kind === 9000) {
+                    report.publications.push({ community, event });
+                    return;
+                  }
                   if (
                     channelLifecycle &&
                     [9002, 9008, 9021, 9022, 41012].includes(event.kind)
