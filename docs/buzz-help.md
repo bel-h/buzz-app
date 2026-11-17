@@ -1256,8 +1256,9 @@ available rather than silently discarding it.
   again removes yours. Click the import count to import the agent, or **More**
   to open it in the side panel, with its full instructions, when it was last
   updated and **Import**. Search matches are highlighted on the card and in
-  the panel. If stars and imports can't load, the Marketplace still lists
-  agents, without them. Stars and imports are public to the
+  the panel. If stars and imports can't load, or take more than a few
+  seconds, the Marketplace still lists agents, without them. Counts are
+  self-reported: they show who starred or imported, not proof of use. Stars and imports are public to the
   community; an owner's own imports aren't counted.
 - A shared agent image in a desktop conversation shows **Add agent** beneath
   its name. Choose it to review and import the agent; the preview omits the model.

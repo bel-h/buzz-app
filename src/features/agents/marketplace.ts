@@ -5,7 +5,9 @@
 // address as `a`, and `k` = 30175. An import is the same reaction with content
 // "📥", published once a copy is made here. Counts are read by `#a`, so they
 // carry across edits. Unstarring deletes your reactions (kind 5), one per
-// event; imports are never undone.
+// event; imports are never undone. Counts are self-reported: anyone can
+// publish a reaction, so they show who said they starred or imported, at
+// most once per person.
 import type { Outbox } from "../relay/outbox";
 import type { EventData, ReadFilter } from "../relay/events";
 import type { RelaySession } from "../relay/session";
@@ -75,26 +77,33 @@ export type Reactions = Readonly<{
 }>;
 
 /** Stars and imports on these agents as the relay has them, not this
- * device's unsent writes. The relay withholds deleted reactions. */
+ * device's unsent writes. The relay withholds deleted reactions. Everyone's
+ * reactions are capped, so the viewer's own are read apart: whatever else is
+ * published on an agent, your star shows and unstarring finds it. */
 export async function readReactions(
   session: Reader,
   agents: readonly SharedAgent[],
   signal: AbortSignal,
+  viewer?: string,
 ): Promise<Reactions> {
   const stars = new Map<string, Map<string, string[]>>();
   const imports = new Map<string, Set<string>>();
   const addresses = [...new Set(agents.map(address))];
   const wanted = new Set(addresses);
-  for (let i = 0; i < addresses.length; i += ADDRESS_CHUNK) {
-    const page = await readAll(
+  const read = (filter: Omit<ReadFilter, "limit">) =>
+    readAll(
       (filters, settings) => session.readRemote(filters, settings),
-      {
-        kinds: [REACTION_KIND],
-        "#a": addresses.slice(i, i + ADDRESS_CHUNK),
-      },
+      filter,
       signal,
       { limit: READ_LIMIT, maxPages: REACTION_PAGES },
     );
+  for (let i = 0; i < addresses.length; i += ADDRESS_CHUNK) {
+    const filter = {
+      kinds: [REACTION_KIND],
+      "#a": addresses.slice(i, i + ADDRESS_CHUNK),
+    };
+    const page = await read(filter);
+    if (viewer) page.push(...(await read({ ...filter, authors: [viewer] })));
     for (const event of page) {
       if (event.kind !== REACTION_KIND) continue;
       const target = event.tags.find(
@@ -125,6 +134,8 @@ export function importCount(reactions: Reactions, agent: SharedAgent) {
 export const starCount = (reactions: Reactions, agent: SharedAgent) =>
   reactions.stars.get(address(agent))?.size ?? 0;
 
+// No `p` tag for the owner, though NIP-25 suggests one: it would notify them
+// of every star and import.
 const reaction = (agent: SharedAgent, content: string) => ({
   kind: REACTION_KIND,
   content,
@@ -205,6 +216,17 @@ export function createMarketplace(
   };
   const outbox = session.outbox;
   const loaded = new Set<string>();
+  /** Whether importing `agent` now would publish an import record. */
+  const recordable = (
+    agent: SharedAgent,
+    current: MarketplaceState = state,
+  ): boolean =>
+    !!outbox &&
+    !!viewer &&
+    viewer !== agent.owner &&
+    current.status === "ready" &&
+    !current.imports.get(address(agent))?.has(viewer) &&
+    outbox.supports(REACTION_KIND);
   return {
     subscribe(listener: () => void) {
       listeners.add(listener);
@@ -223,7 +245,7 @@ export function createMarketplace(
       if (state.status === "error")
         update({ status: "loading", error: undefined });
       try {
-        const reactions = await readReactions(session, missing, signal);
+        const reactions = await readReactions(session, missing, signal, viewer);
         if (signal.aborted) return;
         const stars = new Map(state.stars);
         const imports = new Map(state.imports);
@@ -316,19 +338,12 @@ export function createMarketplace(
         update({ pending });
       }
     },
+    recordable,
     /** Counts a copy made here, once per person and never its owner's own.
      * The copy already stands, so a refusal only loses the count. */
     async recordImport(agent: SharedAgent) {
       const key = address(agent);
-      if (
-        !outbox ||
-        !viewer ||
-        viewer === agent.owner ||
-        state.status !== "ready" ||
-        state.imports.get(key)?.has(viewer) ||
-        !outbox.supports(REACTION_KIND)
-      )
-        return;
+      if (!outbox || !viewer || !recordable(agent)) return;
       const people = state.imports.get(key);
       update({
         imports: changed(state.imports, key, new Set(people).add(viewer)),

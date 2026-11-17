@@ -1244,8 +1244,79 @@ it("reads counts once per session, and again only for agents new since", async (
   read.mockResolvedValue([alpha, beta]);
   render(<AgentBrowse relay={relay} {...importing()} />);
   await screen.findByText("Beta");
-  expect(readRemote).toHaveBeenCalledTimes(2);
-  expect(readRemote.mock.calls[1]?.[0]).toEqual([
-    { kinds: [7], "#a": [`30175:${beta.pubkey}:beta`], limit: 500 },
+  // Everyone's reactions, then your own, for each load.
+  expect(readRemote).toHaveBeenCalledTimes(4);
+  const betaOnly = { kinds: [7], "#a": [`30175:${beta.pubkey}:beta`] };
+  expect(readRemote.mock.calls.slice(2).map((call) => call[0])).toEqual([
+    [{ ...betaOnly, limit: 500 }],
+    [{ ...betaOnly, authors: [viewer], limit: 500 }],
   ]);
+});
+
+it("shows agents without counts when counts take more than 5 seconds", async () => {
+  vi.useFakeTimers();
+  try {
+    render(
+      <AgentBrowse
+        relay={community(
+          vi.fn().mockResolvedValue([listing("Alpha")]),
+          directory(),
+          { readRemote: vi.fn(() => new Promise(() => {})) },
+        )}
+        {...importing()}
+      />,
+    );
+    await act(() => vi.advanceTimersByTimeAsync(4_999));
+    expect(screen.queryByText("Alpha")).toBeNull();
+    await act(() => vi.advanceTimersByTimeAsync(1));
+    expect(screen.getByText("Alpha")).toBeVisible();
+    // Still loading: no count, and nothing to toggle yet.
+    expect(screen.getByRole("button", { name: "Star Alpha" })).toBeDisabled();
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it("finds your own star even when everyone's reactions miss it", async () => {
+  const alpha = listing("Alpha");
+  const readRemote = vi.fn(async ([filter]: { authors?: string[] }[]) =>
+    filter?.authors ? [reactionOn(alpha, "⭐", viewer)] : [],
+  );
+  render(
+    <AgentBrowse
+      relay={community(vi.fn().mockResolvedValue([alpha]), directory(), {
+        readRemote,
+      })}
+      {...importing()}
+    />,
+  );
+  expect(
+    await screen.findByRole("button", { name: "Unstar Alpha, 1 star" }),
+  ).toHaveAttribute("aria-pressed", "true");
+});
+
+it("records nothing, and says nothing public, when you import your own agent", async () => {
+  const mine = listing("Alpha", { owner: viewer });
+  const writes = outbox();
+  const props = importing();
+  render(
+    <AgentBrowse
+      relay={community(vi.fn().mockResolvedValue([mine]), directory(), {
+        writes,
+      })}
+      {...props}
+    />,
+  );
+  fireEvent.click(
+    await screen.findByRole("button", { name: "More about Alpha" }),
+  );
+  const panel = await screen.findByRole("region", {
+    name: "Shared agent profile",
+  });
+  fireEvent.click(within(panel).getByRole("button", { name: "Import" }));
+  const dialog = await screen.findByRole("dialog");
+  expect(within(dialog).queryByText(/counted publicly/)).toBeNull();
+  fireEvent.click(within(dialog).getByRole("button", { name: "Import" }));
+  await vi.waitFor(() => expect(props.onImported).toHaveBeenCalled());
+  expect(writes.sent).toEqual([]);
 });

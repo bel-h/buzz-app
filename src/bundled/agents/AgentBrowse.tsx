@@ -89,6 +89,8 @@ import styles from "./AgentBrowse.module.css";
 const pageSize = 200;
 /** At most 10,000 catalog events, as the community catalog reads. */
 const maxPages = 50;
+/** How long the grid waits for counts before showing agents without them. */
+const COUNT_WAIT_MS = 5_000;
 
 type Sort = "relevance" | "stars" | "imports" | "newest" | "name";
 const SORTS = [
@@ -216,8 +218,17 @@ function SharedAgentList({
       );
       const listed = sharedAgents(events);
       // Shown once, with its counts, so sorting by them doesn't reorder it
-      // as they arrive. Counts that can't load leave browsing working.
-      await marketplace.load(listed, signal);
+      // as they arrive. Counts that can't load leave browsing working, and
+      // slow ones stop holding it after a few seconds: they fill in later
+      // without moving the cards.
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      await Promise.race([
+        marketplace.load(listed, signal),
+        new Promise((resolve) => {
+          timer = setTimeout(resolve, COUNT_WAIT_MS);
+        }),
+      ]);
+      clearTimeout(timer);
       signal.throwIfAborted();
       setAgents(listed);
     })()
@@ -775,6 +786,7 @@ function ImportShared({
 }) {
   const [open, setOpen] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
+  const counts = useMarketplace(marketplace);
   const props = { shared, agents, types, onOpen, openSettings };
   return (
     <>
@@ -796,7 +808,7 @@ function ImportShared({
             void marketplace.recordImport(shared);
             onImported(agent);
           }}
-          counted
+          counted={marketplace.recordable(shared, counts)}
           onClose={() => setOpen(false)}
           finalFocus={trigger}
         />
@@ -1102,7 +1114,8 @@ export function SharedImportDialog({
         {counted && (
           <p className="m-0 text-body-sm text-secondary">
             Imports from the Marketplace are counted publicly: anyone in this
-            community can see who imported this agent.
+            community can see who imported this agent, and the record can’t be
+            undone.
           </p>
         )}
         {(refused || error) && (
