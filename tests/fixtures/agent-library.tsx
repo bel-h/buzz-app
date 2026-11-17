@@ -1,3 +1,6 @@
+// Global styles first, as in the app entry, so they declare the cascade layer
+// order before any component stylesheet.
+import "../../src/shared/styles/globals.css";
 import { createAppearance } from "../../src/shared/theme/service";
 import { ClaudeLogoIcon } from "../../src/shared/design-system/icons";
 import { agentAvatars } from "../../src/features/agents/avatar-packs";
@@ -26,7 +29,6 @@ import { createTabs as createClaudeTabs } from "../../src/bundled/claude-code/ta
 import { DEFAULT_CONFIG as claudeDefaults } from "../../src/bundled/claude-code/runtime";
 import { createTabs as createCodexTabs } from "../../src/bundled/codex/tabs";
 import { defaults as codexDefaults } from "../../src/bundled/codex/config";
-import "../../src/shared/styles/globals.css";
 
 const harness = new URLSearchParams(location.search).get("harness");
 const settingsSync = new URLSearchParams(location.search).has("settingsSync");
