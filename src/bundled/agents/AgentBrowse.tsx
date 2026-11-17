@@ -222,13 +222,16 @@ function SharedAgentList({
       // slow ones stop holding it after a few seconds: they fill in later
       // without moving the cards.
       let timer: ReturnType<typeof setTimeout> | undefined;
-      await Promise.race([
-        marketplace.load(listed, signal),
-        new Promise((resolve) => {
-          timer = setTimeout(resolve, COUNT_WAIT_MS);
-        }),
-      ]);
-      clearTimeout(timer);
+      try {
+        await Promise.race([
+          marketplace.load(listed, signal),
+          new Promise((resolve) => {
+            timer = setTimeout(resolve, COUNT_WAIT_MS);
+          }),
+        ]);
+      } finally {
+        clearTimeout(timer);
+      }
       signal.throwIfAborted();
       setAgents(listed);
     })()
@@ -787,6 +790,7 @@ function ImportShared({
   const [open, setOpen] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
   const counts = useMarketplace(marketplace);
+  const counted = marketplace.recordable(shared, counts);
   const props = { shared, agents, types, onOpen, openSettings };
   return (
     <>
@@ -805,10 +809,12 @@ function ImportShared({
         <SharedImportDialog
           {...props}
           onImported={(agent) => {
-            void marketplace.recordImport(shared);
+            // Only as the notice said when Import was pressed: counts that
+            // arrive while importing don't make it public after the fact.
+            if (counted) void marketplace.recordImport(shared);
             onImported(agent);
           }}
-          counted={marketplace.recordable(shared, counts)}
+          counted={counted}
           onClose={() => setOpen(false)}
           finalFocus={trigger}
         />

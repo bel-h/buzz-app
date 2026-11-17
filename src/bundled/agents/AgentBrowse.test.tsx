@@ -1320,3 +1320,54 @@ it("records nothing, and says nothing public, when you import your own agent", a
   await vi.waitFor(() => expect(props.onImported).toHaveBeenCalled());
   expect(writes.sent).toEqual([]);
 });
+
+it("publishes no import record when counts arrive after Import was pressed without the notice", async () => {
+  const alpha = listing("Alpha", { owner: "c1".repeat(32) });
+  let release: (events: EventData[]) => void = () => {};
+  const counts = new Promise<EventData[]>((resolve) => {
+    release = resolve;
+  });
+  let finish: () => void = () => {};
+  const props = importing();
+  props.agents.port.mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        finish = () => resolve({ agent: imported, notes: [] });
+      }),
+  );
+  const writes = outbox();
+  vi.useFakeTimers();
+  try {
+    render(
+      <AgentBrowse
+        relay={community(vi.fn().mockResolvedValue([alpha]), directory(), {
+          readRemote: vi.fn(() => counts),
+          writes,
+        })}
+        {...props}
+      />,
+    );
+    await act(() => vi.advanceTimersByTimeAsync(5_000));
+    fireEvent.click(screen.getByRole("button", { name: "More about Alpha" }));
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    const panel = screen.getByRole("region", { name: "Shared agent profile" });
+    fireEvent.click(within(panel).getByRole("button", { name: "Import" }));
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).queryByText(/counted publicly/)).toBeNull();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Import" }));
+    // Counts load while the import is still running.
+    await act(async () => {
+      release([]);
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    await act(async () => {
+      finish();
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(props.onImported).toHaveBeenCalled();
+    expect(writes.sent).toEqual([]);
+  } finally {
+    vi.useRealTimers();
+  }
+});
