@@ -1,6 +1,5 @@
 import { test, expect } from "./fixture.mjs";
 import { openPage } from "./navigation.mjs";
-import { pauseClock } from "./clock.mjs";
 
 const blocked = "11111111-1111-4111-8111-111111111111";
 const healthy = "22222222-2222-4222-8222-222222222222";
@@ -60,7 +59,19 @@ test("watch catch-up survives one rejected history read and shows recovery in At
   await page
     .getByRole("button", { name: "Details for History recovery", exact: true })
     .click();
-  await pauseClock(page);
+  await expect
+    .poll(() =>
+      page.evaluate(
+        (channels) => {
+          const session = window.localAgentFixture
+            .services()
+            .relay.snapshot().session;
+          return channels.map((id) => session.attendPending(id));
+        },
+        [blocked, healthy],
+      ),
+    )
+    .toEqual([false, false]);
   const stamp = await page.evaluate(() => Math.floor(Date.now() / 1000));
   for (const [channel, content] of [
     [blocked, "Blocked history marker"],
@@ -75,49 +86,55 @@ test("watch catch-up survives one rejected history read and shows recovery in At
       }),
     );
   }
-  await page.evaluate((blocked) => {
-    const { relay } = window.localAgentFixture.services();
-    const session = relay.snapshot().session;
-    const original = session.read.bind(session);
-    const state = { active: true, failures: 0, down: false, recovered: false };
+  let failing = true;
+  let failures = 0;
+  const rejectHistory = async (route) => {
+    const filters = route.request().postDataJSON();
+    if (
+      failing &&
+      filters.some(
+        (filter) =>
+          filter["#h"]?.includes(blocked) &&
+          filter.kinds?.includes(9) &&
+          filter.limit === 16 &&
+          filter.until !== undefined,
+      )
+    ) {
+      failures++;
+      await route.fulfill({
+        // A malformed history response rejects the real session read without
+        // invoking the transport's separate quiet network-retry policy.
+        status: 200,
+        json: { error: "Fixture channel history unavailable" },
+      });
+    } else await route.continue();
+  };
+  await page.route("**/api/relay/**/query", rejectHistory);
+  await page.evaluate(() => {
+    const session = window.localAgentFixture
+      .services()
+      .relay.snapshot().session;
+    const state = { down: false, recovered: false };
     window.historyReadFailure = state;
-    session.read = (filters, options) => {
-      if (
-        state.active &&
-        filters.some(
-          (filter) =>
-            filter["#h"]?.includes(blocked) &&
-            filter.kinds?.includes(9) &&
-            filter.limit === 16 &&
-            filter.until !== undefined,
-        )
-      ) {
-        state.failures++;
-        return Promise.reject(new Error("Fixture channel history unavailable"));
-      }
-      return original(filters, options);
-    };
-    const stop = session.live.subscribe(() => {
+    window.stopHistoryStatus = session.live.subscribe(() => {
       if (session.live.snapshot().status !== "connected") state.down = true;
       else if (state.down) state.recovered = true;
     });
-    window.restoreHistoryRead = () => {
-      session.read = original;
-      stop();
-    };
-  }, blocked);
+  });
+  const admitted = async () => {
+    // This fixture holds finite history pages for scrolling tests. Let each
+    // requested page finish; this journey tests watch admission instead.
+    for (const request of app.pending.splice(0)) request.release();
+    return page.evaluate(() => window.localAgentFixture.watched());
+  };
   try {
-    await page.clock.setSystemTime((stamp + 60) * 1000);
+    await page.clock.setFixedTime((stamp + 60) * 1000);
     app.relay.disconnect("primary");
     await expect
       .poll(() => page.evaluate(() => window.historyReadFailure.recovered))
       .toBe(true);
-    await expect
-      .poll(() => page.evaluate(() => window.localAgentFixture.watched()))
-      .toEqual(["Healthy history marker"]);
-    expect(await page.evaluate(() => window.historyReadFailure.failures)).toBe(
-      1,
-    );
+    await expect.poll(admitted).toEqual(["Healthy history marker"]);
+    expect(failures).toBe(1);
     await page
       .getByLabel("Show activity for History recovery", { exact: true })
       .click();
@@ -129,17 +146,16 @@ test("watch catch-up survives one rejected history read and shows recovery in At
     await page.screenshot({
       path: info.outputPath("healthy-during-history-error.png"),
     });
-    await page.evaluate(() => {
-      window.historyReadFailure.active = false;
-    });
-    await page.clock.runFor(43_000);
+    failing = false;
+    await page.clock.setFixedTime((stamp + 103) * 1000);
     await expect
-      .poll(() => page.evaluate(() => window.localAgentFixture.watched()))
+      .poll(admitted)
       .toEqual(["Healthy history marker", "Blocked history marker"]);
     await expect(activity).toContainText("Blocked history marker");
     await expect(activity.getByRole("listitem")).toHaveCount(2);
     await page.screenshot({ path: info.outputPath("history-recovered.png") });
   } finally {
-    await page.evaluate(() => window.restoreHistoryRead?.());
+    await page.unroute("**/api/relay/**/query", rejectHistory);
+    await page.evaluate(() => window.stopHistoryStatus?.());
   }
 });
