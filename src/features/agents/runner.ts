@@ -1621,7 +1621,9 @@ export class AgentRunners {
    * and delivers them oldest first, in batches, saving its checkpoint after
    * each. A stream with an `overlap` keeps that many seconds below its
    * window open for its next read. A watch's streams are read one after
-   * another; once all of them are read, its live events that waited go on. */
+   * another; once all of them are read, its live events that waited go on.
+   * A failed history read leaves that stream for the next try, while the
+   * other streams go on. */
   private async readMissed(
     runner: Runner,
     pass: Pass,
@@ -1659,6 +1661,7 @@ export class AgentRunners {
       this.saveCheckpoints();
     };
     try {
+      let failed = false;
       const slugs = [...new Set(streams.map(({ slug }) => slug))];
       for (const slug of slugs) {
         for (const stream of streams.filter((item) => item.slug === slug))
@@ -1668,7 +1671,15 @@ export class AgentRunners {
               this.checkpoints[stream.key],
               typeof upper === "number" ? upper : upper(stream),
               read,
-            );
+            ).catch((error) => {
+              if (signal.aborted) throw error;
+              failed = true;
+              console.warn(
+                `Agent ${name()} could not catch up ${slug} in ${stream.channel ?? "all channels"}`,
+                error,
+              );
+              return undefined;
+            });
             if (!window) break;
             if (window.skipped)
               console.warn(
@@ -1713,6 +1724,10 @@ export class AgentRunners {
         const catching = new Set(runner.catching);
         catching.delete(slug);
         this.setCatching(runner, catching);
+      }
+      if (failed) {
+        pass.failedAt = Date.now();
+        return;
       }
       pass.done = true;
       pass.doneAt = Date.now();

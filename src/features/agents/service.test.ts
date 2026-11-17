@@ -9179,6 +9179,68 @@ it("holds a watch's live events while it catches up, then hears them oldest firs
   }
 });
 
+it.each([false, true])(
+  "catches up healthy channels while another channel fails, then recovers without repeats (same watch: %s)",
+  async (sameWatch) => {
+    vi.useFakeTimers();
+    const { service, run, session, history, recover, ctx } = await setup({
+      identities: [echo],
+    });
+    const now = nowSeconds();
+    await service.save(bot, {
+      attentionEnabled: true,
+      attention: {
+        "watch/channel": null,
+        "watch/broken": sameWatch
+          ? null
+          : { ...chat["watch/chat"], channels: [lobby] },
+        "watch/chat": {
+          ...chat["watch/chat"],
+          channels: sameWatch ? [lobby, channel] : [channel],
+        },
+      },
+    });
+    await vi.advanceTimersByTimeAsync(1_000);
+    history.push(
+      eventDto(message(author, lobby, "delayed", now + 10)),
+      posted("healthy", now + 11),
+    );
+    const read = vi.mocked(session.read);
+    const original = read.getMockImplementation() as NonNullable<
+      ReturnType<typeof read.getMockImplementation>
+    >;
+    let failing = true;
+    let failures = 0;
+    read.mockImplementation(async (filters, options) => {
+      if (failing && filters[0]?.["#h"]?.includes(lobby)) {
+        failures++;
+        throw new Error("Channel history unavailable");
+      }
+      return original(filters, options);
+    });
+    try {
+      vi.setSystemTime((now + 60) * 1000);
+      recover();
+      await vi.waitFor(() => expect(heard(run)).toEqual(["healthy"]));
+      expect(failures).toBe(1);
+      await vi.advanceTimersByTimeAsync(29_000);
+      expect(failures).toBe(1);
+      // The service checks the 30-second retry on its five-second tick.
+      await vi.advanceTimersByTimeAsync(6_000);
+      expect(failures).toBe(2);
+      expect(heard(run)).toEqual(["healthy"]);
+      failing = false;
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(heard(run)).toEqual(["healthy", "delayed"]);
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(heard(run)).toEqual(["healthy", "delayed"]);
+    } finally {
+      await ctx.fiber.dispose();
+      vi.useRealTimers();
+    }
+  },
+);
+
 it("starts catch-up again when its watch is edited while a page is being read", async () => {
   vi.useFakeTimers({ toFake: ["Date"] });
   try {
