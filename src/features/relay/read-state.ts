@@ -1122,7 +1122,10 @@ export function createReadState({
             admit([journal.pending.event]);
             await publishPending(signal, true);
           }
-          if (journal.revision <= journal.acceptedRevision) return;
+          // A blocked clear is rechecked even with nothing new to send: peer
+          // clears may have shrunk the merged groups until they fit again.
+          if (journal.revision <= journal.acceptedRevision && !blockedClear)
+            return;
           const owned = [journal.slot, ...(journal.spill ?? [])];
           const unreadSlot = (journal.unread ?? newUnreadJournal()).slot;
           const unreadAt = `read-state-unread-v2:${unreadSlot}`;

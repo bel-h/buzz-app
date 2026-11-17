@@ -2198,6 +2198,35 @@ describe("publication fences", () => {
       status: "error",
       error: "Channel mark read cannot be synchronized",
     });
+    // An unrelated read leaves the notice up while the clear still fails.
+    await owner.read("elsewhere", T - 10, () => true);
+    await owner.flush();
+    expect(owner.snapshot().error).toBe(
+      "Channel mark read cannot be synchronized",
+    );
+    // Peers clear their groups and this mark: the failed clear no longer
+    // needs syncing, so the notice goes.
+    for (let n = 0; n < 150; n++)
+      f.addRemote(
+        peerUnreadMarker(f, `c${n}`.padEnd(120, "x"), 0, {
+          slot: n.toString(16).padStart(32, "b"),
+          createdAt: T + 1,
+          set: T,
+          clear: T + 1,
+        }),
+      );
+    f.addRemote(
+      peerUnreadMarker(f, "room", 0, {
+        slot: "f".repeat(32),
+        clientId: "clearer",
+        createdAt: T + 1,
+        set: T,
+        clear: T + 1,
+      }),
+    );
+    await owner.refresh();
+    await owner.flush();
+    expect(owner.snapshot().error).toBeUndefined();
   }, 30000);
 
   it("publishes every channel group with its merged stored frontier, own or not", async () => {
