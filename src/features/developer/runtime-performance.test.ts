@@ -130,16 +130,33 @@ it.each(["request", "plugin"])(
 it("excludes hidden timer time and resets the visible baseline on return", async () => {
   const metrics = createRuntimePerformance();
   const pending = metrics.capture(1000, () => () => {});
-  await vi.advanceTimersByTimeAsync(200);
+  await vi.advanceTimersByTimeAsync(250);
   vi.spyOn(document, "hidden", "get").mockReturnValue(true);
   document.dispatchEvent(new Event("visibilitychange"));
   await vi.advanceTimersByTimeAsync(600);
   vi.spyOn(document, "hidden", "get").mockReturnValue(false);
   document.dispatchEvent(new Event("visibilitychange"));
-  await vi.advanceTimersByTimeAsync(200);
+  await vi.advanceTimersByTimeAsync(150);
   const report = JSON.parse(JSON.stringify(await pending));
   expect(report.visibility).toMatchObject({ visibleMs: 400, hiddenMs: 600 });
-  expect(report.mainThread.timerLag).toMatchObject({ count: 0, samples: 4 });
+  expect(report.mainThread.timerLag).toMatchObject({ count: 0, samples: 3 });
+});
+
+it("reports a delayed main-thread sample and the actual elapsed interval", async () => {
+  const now = performance.now.bind(performance);
+  let delay = 0;
+  vi.spyOn(performance, "now").mockImplementation(() => now() + delay);
+  const pending = createRuntimePerformance().capture(1000, () => () => {});
+  await vi.advanceTimersByTimeAsync(100);
+  delay = 200;
+  await vi.advanceTimersByTimeAsync(900);
+  const report = JSON.parse(JSON.stringify(await pending));
+  expect(report.elapsedMs).toBe(1200);
+  expect(report.mainThread.timerLag).toMatchObject({
+    count: 1,
+    totalMs: 200,
+    maxMs: 200,
+  });
 });
 
 it.each([0, 999, 10001, 1.5, "1000", null, NaN])(
