@@ -1765,6 +1765,8 @@ tab, asks **Discard changes?** first; **Keep editing** keeps them.
   An event watch hears the channels its agent may read, including public channels
   the agent has not joined. If a channel's history read fails, other watched
   channels can still catch up. Buzz retries the failed read while it stays open.
+  Repeated errors increase the wait between attempts, up to about five minutes.
+  The watch keeps trying until you pause or remove it.
   A watch's delivery channel must be one the agent is
   a member of; the relay decides where the agent may post. On macOS and Linux,
   watched commands stop when their Buzz process exits.

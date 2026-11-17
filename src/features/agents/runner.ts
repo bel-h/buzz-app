@@ -149,6 +149,8 @@ const WAITING_LIMIT = 512;
 const WAITING_BYTES = 4 * 1024 * 1024;
 /** How long a failed catch-up waits before it is tried again. */
 const CATCH_UP_RETRY_MS = 30_000;
+/** Failure waits grow to four minutes, plus up to 25% jitter: five minutes. */
+const CATCH_UP_RETRY_BASE_MAX_MS = 240_000;
 /** How often a stream live does not cover is read again, and how many
  * seconds that read stays behind now, for events the relay stores late. */
 const CATCH_UP_POLL_MS = 30_000;
@@ -307,6 +309,11 @@ type Runner = {
    * have, so the older events come first. */
   catching: ReadonlySet<string>;
   readonly waiting: Map<string, { jobs: Job[]; bytes: number }>;
+  /** Failed history streams keep their deadlines across reconnects. */
+  readonly readRetries: Map<
+    string,
+    { object: AttentionObject; delay: number; at: number }
+  >;
   /** Watch jobs released from `waiting`, oldest first, going into the queue
    * as it has room. */
   readonly later: Job[];
@@ -1037,6 +1044,7 @@ export class AgentRunners {
       },
       catching: new Set(),
       waiting: new Map(),
+      readRetries: new Map(),
       later: [],
       seen: new Set(),
       seenIn: new Map(),
@@ -1390,7 +1398,24 @@ export class AgentRunners {
       const community = agent && this.host.community(agent);
       const on = !!agent?.attentionEnabled && !!runner.type?.run;
       const reading: Stream[] = [];
-      for (const stream of agent && !held ? streamsOf(agent) : []) {
+      const streams = agent ? streamsOf(agent) : [];
+      const active = new Set(
+        streams.filter((stream) => stream.enabled).map((stream) => stream.key),
+      );
+      // A disconnect can hide the agent row. Its saved watches still exist.
+      // A new session can also reload those definitions into new objects.
+      for (const [key, retry] of agent ? runner.readRetries : []) {
+        const object = agent?.attention[retry.object.slug];
+        if (
+          !on ||
+          !active.has(key) ||
+          (object !== retry.object &&
+            JSON.stringify(object) !== JSON.stringify(retry.object))
+        )
+          runner.readRetries.delete(key);
+        else if (object) retry.object = object;
+      }
+      for (const stream of held ? [] : streams) {
         const checkpoint = this.checkpoints[stream.key];
         if (!on || !stream.enabled) {
           // Saved too, so one turned on after a restart starts from about
@@ -1415,8 +1440,9 @@ export class AgentRunners {
         // Until its channel's metadata is known, a read returns none of its
         // events: it waits, with its checkpoint where it was.
         else if (
-          stream.channel === undefined ||
-          !community?.session.attendPending(stream.channel)
+          (stream.channel === undefined ||
+            !community?.session.attendPending(stream.channel)) &&
+          (runner.readRetries.get(stream.key)?.at ?? 0) <= Date.now()
         )
           reading.push(stream);
       }
@@ -1461,17 +1487,18 @@ export class AgentRunners {
         const behind = reading.filter(
           (stream) => through(stream) < due(stream),
         );
-        const polled = reading.filter((stream) => !ticks(stream));
-        if (
-          !behind.length &&
-          !(
-            polled.length && Date.now() - (pass.doneAt ?? 0) >= CATCH_UP_POLL_MS
-          )
-        )
-          continue;
+        const poll = Date.now() - (pass.doneAt ?? 0) >= CATCH_UP_POLL_MS;
+        const polled = reading.filter(
+          (stream) =>
+            !ticks(stream) &&
+            (poll ||
+              behind.includes(stream) ||
+              runner.readRetries.has(stream.key)),
+        );
+        if (!polled.length) continue;
         const next: Pass = { ...pass, controller: new AbortController() };
         delete next.done;
-        delete next.doneAt;
+        if (poll) delete next.doneAt;
         this.passes.set(runner.key, next);
         // Only one behind holds its live events back, to go on in order.
         this.setCatching(runner, new Set(behind.map(({ slug }) => slug)));
@@ -1661,7 +1688,6 @@ export class AgentRunners {
       this.saveCheckpoints();
     };
     try {
-      let failed = false;
       const slugs = [...new Set(streams.map(({ slug }) => slug))];
       for (const slug of slugs) {
         for (const stream of streams.filter((item) => item.slug === slug))
@@ -1671,15 +1697,30 @@ export class AgentRunners {
               this.checkpoints[stream.key],
               typeof upper === "number" ? upper : upper(stream),
               read,
-            ).catch((error) => {
-              if (signal.aborted) throw error;
-              failed = true;
-              console.warn(
-                `Agent ${name()} could not catch up ${slug} in ${stream.channel ?? "all channels"}`,
-                error,
-              );
-              return undefined;
-            });
+            )
+              .then((window) => {
+                signal.throwIfAborted();
+                runner.readRetries.delete(stream.key);
+                return window;
+              })
+              .catch((error) => {
+                if (signal.aborted) throw error;
+                const delay = Math.min(
+                  (runner.readRetries.get(stream.key)?.delay ??
+                    CATCH_UP_RETRY_MS / 2) * 2,
+                  CATCH_UP_RETRY_BASE_MAX_MS,
+                );
+                runner.readRetries.set(stream.key, {
+                  object: pass.attention[slug] as AttentionObject,
+                  delay,
+                  at: Date.now() + delay * (1 + Math.random() / 4),
+                });
+                console.warn(
+                  `Agent ${name()} could not catch up ${slug} in ${stream.channel ?? "all channels"}`,
+                  error,
+                );
+                return undefined;
+              });
             if (!window) break;
             if (window.skipped)
               console.warn(
@@ -1725,12 +1766,8 @@ export class AgentRunners {
         catching.delete(slug);
         this.setCatching(runner, catching);
       }
-      if (failed) {
-        pass.failedAt = Date.now();
-        return;
-      }
       pass.done = true;
-      pass.doneAt = Date.now();
+      pass.doneAt ??= Date.now();
     } catch (error) {
       if (signal.aborted) return;
       pass.failedAt = Date.now();
