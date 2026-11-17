@@ -26,7 +26,7 @@ test("watch catch-up survives one rejected history read and shows recovery in At
   await page.goto(app.origin);
   await openPage(page, "Agents");
   const card = page.getByRole("gridcell", {
-    name: "Local tester",
+    name: "Local tester, Bestie",
     exact: true,
   });
   await expect(card).toBeVisible();
