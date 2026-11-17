@@ -296,6 +296,57 @@ it("lets one plugin own a bounded Dock count and restores the host dot on disabl
   await flush();
   expect(setBadgeCount).toHaveBeenLastCalledWith(undefined);
 });
+it("keeps the host dot when Dock badge subscription setup fails", async () => {
+  const t = setup();
+  const setBadgeCount = vi.spyOn(t.service.indicator, "setBadgeCount");
+  let changed = () => {};
+  t.install({
+    inject: ["notifications"],
+    apply(ctx) {
+      ctx.notifications.dockBadge({
+        id: "broken-setup",
+        count: () => 3,
+        subscribe(listener) {
+          changed = listener;
+          throw new Error("subscribe failed");
+        },
+      });
+    },
+  });
+  await vi.waitFor(() =>
+    expect(setBadgeCount).toHaveBeenLastCalledWith(undefined),
+  );
+  const calls = setBadgeCount.mock.calls.length;
+  changed();
+  expect(setBadgeCount).toHaveBeenCalledTimes(calls);
+});
+it("clears the Dock badge when plugin cleanup fails", async () => {
+  const t = setup();
+  const setBadgeCount = vi.spyOn(t.service.indicator, "setBadgeCount");
+  let changed = () => {};
+  t.install({
+    inject: ["notifications"],
+    apply(ctx) {
+      ctx.notifications.dockBadge({
+        id: "broken-cleanup",
+        count: () => 3,
+        subscribe(listener) {
+          changed = listener;
+          return () => {
+            throw new Error("cleanup failed");
+          };
+        },
+      });
+    },
+  });
+  await vi.waitFor(() => expect(setBadgeCount).toHaveBeenLastCalledWith(3));
+  expect(t.disable).not.toThrow();
+  await flush();
+  expect(setBadgeCount).toHaveBeenLastCalledWith(undefined);
+  const calls = setBadgeCount.mock.calls.length;
+  changed();
+  expect(setBadgeCount).toHaveBeenCalledTimes(calls);
+});
 it("chooses Dock badge ownership by order and falls back when the winner retires", async () => {
   const t = setup();
   const setBadgeCount = vi.spyOn(t.service.indicator, "setBadgeCount");

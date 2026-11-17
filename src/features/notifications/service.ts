@@ -195,7 +195,9 @@ export class NotificationsService extends Service implements Notifications {
           this.indicator.setBadgeCount(undefined);
           return;
         }
+        let active = true;
         const update = () => {
+          if (!active) return;
           try {
             const count = badge.count((target) => this.gated(target));
             this.indicator.setBadgeCount(
@@ -205,16 +207,22 @@ export class NotificationsService extends Service implements Notifications {
             this.indicator.setBadgeCount(undefined);
           }
         };
-        let stopContribution = () => {};
+        let stopContribution: () => void;
         try {
-          const stop = badge.subscribe(update);
-          if (typeof stop === "function") stopContribution = stop;
+          stopContribution = badge.subscribe(update);
         } catch {
-          // A broken plugin count never strands the host's ordinary dot.
+          active = false;
+          this.indicator.setBadgeCount(undefined);
+          return;
         }
         const stopGates = this.subscribeGates(update);
         stopBadge = () => {
-          stopContribution();
+          active = false;
+          try {
+            stopContribution();
+          } catch {
+            // Plugin cleanup cannot block host cleanup or the next projection.
+          }
           stopGates();
         };
         update();
