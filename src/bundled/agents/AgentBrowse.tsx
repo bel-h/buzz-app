@@ -51,6 +51,10 @@ import { useReauthorizedRetry } from "../../features/relay/RecoveryNotice";
 import type { RelayData } from "../../features/relay/service";
 import type { RelaySession } from "../../features/relay/session";
 import { MatchedLabel } from "../../features/search/MatchedLabel";
+import {
+  formatFullTimestamp,
+  formatItemTimestamp,
+} from "../../shared/datetime";
 import { Dialog } from "../../shared/design-system/ui/Dialog";
 import { Button } from "../../shared/design-system/ui/Button";
 import { Avatar } from "../../shared/design-system/ui/Avatar";
@@ -116,6 +120,8 @@ export type SharedAgentSelection = {
 type Selection = {
   selectedId?: string | undefined;
   onSelect(selection: SharedAgentSelection, trigger: HTMLButtonElement): void;
+  /** The search's words as they change, so the panel can mark them too. */
+  onSearch?: ((words: readonly string[]) => void) | undefined;
 };
 
 export function AgentBrowse({
@@ -176,6 +182,7 @@ function SharedAgentList({
   viewer,
   selectedId,
   onSelect,
+  onSearch,
   ...importing
 }: Selection &
   Importing & {
@@ -261,6 +268,11 @@ function SharedAgentList({
   const naming = useRef(name);
   naming.current = name;
   const wordsKey = words.join(" ");
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `wordsKey` stands for `words`.
+  useEffect(() => {
+    onSearch?.(words);
+  }, [wordsKey, onSearch]);
+  useEffect(() => () => onSearch?.([]), [onSearch]);
   // biome-ignore lint/correctness/useExhaustiveDependencies: Counts are sampled, not followed; `wordsKey` stands for `words`.
   const results = useMemo(() => {
     const reactions = sorting.current;
@@ -308,7 +320,7 @@ function SharedAgentList({
           <div className={styles.search}>
             <SearchField
               label="Search agents"
-              placeholder="Search names and instructions"
+              placeholder="Search"
               value={query}
               onValueChange={setQuery}
             />
@@ -415,7 +427,7 @@ function SharedAgentList({
               </span>
               <span className={cardStyles.detail}>
                 <span className={cardStyles.detailText}>
-                  by {name(agent.owner)}
+                  by <Matched text={name(agent.owner)} words={words} />
                 </span>
               </span>
             </span>
@@ -511,6 +523,9 @@ function StarToggle({
   const count = people?.size ?? 0;
   const starred = !!viewer && !!people?.get(viewer)?.length;
   const failure = counts.failures.get(key);
+  // Without the count there is no telling whether you starred it.
+  if (counts.status === "error") return null;
+  const ready = counts.status === "ready";
   return (
     <>
       {failure && (
@@ -522,7 +537,7 @@ function StarToggle({
         size="sm"
         variant={starred ? "glass" : "glass-ghost"}
         aria-pressed={starred}
-        aria-label={`${starred ? "Unstar" : "Star"} ${agent.name}, ${count} ${count === 1 ? "star" : "stars"}`}
+        aria-label={`${starred ? "Unstar" : "Star"} ${agent.name}${ready ? `, ${count} ${count === 1 ? "star" : "stars"}` : ""}`}
         title={unavailable ?? (starred ? "Unstar" : "Star")}
         disabled={!!unavailable || counts.pending.has(key)}
         onClick={() => void marketplace.toggleStar(agent)}
@@ -540,7 +555,7 @@ function StarToggle({
           ) : (
             <StarIcon size={16} aria-hidden="true" />
           )}
-          {count}
+          {ready && count}
         </span>
       </Button>
     </>
@@ -550,8 +565,13 @@ function StarToggle({
 export function SharedAgentPanel({
   selection,
   onImported,
+  words = [],
   ...importing
-}: Importing & { selection: SharedAgentSelection }) {
+}: Importing & {
+  selection: SharedAgentSelection;
+  /** The Marketplace search's words, marked here as on the card. */
+  words?: readonly string[] | undefined;
+}) {
   const { agent, session, community, viewer } = selection;
   const marketplace = marketplaceFor(session, viewer);
   const counts = useMarketplace(marketplace);
@@ -563,7 +583,7 @@ export function SharedAgentPanel({
   );
   const backdrop = pack?.preview ?? picture;
   return (
-    <div className={pageStyles.detailsScroll}>
+    <div className={`${pageStyles.detailsScroll} ${styles.marked}`}>
       <section
         className={`${hero.hero} ${hero.panelHero}`}
         aria-label={`${agent.name} identity`}
@@ -573,7 +593,7 @@ export function SharedAgentPanel({
           <AgentPortrait agent={agent} community={community} />
         </span>
         <h2 className="m-0 text-heading text-center break-words">
-          {agent.name}
+          <Matched text={agent.name} words={words} />
         </h2>
         <div className={hero.actions}>
           <ImportShared
@@ -606,6 +626,7 @@ export function SharedAgentPanel({
                 pubkey={agent.owner}
                 session={session}
                 community={community}
+                words={words}
               />
             }
           />
@@ -614,22 +635,48 @@ export function SharedAgentPanel({
             trailing={
               <span className={styles.fact}>
                 <ModelIcon model={agent.model} />
-                {agent.model || "Not given"}
+                {agent.model ? (
+                  <Matched text={agent.model} words={words} />
+                ) : (
+                  "Not given"
+                )}
               </span>
             }
           />
           {agent.runtime && (
             <PreferenceRow
               title="Harness"
-              trailing={<span className={styles.fact}>{agent.runtime}</span>}
+              trailing={
+                <span className={styles.fact}>
+                  <Matched text={agent.runtime} words={words} />
+                </span>
+              }
             />
           )}
           {agent.provider && (
             <PreferenceRow
               title="Provider"
-              trailing={<span className={styles.fact}>{agent.provider}</span>}
+              trailing={
+                <span className={styles.fact}>
+                  <Matched text={agent.provider} words={words} />
+                </span>
+              }
             />
           )}
+          <PreferenceRow
+            title="Updated"
+            trailing={
+              <Tooltip content={formatFullTimestamp(agent.createdAt)}>
+                <span
+                  // biome-ignore lint/a11y/noNoninteractiveTabindex: keyboard users need access to the full date in the tooltip.
+                  tabIndex={0}
+                  className={styles.fact}
+                >
+                  {formatItemTimestamp(agent.createdAt)}
+                </span>
+              </Tooltip>
+            }
+          />
           {counts.status === "ready" && (
             <PreferenceRow
               title="Imports"
@@ -645,7 +692,11 @@ export function SharedAgentPanel({
       <div className={styles.details}>
         <InlineHeader title="Instructions" />
         <section className={styles.instructions} aria-label="Instructions">
-          {agent.instructions || "No instructions included."}
+          {agent.instructions ? (
+            <Matched text={agent.instructions} words={words} />
+          ) : (
+            "No instructions included."
+          )}
         </section>
       </div>
     </div>
@@ -657,10 +708,12 @@ function Sharer({
   pubkey,
   session,
   community,
+  words,
 }: {
   pubkey: string;
   session: RelaySession;
   community: string | undefined;
+  words: readonly string[];
 }) {
   const profiles = useSyncExternalStore(
     session.profiles.subscribe,
@@ -687,7 +740,9 @@ function Sharer({
         className={styles.fact}
       >
         <Avatar src={picture} alt="" fallback={name} size="small" />
-        <span className="truncate">{name}</span>
+        <span className="truncate">
+          <Matched text={name} words={words} />
+        </span>
       </span>
     </Tooltip>
   );

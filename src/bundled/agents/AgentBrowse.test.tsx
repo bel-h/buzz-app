@@ -38,6 +38,7 @@ function AgentBrowse(
   },
 ) {
   const [selection, setSelection] = useState<SharedAgentSelection>();
+  const [words, setWords] = useState<readonly string[]>([]);
   return (
     <>
       <Catalog
@@ -45,6 +46,7 @@ function AgentBrowse(
         relay={props.relay}
         selectedId={selection?.agent.id}
         onSelect={setSelection}
+        onSearch={setWords}
       />
       {selection && (
         <section aria-label="Shared agent profile">
@@ -56,7 +58,13 @@ function AgentBrowse(
                 id: selection.agent.id,
                 label: selection.agent.name,
                 close: () => setSelection(undefined),
-                content: <SharedAgentPanel selection={selection} {...props} />,
+                content: (
+                  <SharedAgentPanel
+                    selection={selection}
+                    words={words}
+                    {...props}
+                  />
+                ),
               },
             ]}
           />
@@ -1049,7 +1057,7 @@ it("rolls a refused star back and says why", async () => {
   expect(writes.dismiss).toHaveBeenCalledWith(writes.sent[0]?.id);
 });
 
-it("keeps browsing when stars can't load, with starring disabled", async () => {
+it("keeps browsing when stars can't load, without stars or import counts", async () => {
   render(
     <AgentBrowse
       relay={community(
@@ -1060,13 +1068,44 @@ it("keeps browsing when stars can't load, with starring disabled", async () => {
       {...importing()}
     />,
   );
-  const star = await screen.findByRole("button", {
-    name: "Star Alpha, 0 stars",
+  const imports = await screen.findByRole("button", { name: "Import Alpha" });
+  await vi.waitFor(() =>
+    expect(screen.queryByRole("button", { name: /^Star Alpha/ })).toBeNull(),
+  );
+  expect(imports).toHaveTextContent(/^$/);
+  fireEvent.click(screen.getByRole("button", { name: "More about Alpha" }));
+  const panel = await screen.findByRole("region", {
+    name: "Shared agent profile",
   });
-  expect(star).toBeDisabled();
-  expect(
-    screen.getByRole("button", { name: "Import Alpha" }),
-  ).toBeInTheDocument();
+  expect(within(panel).queryByRole("button", { name: /^Star/ })).toBeNull();
+  expect(within(panel).queryByText("Imports")).toBeNull();
+});
+
+it("marks the search in the panel, and shows when the agent was updated", async () => {
+  render(
+    <AgentBrowse
+      relay={community(vi.fn().mockResolvedValue([shared]))}
+      {...importing()}
+    />,
+  );
+  const user = userEvent.setup();
+  await user.click(
+    await screen.findByRole("button", { name: "More about Shared helper" }),
+  );
+  const panel = await screen.findByRole("region", {
+    name: "Shared agent profile",
+  });
+  expect(within(panel).getByText("Updated")).toBeVisible();
+  expect(panel.querySelectorAll("mark")).toHaveLength(0);
+  await user.type(
+    screen.getByRole("searchbox", { name: "Search agents" }),
+    "model",
+  );
+  await vi.waitFor(() =>
+    expect(
+      [...panel.querySelectorAll("mark")].map((mark) => mark.textContent),
+    ).toEqual(["model"]),
+  );
 });
 
 it("records an import from the panel once, publicly", async () => {
