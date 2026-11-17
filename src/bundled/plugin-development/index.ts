@@ -1,5 +1,6 @@
 // The Plugin development plugin: agent tools for writing and reloading
 // local plugins. The tools themselves are in features/plugin-development.
+import { registerPerformanceTool } from "../../features/developer/performance-tool";
 import type { Context } from "@deepseek-ai/cordis";
 import { registerPluginDevelopmentTools } from "../../features/plugin-development/agent-tools";
 
@@ -13,6 +14,9 @@ export const inject = [
 
 export function apply(ctx: Context) {
   const { agents, pages, panels, pluginDevelopment } = ctx;
+  const lifetime = new AbortController();
+  ctx.effect(() => () => lifetime.abort());
+  registerPerformanceTool(agents, lifetime.signal);
   const sections = ctx.sidebarSections;
   registerPluginDevelopmentTools({
     plugins: () => pluginDevelopment.plugins(),
