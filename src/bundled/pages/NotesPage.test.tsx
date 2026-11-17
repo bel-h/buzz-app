@@ -51,28 +51,28 @@ it("groups by the signed creator and verified agent ownership, preserving attrib
   ).not.toBeInTheDocument();
   const folder = screen.getByRole("button", { name: "Shared with me" });
   fireEvent.click(folder);
-  const back = screen.getByRole("button", { name: "Back to pages" });
+  const back = screen.getByRole("button", { name: "Back to docs" });
   expect(back).toHaveFocus();
   expect(screen.getByRole("link", { name: other.title })).toBeVisible();
   expect(
-    screen.queryByRole("button", { name: "New page" }),
+    screen.queryByRole("button", { name: "New doc" }),
   ).not.toBeInTheDocument();
   fireEvent.change(screen.getByRole("searchbox"), {
     target: { value: "No match" },
   });
-  expect(screen.getByRole("status")).toHaveTextContent("No matching pages.");
-  fireEvent.click(screen.getByRole("button", { name: "Clear search pages" }));
+  expect(screen.getByRole("status")).toHaveTextContent("No matching docs.");
+  fireEvent.click(screen.getByRole("button", { name: "Clear search docs" }));
   fireEvent.click(screen.getByRole("link", { name: other.title }));
   const article = await screen.findByRole("article", { name: other.title });
   await within(article).findByText("You have read access.");
   expect(
-    within(article).queryByRole("combobox", { name: "Page mode" }),
+    within(article).queryByRole("combobox", { name: "Doc mode" }),
   ).not.toBeInTheDocument();
   fireEvent.click(
     screen.getByRole("button", { name: "Back to Shared with me" }),
   );
   expect(screen.getByRole("list", { name: "Shared with me" })).toBeVisible();
-  fireEvent.click(screen.getByRole("button", { name: "Back to pages" }));
+  fireEvent.click(screen.getByRole("button", { name: "Back to docs" }));
   expect(screen.getByRole("button", { name: "Shared with me" })).toHaveFocus();
   expect(channel.roles).toEqual(roles);
   expect((await f.workspace.open(other)).event.pubkey).toBe(f.viewer.pubkey);
@@ -81,8 +81,8 @@ it("groups by the signed creator and verified agent ownership, preserving attrib
 
 it("does not trust names, inventory, forged auth or unreadable ownership, and responds to proof removal", async () => {
   const f = await workspaceFixture();
-  const agent = f.seed("Verified agent page", "Work");
-  const spoof = f.seed("Spoofed owner page", "Work");
+  const agent = f.seed("Verified agent doc", "Work");
+  const spoof = f.seed("Spoofed owner doc", "Work");
   storage(f, agent).creator = f.carl.pubkey;
   storage(f, spoof).creator = f.sam.pubkey;
   f.setAgentKeys([f.carl.pubkey, f.sam.pubkey]);
@@ -97,7 +97,7 @@ it("does not trust names, inventory, forged auth or unreadable ownership, and re
     ),
   );
   // This owned-agent page is private to the agent, so grouping cannot discover it.
-  const privateNote = f.seed("Private agent page", "Secret");
+  const privateNote = f.seed("Private agent doc", "Secret");
   const privateChannel = storage(f, privateNote);
   privateChannel.creator = f.carl.pubkey;
   privateChannel.roles = { [f.carl.pubkey]: "owner" };
@@ -148,8 +148,8 @@ it("keeps viewer pages usable when ownership reads fail, and retries on refresh"
     ...session,
     profiles: { ...session.profiles, ensure },
   }));
-  const mine = f.seed("My page", "Work");
-  const agent = f.seed("Unverified agent page", "Work");
+  const mine = f.seed("My doc", "Work");
+  const agent = f.seed("Unverified agent doc", "Work");
   storage(f, agent).creator = f.carl.pubkey;
   render(<WorkingNotesCommunity workspace={f.workspace} />);
   await screen.findByRole("link", { name: mine.title });
@@ -164,9 +164,9 @@ it("keeps viewer pages usable when ownership reads fail, and retries on refresh"
   ).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Shared with me" }));
   expect(screen.getByRole("link", { name: agent.title })).toBeVisible();
-  fireEvent.click(screen.getByRole("button", { name: "Back to pages" }));
+  fireEvent.click(screen.getByRole("button", { name: "Back to docs" }));
   ensure.mockImplementation(f.session.profiles.ensure);
-  fireEvent.click(screen.getByRole("button", { name: "Refresh pages" }));
+  fireEvent.click(screen.getByRole("button", { name: "Refresh docs" }));
   await screen.findByRole("link", { name: agent.title });
   expect(
     screen.queryByRole("button", { name: "Shared with me" }),

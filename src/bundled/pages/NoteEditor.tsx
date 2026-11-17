@@ -19,8 +19,8 @@ export function NoteEditor({
     <Editor
       {...props}
       maxLength={MAX_NOTE_BYTES}
-      label="Page body"
-      placeholder="Write your page…"
+      label="Doc body"
+      placeholder="Write your doc…"
       destinations={notes
         .filter((note) => !note.deleted)
         .map((note) => ({ label: note.title, href: noteUrl(note, community) }))}

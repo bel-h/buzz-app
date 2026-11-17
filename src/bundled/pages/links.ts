@@ -24,7 +24,7 @@ export function pageLink(
   community: string,
 ) {
   if (!UUID.test(address.id) || !UUID.test(address.channel))
-    throw new Error("Invalid page address.");
+    throw new Error("Invalid doc address.");
   const url = new URL("buzz://plugin");
   url.searchParams.set("id", PLUGIN_ID);
   url.searchParams.set("page", PAGE_ID);

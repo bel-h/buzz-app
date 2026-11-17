@@ -60,7 +60,7 @@ it("owns only channel-backed note routes, tools and panels while preserving sepa
     const background = await notesFixture();
     try {
       const note = background.seed(
-        "Background community page",
+        "Background community doc",
         "Read as the agent",
       );
       const connection = vi.spyOn(service, "relay").mockReturnValue({
@@ -89,7 +89,7 @@ it("owns only channel-backed note routes, tools and panels while preserving sepa
     expect(pages.snapshot()).toMatchObject([
       {
         id: "pages",
-        title: "Pages",
+        title: "Docs",
         layout: "workspace",
         primary: true,
         placement: "dock",

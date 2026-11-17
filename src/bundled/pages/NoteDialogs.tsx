@@ -129,8 +129,8 @@ export function NoteSharing({
       trigger={trigger}
       close={onClose}
       title="Share access"
-      nonMemberLabel="Not in this page"
-      description="Access includes the current page and all retained revisions."
+      nonMemberLabel="Not in this doc"
+      description="Access includes the current doc and all retained revisions."
       shareLink={noteUrl(note, session.scope.replace(/:[0-9a-f]{64}$/, ""))}
       memberActions={{
         canAdd: !!roles?.canManage,
@@ -151,7 +151,7 @@ export function NoteSharing({
                   );
                 }}
               >
-                Retry page access
+                Retry doc access
               </Button>
             </div>
           )}
@@ -160,12 +160,12 @@ export function NoteSharing({
             recovery={session.recovery}
             channelId={channel}
             policy={{
-              subject: "page",
+              subject: "doc",
               allowPublic: false,
               visibilityDescription: (visibility) =>
                 visibility === "public"
-                  ? "Everyone in this community can read this page and all retained revisions."
-                  : "Only page members can read this page and all retained revisions.",
+                  ? "Everyone in this community can read this doc and all retained revisions."
+                  : "Only doc members can read this doc and all retained revisions.",
             }}
             {...(accessChannel ? { channel: accessChannel } : {})}
           />
@@ -432,12 +432,12 @@ export function NoteHistory({
           </p>
           <pre className={styles.source}>
             {selected.markdown ||
-              (selected.deleted ? "The page was deleted." : "Empty revision")}
+              (selected.deleted ? "The doc was deleted." : "Empty revision")}
           </pre>
         </section>
       )}
       {!busy && !error && !selected && (
-        <p>Choose a version from Page actions → Revision history.</p>
+        <p>Choose a version from Doc actions → Revision history.</p>
       )}
       {confirm && selected && (
         <AlertDialog

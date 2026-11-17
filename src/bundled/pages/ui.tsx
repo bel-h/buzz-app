@@ -10,6 +10,6 @@ const Ui = createContext<PagesUi | undefined>(undefined);
 export const PagesUiProvider = Ui.Provider;
 export function usePagesUi() {
   const ui = useContext(Ui);
-  if (!ui) throw new Error("Pages requires its host UI provider.");
+  if (!ui) throw new Error("Docs requires its host UI provider.");
   return ui;
 }

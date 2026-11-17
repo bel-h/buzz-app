@@ -65,7 +65,7 @@ export function createNotesWorkspace(session: RelaySession) {
     const active = signal(caller);
     active.throwIfAborted();
     if (!session.snapshotRead)
-      throw new Error("Connect to your community to use working pages.");
+      throw new Error("Connect to your community to use working docs.");
     let events: readonly RelayEvent[];
     try {
       events = await session.snapshotRead(filters, { signal: active });
@@ -89,9 +89,7 @@ export function createNotesWorkspace(session: RelaySession) {
     const active = signal(caller);
     const writer = session.configArtifactWriter;
     if (!writer)
-      throw new Error(
-        "Saving working pages is unavailable on this connection.",
-      );
+      throw new Error("Saving working docs is unavailable on this connection.");
     const event = await writer.sign(
       {
         ...template,
@@ -116,7 +114,7 @@ export function createNotesWorkspace(session: RelaySession) {
   }
   async function sharing(channel: string, caller?: AbortSignal) {
     if (!session.relayAuthor || !session.viewer)
-      throw new Error("Connect to read page sharing.");
+      throw new Error("Connect to read doc sharing.");
     const relayAuthor = session.relayAuthor;
     const events = await snapshot(
       [39000, 39001, 39002].map((kind) => ({
@@ -140,7 +138,7 @@ export function createNotesWorkspace(session: RelaySession) {
         event.pubkey === relayAuthor &&
         noteTag(event, "d") === channel,
     );
-    if (!metadata) throw new Error("Page sharing is unavailable.");
+    if (!metadata) throw new Error("Doc sharing is unavailable.");
     const identity = channelIdentity(metadata);
     return {
       authority,
@@ -175,18 +173,16 @@ export function createNotesWorkspace(session: RelaySession) {
     const [head] = heads;
     if (heads.length !== 1 || !head || noteTag(head, "d") !== address.id)
       throw new Error(
-        "This storage contains other pages. Create a separate working copy before sharing this page.",
+        "This storage contains other docs. Create a separate working copy before sharing this doc.",
       );
   }
   function generalAccess(address: NoteAddress): ChannelDetailsCapability {
     const details = session.channelDetails;
     async function guard(channel: string, caller?: AbortSignal) {
-      if (channel !== address.channel) throw new Error("Invalid page channel.");
+      if (channel !== address.channel) throw new Error("Invalid doc channel.");
       await resolve(address, caller);
       if (!independent(address, await sharing(channel, caller)))
-        throw new Error(
-          "This page does not have independent sharing settings.",
-        );
+        throw new Error("This doc does not have independent sharing settings.");
       await singleNote(address, caller);
     }
     return {
@@ -224,7 +220,7 @@ export function createNotesWorkspace(session: RelaySession) {
     const choices = session.agentChoices.snapshot();
     if (!choices.complete || choices.pending)
       throw new Error(
-        "Your agent list is incomplete. Refresh it before creating an agent page.",
+        "Your agent list is incomplete. Refresh it before creating an agent doc.",
       );
     if (!choices.selectable.some((agent) => agent.pubkey === key))
       throw new Error("This creating agent is unavailable.");
@@ -252,7 +248,7 @@ export function createNotesWorkspace(session: RelaySession) {
     await resolve(address, caller);
     const state = await sharing(address.channel, caller);
     if (!independent(address, state))
-      throw new Error("This page does not use independent page sharing.");
+      throw new Error("This doc does not use independent doc sharing.");
     await singleNote(address, caller);
     const roles = state.authority;
     if (
@@ -260,7 +256,7 @@ export function createNotesWorkspace(session: RelaySession) {
       key === session.viewer ||
       roles.roles[key] === "owner"
     )
-      throw new Error("You cannot change this person’s page access.");
+      throw new Error("You cannot change this person’s doc access.");
     const previous = roles.roles[key];
     if (
       options.expectedRole !== undefined &&
@@ -319,15 +315,15 @@ export function createNotesWorkspace(session: RelaySession) {
   ) {
     if (!session.configArtifactWriter)
       throw new Error(
-        "This connection does not advertise support for working-page revisions.",
+        "This connection does not advertise support for working-doc revisions.",
       );
     validateDraft(input);
     if (!UUID.test(input.id))
-      throw new Error("Use a new page UUID and reuse it when retrying.");
+      throw new Error("Use a new doc UUID and reuse it when retrying.");
     // Agent creation admits only its verified caller, never the owner’s inventory.
     if (input.agent) await verifyCreatingAgent(input.agent, caller);
     if (!session.viewer || !session.relayAuthor)
-      throw new Error("Connect to create a page.");
+      throw new Error("Connect to create a doc.");
     const label = documentLabel(input.id);
     const found = await read(
       [
@@ -344,22 +340,22 @@ export function createNotesWorkspace(session: RelaySession) {
     );
     if (found.length > 1)
       throw new Error(
-        "Multiple storage channels match this page. Resolve them before creating another.",
+        "Multiple storage channels match this doc. Resolve them before creating another.",
       );
     let channel = found[0] ? noteTag(found[0], "d") : undefined;
     if (found[0] && (!channel || !UUID.test(channel)))
-      throw new Error("The page’s storage identity is invalid.");
+      throw new Error("The doc’s storage identity is invalid.");
     if (
       found[0] &&
       (!found[0].tags.some((tag) => tag.length === 1 && tag[0] === "private") ||
         found[0].tags.find(([key]) => key === "t")?.[1] !== "system")
     )
       throw new Error(
-        "The page’s storage channel has unexpected access settings.",
+        "The doc’s storage channel has unexpected access settings.",
       );
     if (!channel)
       channel = await session.channelCreation.create({
-        name: `Page ${input.id.slice(0, 8)}`,
+        name: `Doc ${input.id.slice(0, 8)}`,
         visibility: "private",
         system: true,
         labels: [NOTE_LABEL, label],
@@ -372,7 +368,7 @@ export function createNotesWorkspace(session: RelaySession) {
       state.authority.roles[session.viewer] !== "owner"
     )
       throw new Error(
-        "The page’s storage channel has unexpected access settings.",
+        "The doc’s storage channel has unexpected access settings.",
       );
     const existing = await read(
       [
@@ -389,7 +385,7 @@ export function createNotesWorkspace(session: RelaySession) {
     if (existing[0]) {
       const note = parseNote(existing[0]);
       if (!note || note.id !== input.id || note.channel !== channel)
-        throw new Error("The existing page has an unsupported format.");
+        throw new Error("The existing doc has an unsupported format.");
       if (
         note.deleted ||
         note.title !== input.title.trim() ||
@@ -411,7 +407,7 @@ export function createNotesWorkspace(session: RelaySession) {
     );
     if (otherDocuments.length)
       throw new Error(
-        "This storage already contains another page. Use a new page ID.",
+        "This storage already contains another doc. Use a new doc ID.",
       );
     if (input.agent) await session.memberAdditions.add(channel, input.agent);
     try {
@@ -419,12 +415,12 @@ export function createNotesWorkspace(session: RelaySession) {
       const current = await readNote(read, address, caller);
       if (current.revision !== event.id)
         throw new Error(
-          "The page has changed. Open its latest revision before editing.",
+          "The doc has changed. Open its latest revision before editing.",
         );
       return current;
     } catch (error) {
       throw new Error(
-        `Page creation was not confirmed. Reuse page ID ${input.id} to recover its storage and check the result. ${error instanceof Error ? error.message : ""}`,
+        `Doc creation was not confirmed. Reuse doc ID ${input.id} to recover its storage and check the result. ${error instanceof Error ? error.message : ""}`,
       );
     }
   }
@@ -477,7 +473,7 @@ export async function readNotesPage(
   caller?: AbortSignal,
 ): Promise<NotesPage> {
   if (!PUBKEY.test(viewer) || !PUBKEY.test(relayAuthor))
-    throw new Error("Connect to read pages.");
+    throw new Error("Connect to read docs.");
   if (
     cursor !== undefined &&
     (!cursor ||
@@ -489,7 +485,7 @@ export async function readNotesPage(
       typeof cursor.before_id !== "string" ||
       !PUBKEY.test(cursor.before_id))
   )
-    throw new Error("Invalid page-list cursor.");
+    throw new Error("Invalid doc-list cursor.");
   // One paged stream includes private memberships and community-readable notes.
   // Explicit system opt-in keeps ordinary channel discovery unchanged.
   const metadata = await read(
@@ -516,7 +512,7 @@ export async function readNotesPage(
       (last.created_at === cursor.until && last.id > cursor.before_id)
     )
   )
-    throw new Error("The page list did not advance. Refresh to try again.");
+    throw new Error("The doc list did not advance. Refresh to try again.");
   const addresses = metadata.flatMap((event) => {
     const channel = noteTag(event, "d");
     const label = event.tags.find(

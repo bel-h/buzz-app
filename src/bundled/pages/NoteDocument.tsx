@@ -57,7 +57,7 @@ import styles from "./WorkingNotes.module.css";
 import type { DocumentView } from "./working-route";
 
 const errorText = (error: unknown) =>
-  error instanceof Error ? error.message : "The page could not be read.";
+  error instanceof Error ? error.message : "The doc could not be read.";
 export type NoteFocus = {
   target: "title" | "body";
   start: number;
@@ -576,14 +576,25 @@ export function NoteDocument({
   }, []);
   const exportMarkdown = () => {
     if (!note) return;
+    const name = resolveName(author, profile?.name ?? author)
+      .replace(/\s+/g, " ")
+      .replace(/[\\`*_[\]<>&~]/g, "\\$&");
+    const metadata = [
+      `> Source: [Open in Docs](<${noteUrl(note, community)}>)`,
+      `> Status: ${dirty || restoreFrom ? "Unsaved draft (based on the saved revision below)." : "Saved revision."}`,
+      `> Saved revision: \`${note.revision}\``,
+      `> Saved revision editor: ${name} (\`${author}\`)`,
+      `> Saved revision date: ${new Date(note.event.created_at * 1000).toISOString()}`,
+    ].join("\n>\n");
     const url = URL.createObjectURL(
-      new Blob([editing || dirty ? markdown : note.markdown], {
-        type: "text/markdown;charset=utf-8",
-      }),
+      new Blob(
+        [`${metadata}\n\n`, editing || dirty ? markdown : note.markdown],
+        { type: "text/markdown;charset=utf-8" },
+      ),
     );
     const link = document.createElement("a");
     link.href = url;
-    link.download = `${(editing ? title : note.title).replace(/[^\p{L}\p{N}._ -]/gu, "_").slice(0, 80) || "page"}.md`;
+    link.download = `${(editing ? title : note.title).replace(/[^\p{L}\p{N}._ -]/gu, "_").slice(0, 80) || "doc"}.md`;
     link.click();
     downloads.current.set(
       url,
@@ -596,7 +607,7 @@ export function NoteDocument({
   const copyLink = () => {
     void run(async () => {
       await writeClipboardText(noteUrl(address, community));
-      setStatus("Page link copied");
+      setStatus("Doc link copied");
     });
   };
   return (
@@ -605,13 +616,13 @@ export function NoteDocument({
       aria-label={
         !unavailable && note
           ? (deletedPreview?.title ?? note.title)
-          : "Working page"
+          : "Working doc"
       }
     >
       {/* biome-ignore lint/a11y/useKeyWithClickEvents: blank-space clicks extend the existing textbox hit area; keyboard users reach that textbox with Tab. */}
       <section
         className={readerStyles.document}
-        aria-label="Page contents"
+        aria-label="Doc contents"
         onCompositionStart={() => setComposing(true)}
         onCompositionEnd={() => setComposing(false)}
         onPointerDown={(event) => {
@@ -654,7 +665,7 @@ export function NoteDocument({
           <h2 className="text-heading">
             {!unavailable && note
               ? (deletedPreview?.title ?? note.title)
-              : "Working page"}
+              : "Working doc"}
           </h2>
         )}
         {note && !unavailable && (
@@ -681,14 +692,14 @@ export function NoteDocument({
         <div className={styles.actions}>
           {note && canEdit && !note.deleted && (
             <Select
-              label="Page mode"
+              label="Doc mode"
               variant="compact"
               size="sm"
               value={editing ? "editing" : "viewing"}
               disabled={busy || saving}
               groups={[
                 {
-                  label: "Page mode",
+                  label: "Doc mode",
                   options: [
                     { value: "viewing", label: "Viewing" },
                     { value: "editing", label: "Editing" },
@@ -711,7 +722,7 @@ export function NoteDocument({
             disabled={busy || !!conflict || !canEdit || unavailable}
             onClick={() => void save()}
           >
-            {note?.deleted ? "Restore page" : saveError ? "Retry save" : "Save"}
+            {note?.deleted ? "Restore doc" : saveError ? "Retry save" : "Save"}
           </NoteSaveAction>
           {note?.deleted && canEdit && !unavailable && (
             <Button
@@ -725,8 +736,8 @@ export function NoteDocument({
             </Button>
           )}
           <IconButton
-            aria-label="Refresh page"
-            title="Refresh page"
+            aria-label="Refresh doc"
+            title="Refresh doc"
             icon={
               <ArrowsClockwiseIcon
                 size={16}
@@ -744,8 +755,8 @@ export function NoteDocument({
             <>
               <IconButton
                 ref={shareTrigger}
-                aria-label="Share page"
-                title="Share page"
+                aria-label="Share doc"
+                title="Share doc"
                 icon={<ShareIcon size={16} />}
                 onClick={() => setDialog("share")}
               />
@@ -754,14 +765,14 @@ export function NoteDocument({
                   render={
                     <IconButton
                       ref={actionsTrigger}
-                      aria-label="Page actions"
-                      title="Page actions"
+                      aria-label="Doc actions"
+                      title="Doc actions"
                       icon={<DotsThreeIcon size={16} />}
                     />
                   }
                 />
                 <MenuPopup>
-                  <MenuItem onClick={copyLink}>Copy page link</MenuItem>
+                  <MenuItem onClick={copyLink}>Copy doc link</MenuItem>
                   {canEdit && !note.deleted && (
                     <MenuItem
                       disabled={busy}
@@ -775,8 +786,8 @@ export function NoteDocument({
                   )}
                   {!note.deleted && backlinks.length > 0 && (
                     <MenuSubmenu>
-                      <MenuSubmenuTrigger>Linked pages</MenuSubmenuTrigger>
-                      <MenuSubmenuPopup aria-label="Linked pages">
+                      <MenuSubmenuTrigger>Linked docs</MenuSubmenuTrigger>
+                      <MenuSubmenuPopup aria-label="Linked docs">
                         {backlinks.map((source) => (
                           <MenuItem
                             key={noteKey(source)}
@@ -787,8 +798,8 @@ export function NoteDocument({
                         ))}
                         {partial && (
                           <MenuNote>
-                            More pages are available in the browser. Linked
-                            pages cover the loaded pages.
+                            More docs are available in the browser. Linked docs
+                            cover the loaded docs.
                           </MenuNote>
                         )}
                       </MenuSubmenuPopup>
@@ -837,7 +848,7 @@ export function NoteDocument({
                       disabled={busy || saving || dirty}
                       onClick={() => setDialog("delete")}
                     >
-                      Delete page
+                      Delete doc
                     </MenuItem>
                   )}
                 </MenuPopup>
@@ -856,7 +867,7 @@ export function NoteDocument({
           <p className="text-caption text-subtle">
             {note.editable
               ? "You have read access."
-              : "This page format is read-only in this version of Buzz."}
+              : "This doc format is read-only in this version of Buzz."}
           </p>
         )}
         {previewError && <p role="alert">{previewError} Refresh to retry.</p>}
@@ -925,7 +936,7 @@ export function NoteDocument({
             onOpenChange={(open) => {
               if (!open) setDialog(undefined);
             }}
-            title="Delete this page?"
+            title="Delete this doc?"
             description="You can restore it from retained history."
             preventClose={busy}
             actions={
@@ -952,7 +963,7 @@ export function NoteDocument({
                     });
                   }}
                 >
-                  Delete page
+                  Delete doc
                 </Button>
               </>
             }
@@ -962,7 +973,7 @@ export function NoteDocument({
           <Dialog
             open
             onOpenChange={() => {}}
-            title="This page has a newer revision"
+            title="This doc has a newer revision"
             description="Compare the latest contents with your unsaved draft before choosing what to keep."
             size="wide"
             preventClose
@@ -994,7 +1005,7 @@ export function NoteDocument({
             <h2 className="text-label">{conflict.title}</h2>
             <pre className={styles.source}>
               {conflict.markdown ||
-                (conflict.deleted ? "The page was deleted." : "Empty page")}
+                (conflict.deleted ? "The doc was deleted." : "Empty doc")}
             </pre>
           </Dialog>
         )}

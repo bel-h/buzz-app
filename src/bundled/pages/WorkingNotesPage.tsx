@@ -64,7 +64,7 @@ function openBuzzLink(
   return true;
 }
 const errorText = (error: unknown) =>
-  error instanceof Error ? error.message : "Pages could not be read.";
+  error instanceof Error ? error.message : "Docs could not be read.";
 
 export function WorkingNotesPage({
   relay,
@@ -107,14 +107,14 @@ export function WorkingNotesPage({
       <Panel>
         <PanelHeader
           title={
-            <PanelHeaderLabel title="Pages" icon={<NoteIcon size={16} />} />
+            <PanelHeaderLabel title="Docs" icon={<NoteIcon size={16} />} />
           }
         />
         <div className={styles.browser}>
           <p role="status">
             {connection.status === "connecting"
-              ? "Connecting to working pages…"
-              : "Connect to your community to open pages."}
+              ? "Connecting to working docs…"
+              : "Connect to your community to open docs."}
           </p>
           {connection.status === "error" && (
             <>
@@ -130,7 +130,7 @@ export function WorkingNotesPage({
       ? workingRoute(request.target.route?.params)
       : undefined;
   if (route?.community && route.community !== connection.origin)
-    return <p role="status">Connect to this page’s community to open it.</p>;
+    return <p role="status">Connect to this doc’s community to open it.</p>;
   return (
     <WorkingNotesCommunity
       key={`${connection.scope}:${connection.generation}`}
@@ -442,7 +442,7 @@ export function WorkingNotesCommunity({
               id: key,
               label:
                 collection.notes.find((note) => noteKey(note) === key)?.title ??
-                "Page",
+                "Doc",
               content: (
                 <NoteDocument
                   address={address}
@@ -489,7 +489,7 @@ export function WorkingNotesCommunity({
           }),
           ...[...drafts.current.values()].map((draft) => ({
             id: `new:${draft.id}`,
-            label: "New page",
+            label: "New doc",
             content: (
               <NewNoteDocument
                 workspace={workspace}
@@ -543,7 +543,7 @@ export function WorkingNotePanel({
   )
     return (
       <div className={styles.browser}>
-        <p role="status">Connect to this page’s community to open it.</p>
+        <p role="status">Connect to this doc’s community to open it.</p>
       </div>
     );
   return (
@@ -576,7 +576,7 @@ function NotePanelContents({
   const [error, setError] = useState("");
   const title =
     catalogue.notes.find((note) => noteKey(note) === noteKey(initial))?.title ??
-    "Page";
+    "Doc";
   usePagesUi().panels.useTabTitle(title);
   useEffect(() => {
     const controller = new AbortController();
@@ -625,7 +625,7 @@ function NotePanelContents({
     <div className={styles.page}>
       {error && (
         <p role="status" className="text-caption text-subtle">
-          Related pages could not be loaded. {error}
+          Related docs could not be loaded. {error}
         </p>
       )}
       {[initial].map((address) => (

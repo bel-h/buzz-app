@@ -89,6 +89,80 @@ async function saved(save: MockInstance<NotesWorkspace["save"]>) {
   });
 }
 
+it.each([false, true])(
+  "exports source and saved signer metadata without attributing draft edits to that signer (draft=%s)",
+  async (draft) => {
+    const f = await workspaceFixture();
+    const initial = f.seed("Plan", "First revision");
+    await f.edit(f.carl, initial, {
+      title: "Saved plan",
+      markdown: "---\ntitle: preserved\n---\n# Body\n\n",
+    });
+    const note = await f.workspace.open(initial);
+    await f.session.profiles.ensure([f.carl.pubkey]);
+    writeView(f.session.scope, `note-auto-save:${noteKey(note)}`, false);
+    const create = vi.fn((_blob: Blob) => "blob:export");
+    const revoke = vi.fn();
+    vi.stubGlobal(
+      "URL",
+      class extends URL {
+        static createObjectURL = create;
+        static revokeObjectURL = revoke;
+      },
+    );
+    const click = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(() => {});
+    try {
+      const view = render(
+        <NoteDocument
+          address={note}
+          workspace={f.workspace}
+          onOpen={vi.fn()}
+        />,
+      );
+      const title = await screen.findByRole("textbox", { name: "Title" });
+      await waitFor(() => expect(title).toHaveValue(note.title));
+      if (draft)
+        fireEvent.change(title, { target: { value: "Unsaved title" } });
+      fireEvent.click(screen.getByRole("button", { name: "Doc actions" }));
+      fireEvent.click(
+        await screen.findByRole("menuitem", { name: "Export Markdown" }),
+      );
+      const blob = create.mock.calls[0]?.[0] as Blob;
+      const text = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result));
+        reader.onerror = () => reject(reader.error);
+        reader.readAsText(blob);
+      });
+      expect(text).toContain(`[Open in Docs](<${noteUrl(note, f.origin)}>)`);
+      expect(text).toContain(`> Saved revision: \`${note.revision}\``);
+      expect(text).toContain(
+        `> Saved revision editor: Carl (\`${f.carl.pubkey}\`)`,
+      );
+      expect(text).toContain(
+        `> Saved revision date: ${new Date(note.event.created_at * 1000).toISOString()}`,
+      );
+      expect(text).toContain(
+        draft
+          ? "Status: Unsaved draft (based on the saved revision below)."
+          : "Status: Saved revision.",
+      );
+      expect(text.endsWith(`\n\n${note.markdown}`)).toBe(true);
+      expect(click.mock.instances[0]).toHaveAttribute(
+        "download",
+        `${draft ? "Unsaved title" : note.title}.md`,
+      );
+      expect((await f.workspace.open(note)).revision).toBe(note.revision);
+      view.unmount();
+      expect(revoke).toHaveBeenCalledWith("blob:export");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  },
+);
+
 it("saves changed content after idle, stays in Editing and skips unchanged content", async () => {
   const f = await fixture();
   await advance(10_000);
@@ -202,7 +276,7 @@ it("accepts a remote revision while clean and editing, then preserves a dirty dr
     f.echo(next);
   });
   expect(f.title).toHaveValue("Remote title");
-  expect(screen.getByRole("textbox", { name: "Page body" })).toHaveTextContent(
+  expect(screen.getByRole("textbox", { name: "Doc body" })).toHaveTextContent(
     "First item",
   );
   await advance(10_000);
@@ -219,7 +293,7 @@ it("accepts a remote revision while clean and editing, then preserves a dirty dr
   });
   expect(f.title).toHaveValue("My newer draft");
   expect(
-    screen.getByRole("dialog", { name: "This page has a newer revision" }),
+    screen.getByRole("dialog", { name: "This doc has a newer revision" }),
   ).toBeVisible();
   await advance(15_000);
   expect(f.save).not.toHaveBeenCalled();
@@ -229,7 +303,7 @@ it("persists Disable auto-save per page and account, cancels the timer, and keep
   const f = await fixture();
   f.change("Manual plan");
   await advance(1000);
-  fireEvent.click(screen.getByRole("button", { name: "Page actions" }));
+  fireEvent.click(screen.getByRole("button", { name: "Doc actions" }));
   await advance(0);
   expect(
     screen.queryByRole("menuitem", { name: "Disable auto-save" }),
@@ -241,8 +315,8 @@ it("persists Disable auto-save per page and account, cancels the timer, and keep
   expect(f.save).not.toHaveBeenCalled();
   expect(readView(f.session.scope, f.preference, true)).toBe(false);
   const manual = screen.getByRole("button", { name: /^Save$/ });
-  const mode = screen.getByRole("combobox", { name: "Page mode" });
-  const refresh = screen.getByRole("button", { name: "Refresh page" });
+  const mode = screen.getByRole("combobox", { name: "Doc mode" });
+  const refresh = screen.getByRole("button", { name: "Refresh doc" });
   expect(
     mode.compareDocumentPosition(manual) & Node.DOCUMENT_POSITION_FOLLOWING,
   ).toBeTruthy();
@@ -255,15 +329,15 @@ it("persists Disable auto-save per page and account, cancels the timer, and keep
   f.view.unmount();
   vi.useRealTimers();
   f.mount();
-  await screen.findByRole("button", { name: "Page actions" });
-  fireEvent.click(screen.getByRole("button", { name: "Page actions" }));
+  await screen.findByRole("button", { name: "Doc actions" });
+  fireEvent.click(screen.getByRole("button", { name: "Doc actions" }));
   fireEvent.click(
     await screen.findByRole("menuitem", { name: "Revision history" }),
   );
   expect(
     await screen.findByRole("menuitem", { name: "Enable auto-save" }),
   ).toBeVisible();
-  const other = f.seed("Other page", "Body");
+  const other = f.seed("Other doc", "Body");
   expect(
     readView(f.session.scope, `note-auto-save:${noteKey(other)}`, true),
   ).toBe(true);
@@ -280,7 +354,7 @@ it("preserves a concurrent draft and does not overwrite until the user resolves 
   await advance(1500);
   await saved(f.save).catch(() => {});
   expect(
-    screen.getByRole("dialog", { name: "This page has a newer revision" }),
+    screen.getByRole("dialog", { name: "This doc has a newer revision" }),
   ).toBeVisible();
   expect(f.title).toHaveValue("My draft");
   await advance(30_000);
@@ -314,13 +388,13 @@ async function historyFixture(automatic = false, deleted = false) {
     { title: "New plan", markdown: deleted ? "" : "New body" },
     deleted ? "delete" : "update",
   );
-  fireEvent.click(screen.getByRole("button", { name: "Refresh page" }));
+  fireEvent.click(screen.getByRole("button", { name: "Refresh doc" }));
   if (deleted) await screen.findByRole("button", { name: "Restore" });
   else await waitFor(() => expect(f.title).toHaveValue("New plan"));
   return { ...f, current };
 }
 async function previewOriginal() {
-  fireEvent.click(screen.getByRole("button", { name: "Page actions" }));
+  fireEvent.click(screen.getByRole("button", { name: "Doc actions" }));
   fireEvent.click(
     await screen.findByRole("menuitem", { name: "Revision history" }),
   );
@@ -444,7 +518,7 @@ it("preserves a draft when another author wins before restore", async () => {
   fireEvent.click(
     await screen.findByRole("button", { name: "Replace and restore" }),
   );
-  await screen.findByRole("dialog", { name: "This page has a newer revision" });
+  await screen.findByRole("dialog", { name: "This doc has a newer revision" });
   expect(f.title).toHaveValue("My pending draft");
   expect((await f.workspace.open(f.note)).title).toBe("Remote winner");
 });
@@ -549,7 +623,7 @@ it("keeps only the mounted Page channel live and receives a tool save through it
   });
   await waitFor(() =>
     expect(
-      screen.getByRole("textbox", { name: /^Page body$/ }),
+      screen.getByRole("textbox", { name: /^Doc body$/ }),
     ).toHaveTextContent("Updated by the agent"),
   );
   view.unmount();

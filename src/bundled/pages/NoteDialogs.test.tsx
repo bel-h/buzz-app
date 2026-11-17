@@ -77,7 +77,7 @@ it("shows each revision signer in history, with a key fallback for a missing pro
   const note = f.seed("Plan", "Original");
   await f.edit(f.carl, note, { title: "Agent edit", markdown: "By the agent" });
   const storage = f.channels.get(note.channel);
-  if (!storage) throw new Error("Missing page storage");
+  if (!storage) throw new Error("Missing doc storage");
   storage.roles[f.sam.pubkey] = "member";
   f.profiles.splice(
     f.profiles.findIndex((profile) => profile.pubkey === f.sam.pubkey),

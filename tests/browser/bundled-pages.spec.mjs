@@ -2,7 +2,7 @@ import { test, expect } from "./source-fixture.mjs";
 import { watchPageErrors } from "./page-errors.mjs";
 
 async function pageAction(page, article, name) {
-  await article.getByRole("button", { name: "Page actions" }).click();
+  await article.getByRole("button", { name: "Doc actions" }).click();
   await page.getByRole("menuitem", { name, exact: true }).click();
 }
 
@@ -35,7 +35,7 @@ test("edits and preserves drafts using host UI, then adopts an agent revision wi
   await folder.focus();
   await folder.press("Enter");
   await expect(
-    page.getByRole("button", { name: "Back to pages", exact: true }),
+    page.getByRole("button", { name: "Back to docs", exact: true }),
   ).toBeFocused();
   await shared.click();
   await expect(
@@ -50,9 +50,7 @@ test("edits and preserves drafts using host UI, then adopts an agent revision wi
   await expect(shared).toHaveCount(0);
   await page.goForward();
   await expect(shared).toBeVisible();
-  await page
-    .getByRole("button", { name: "Back to pages", exact: true })
-    .click();
+  await page.getByRole("button", { name: "Back to docs", exact: true }).click();
   await expect(folder).toBeFocused();
   await page
     .getByRole("link", { name: "Connected pages plan", exact: true })
@@ -62,11 +60,9 @@ test("edits and preserves drafts using host UI, then adopts an agent revision wi
     exact: true,
   });
   await manual(page, article);
-  const body = article.getByRole("textbox", { name: "Page body", exact: true });
+  const body = article.getByRole("textbox", { name: "Doc body", exact: true });
   await body.fill("A draft retained while browsing.");
-  await page
-    .getByRole("button", { name: "Back to pages", exact: true })
-    .click();
+  await page.getByRole("button", { name: "Back to docs", exact: true }).click();
   await page
     .getByRole("link", { name: "Connected pages plan", exact: true })
     .click();
@@ -74,7 +70,7 @@ test("edits and preserves drafts using host UI, then adopts an agent revision wi
   await article.getByRole("button", { name: "Save", exact: true }).click();
   await expect(article.getByRole("status")).toHaveText(/^Saved /);
   await article
-    .getByRole("combobox", { name: "Page mode", exact: true })
+    .getByRole("combobox", { name: "Doc mode", exact: true })
     .click();
   await page.getByRole("option", { name: "Editing", exact: true }).click();
   const remote = "# Agent update\n\n- retain spacing\n- no echo\n";
@@ -117,7 +113,7 @@ test("edits and preserves drafts using host UI, then adopts an agent revision wi
   await page.keyboard.press("Escape");
   await expect(preview).toBeHidden();
   await expect(
-    article.getByRole("button", { name: "Page actions" }),
+    article.getByRole("button", { name: "Doc actions" }),
   ).toBeFocused();
   await pageAction(page, article, "Markdown source");
   await expect(
@@ -154,7 +150,7 @@ test("edits and preserves drafts using host UI, then adopts an agent revision wi
         document.documentElement.style.fontSize = "20px";
       }, theme);
       await expect(
-        article.getByRole("button", { name: "Share page", exact: true }),
+        article.getByRole("button", { name: "Share doc", exact: true }),
       ).toBeInViewport({ ratio: 1 });
       await expect(
         body.getByRole("heading", { level: 1, name: "Agent update" }),
@@ -210,7 +206,7 @@ test("opens a Page beside the conversation and preserves host history and live e
     remote,
   );
   await expect(
-    article.getByRole("textbox", { name: "Page body", exact: true }),
+    article.getByRole("textbox", { name: "Doc body", exact: true }),
   ).toHaveText(remote);
   await page.goBack();
   await expect(article).toBeHidden();

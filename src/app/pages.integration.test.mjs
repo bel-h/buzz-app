@@ -63,7 +63,7 @@ test("the app runtime exposes ready bundled pages and removes them on disable", 
     const documents = services.pages
       .snapshot()
       .find((page) => page.key === "com.squareup.pages/pages");
-    assert.equal(documents.title, "Pages");
+    assert.equal(documents.title, "Docs");
     assert.equal(documents.placement, "dock");
     assert.match(
       renderToStaticMarkup(createElement(documents.component)),

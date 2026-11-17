@@ -58,7 +58,7 @@ export function noteTools(
       value.session.relayAuthor !== client.relayAuthor
     )
       throw new Error(
-        "Working pages require this agent’s owning community to be connected.",
+        "Working docs require this agent’s owning community to be connected.",
       );
     return value;
   }
@@ -68,7 +68,7 @@ export function noteTools(
     const value = workspace(client);
     if (!value.session.configArtifactWriter)
       throw new Error(
-        "This connection does not advertise working-page revision support.",
+        "This connection does not advertise working-doc revision support.",
       );
     return value;
   };
@@ -94,7 +94,7 @@ export function noteTools(
         } catch (error) {
           if (error instanceof NoteConflict)
             throw new Error(
-              `This request did not confirm your content as the current revision. Keep your proposed text, call page_get, merge with the latest content and retry against its revision. Current page: ${format(error.current, community(client))}`,
+              `This request did not confirm your content as the current revision. Keep your proposed text, call page_get, merge with the latest content and retry against its revision. Current doc: ${format(error.current, community(client))}`,
             );
           throw error;
         }
@@ -104,14 +104,14 @@ export function noteTools(
   return [
     tool(
       "page_help",
-      "Create document deliverables as live Pages instead of attaching .md files. Start here for the create/verify/link/update workflow, Pages plugin links, reading and updating shared pages, revision conflicts, permissions, or missing tools. Use page_* tools for these pages; Canvas and published notes_* tools read different content.",
+      "Create document deliverables as live Docs instead of attaching .md files. Start here for the create/verify/link/update workflow, Docs plugin links, reading and updating shared docs, revision conflicts, permissions, or missing tools. Use page_* tools for these docs; Canvas and published notes_* tools read different content.",
       {},
       [],
       async () => agentGuide,
     ),
     tool(
       "page_get",
-      "Read a working page from its Pages plugin URL, or id and channel. Search accessible pages by title with q, or omit arguments to list. Search/listing are paged; keep q and pass the returned cursor. Results include links and revisions for page_set. For guidance use page_help. Published agent notes still use notes_get.",
+      "Read a working doc from its Docs plugin URL, or id and channel. Search accessible docs by title with q, or omit arguments to list. Search/listing are paged; keep q and pass the returned cursor. Results include links and revisions for page_set. For guidance use page_help. Published agent notes still use notes_get.",
       {
         ...addressFields,
         url: str,
@@ -133,7 +133,7 @@ export function noteTools(
         ) {
           if (args.q !== undefined || args.cursor !== undefined)
             throw new Error(
-              "Read a page address or search/list pages, not both.",
+              "Read a doc address or search/list docs, not both.",
             );
           const linked =
             args.url === undefined
@@ -143,10 +143,10 @@ export function noteTools(
             args.url !== undefined &&
             (!linked || args.id !== undefined || args.channel !== undefined)
           )
-            throw new Error("Provide one valid page URL, or id and channel.");
+            throw new Error("Provide one valid doc URL, or id and channel.");
           if (linked && linked.community !== origin)
             throw new Error(
-              `This page belongs to ${linked.community}; this agent is connected to ${origin}. Ask from the page’s community.`,
+              `This doc belongs to ${linked.community}; this agent is connected to ${origin}. Ask from the doc’s community.`,
             );
           const address = linked ?? noteAddress(args);
           return format(await readNote(asReader(client), address), origin);
@@ -182,14 +182,14 @@ export function noteTools(
     ),
     tool(
       "page_set",
-      "Create or edit a live Markdown document; prefer this to .md attachments unless a file is requested. The result’s message is a ready-to-post Page link. Verify with page_get, then reply using that link. To create, omit channel/revision and reuse a new UUID id on retries; only the owner and creating agent receive access. The owner shares or grants Admin in Share page; page_share requires Admin. To edit, use channel/revision from page_get; on conflict read, merge and retry. Restore deleted pages with page_delete restore:true. Pass text or a UTF-8 path.",
+      "Create or edit a live Markdown document; prefer this to .md attachments unless a file is requested. The result’s message is a ready-to-post Doc link. Verify with page_get, then reply using that link. To create, omit channel/revision and reuse a new UUID id on retries; only the owner and creating agent receive access. The owner shares or grants Admin in Share doc; page_share requires Admin. To edit, use channel/revision from page_get; on conflict read, merge and retry. Restore deleted docs with page_delete restore:true. Pass text or a UTF-8 path.",
       { ...addressFields, revision: str, title: str, text: str, path: str },
       ["id", "title"],
       async (client, _context, args) => {
         requireWrites(client);
         if (args.revision !== undefined && args.channel === undefined)
           throw new Error(
-            "Editing requires channel and id from page_get together with revision. Omit revision only when creating a new page.",
+            "Editing requires channel and id from page_get together with revision. Omit revision only when creating a new doc.",
           );
         if ((args.text === undefined) === (args.path === undefined))
           throw new Error("Provide exactly one of text or path.");
@@ -216,7 +216,7 @@ export function noteTools(
           throw new NoteConflict(base);
         if (base.deleted)
           throw new Error(
-            "This page is deleted. Read page_history for retained title/content, then use page_delete with restore:true, the current revision, title and text to restore it.",
+            "This doc is deleted. Read page_history for retained title/content, then use page_delete with restore:true, the current revision, title and text to restore it.",
           );
         return format(
           await saveNote(
@@ -231,7 +231,7 @@ export function noteTools(
     ),
     tool(
       "page_history",
-      "Read retained revisions of a connected page. Access is the same as the current page; offset pages are 100 revisions. To restore an older version, read it, then page_set its contents against the current revision.",
+      "Read retained revisions of a connected doc. Access is the same as the current doc; offset pages are 100 revisions. To restore an older version, read it, then page_set its contents against the current revision.",
       {
         ...addressFields,
         offset: { type: "integer", minimum: 0, maximum: 10000 },
@@ -248,7 +248,7 @@ export function noteTools(
     ),
     tool(
       "page_delete",
-      "Soft-delete or restore a connected page using its current revision. Restoring requires a title and Markdown text. The backing channel and sharing are retained.",
+      "Soft-delete or restore a connected doc using its current revision. Restoring requires a title and Markdown text. The backing channel and sharing are retained.",
       {
         ...addressFields,
         revision: str,
@@ -281,7 +281,7 @@ export function noteTools(
     ),
     tool(
       "page_share",
-      "Explicitly give a person/agent read or edit access to a connected page, or remove them. Requires the calling agent’s channel administration permission; never borrows the owner’s authority. Readers receive retained history too.",
+      "Explicitly give a person/agent read or edit access to a connected doc, or remove them. Requires the calling agent’s channel administration permission; never borrows the owner’s authority. Readers receive retained history too.",
       {
         ...addressFields,
         pubkey: str,
@@ -317,7 +317,7 @@ export function noteTools(
               noteTag(event, "d") === address.channel,
           );
           if (!independentNoteStorage(address, metadata))
-            throw new Error("This page does not use independent page sharing.");
+            throw new Error("This doc does not use independent doc sharing.");
           return {
             metadata,
             authority: memberAuthority(
@@ -331,7 +331,7 @@ export function noteTools(
         const before = await state();
         if (!before.authority.canManage)
           throw new Error(
-            "This agent needs Admin access to administer page sharing. Ask the owner to open Share page and grant this agent Admin. Creating or editing a page does not grant administration.",
+            "This agent needs Admin access to administer doc sharing. Ask the owner to open Share doc and grant this agent Admin. Creating or editing a doc does not grant administration.",
           );
         if (
           pubkey === client.pubkey ||
@@ -354,7 +354,7 @@ export function noteTools(
           noteTag(heads[0], "d") !== address.id
         )
           throw new Error(
-            "This storage contains other pages. Create a separate working copy before sharing this page.",
+            "This storage contains other docs. Create a separate working copy before sharing this doc.",
           );
         const role = access === "read" ? "guest" : "member";
         await client.publish({
@@ -377,7 +377,7 @@ export function noteTools(
           throw new Error(
             "Sharing was not confirmed. Read access before retrying.",
           );
-        return "Page access updated.";
+        return "Doc access updated.";
       },
     ),
   ];

@@ -20,7 +20,7 @@ export const apply: PluginModule["apply"] = (ctx) => {
   const ui = { conversation: ctx.conversation.ui, panels: ctx.panels.ui };
   ctx.agents.addInstructions({
     id: "pages",
-    text: "For document deliverables, prefer a live Page to a .md attachment unless the person requests a file. Call page_help for the create/verify/link/update workflow. Update the same Page on follow-ups; never broaden sharing automatically. Pages, Canvas and published notes use separate tools.",
+    text: "For document deliverables, prefer a live Doc to a .md attachment unless the person requests a file. Call page_help for the create/verify/link/update workflow. Update the same Doc on follow-ups; never broaden sharing automatically. Docs, Canvas and published notes use separate tools.",
   });
   const workspaces = new Map<RelaySession, NotesWorkspace>();
   const getWorkspace = (session: RelaySession) => {
@@ -57,7 +57,7 @@ export const apply: PluginModule["apply"] = (ctx) => {
   ctx.panels.register({
     id: "page",
     addressable: true,
-    title: "Page",
+    title: "Doc",
     keepOpen: true,
     channelPlacement: "tab",
     matches: (target) => !!parseNoteUrl(target),
@@ -75,7 +75,7 @@ export const apply: PluginModule["apply"] = (ctx) => {
   });
   ctx.pages.register({
     id: "pages",
-    title: "Pages",
+    title: "Docs",
     layout: "workspace",
     primary: true,
     placement: "dock",

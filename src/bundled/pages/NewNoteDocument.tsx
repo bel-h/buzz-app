@@ -96,7 +96,7 @@ export function NewNoteDocument({
   useEffect(() => {
     if (!accepted || composing || handedOff.current) return;
     handedOff.current = true;
-    const nextTitle = title.trim() || "Untitled page";
+    const nextTitle = title.trim() || "Untitled doc";
     if (nextTitle !== accepted.title || markdown !== accepted.markdown)
       workspace.drafts.set(noteKey(accepted), {
         base: accepted,
@@ -150,7 +150,7 @@ export function NewNoteDocument({
       // Later typing is retained as a draft against the accepted first revision.
       attempt.current ??= {
         ...latest.current,
-        title: latest.current.title.trim() || "Untitled page",
+        title: latest.current.title.trim() || "Untitled doc",
       };
       const note = await workspace.create(attempt.current, controller.signal);
       controller.signal.throwIfAborted();
@@ -158,7 +158,7 @@ export function NewNoteDocument({
     } catch (error) {
       if (controller.signal.aborted) return;
       setError(
-        error instanceof Error ? error.message : "The page could not be saved.",
+        error instanceof Error ? error.message : "The doc could not be saved.",
       );
     } finally {
       request.current = null;
@@ -201,11 +201,11 @@ export function NewNoteDocument({
   ]);
   const community = workspace.session.scope.replace(/:[0-9a-f]{64}$/, "");
   return (
-    <article className={styles.documentPane} aria-label="New page">
+    <article className={styles.documentPane} aria-label="New doc">
       {/* biome-ignore lint/a11y/useKeyWithClickEvents: blank-space clicks extend the existing textbox hit area; keyboard users reach that textbox with Tab. */}
       <section
         className={readerStyles.document}
-        aria-label="Page contents"
+        aria-label="Doc contents"
         onCompositionStart={() => setComposing(true)}
         onCompositionEnd={() => setComposing(false)}
         onPointerDown={(event) => {
@@ -232,7 +232,7 @@ export function NewNoteDocument({
           <Input
             ref={titleInput}
             appearance="heading"
-            placeholder="Untitled page"
+            placeholder="Untitled doc"
             value={title}
             onValueChange={setTitle}
           />
@@ -250,7 +250,7 @@ export function NewNoteDocument({
         )}
         <div className={styles.actions}>
           <Select
-            label="Page mode"
+            label="Doc mode"
             variant="compact"
             size="sm"
             value="editing"
@@ -258,7 +258,7 @@ export function NewNoteDocument({
             disabled
             groups={[
               {
-                label: "Page mode",
+                label: "Doc mode",
                 options: [{ value: "editing", label: "Editing" }],
               },
             ]}
@@ -271,8 +271,8 @@ export function NewNoteDocument({
             {error ? "Retry save" : "Save"}
           </NoteSaveAction>
           <IconButton
-            aria-label="Share page"
-            title="Share page"
+            aria-label="Share doc"
+            title="Share doc"
             icon={<ShareIcon size={16} />}
             onClick={() => {
               setShare(true);
@@ -283,8 +283,8 @@ export function NewNoteDocument({
             <MenuTrigger
               render={
                 <IconButton
-                  aria-label="Page actions"
-                  title="Page actions"
+                  aria-label="Doc actions"
+                  title="Doc actions"
                   icon={<DotsThreeIcon size={16} />}
                 />
               }

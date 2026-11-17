@@ -103,6 +103,6 @@ export function workingTarget(
   target: Extract<OpenTarget, { kind: "page" }>,
   route: WorkingRoute,
 ): OpenTarget {
-  if (!workingRoute(route)) throw new Error("Invalid page destination.");
+  if (!workingRoute(route)) throw new Error("Invalid doc destination.");
   return { ...target, route: { version: 1, params: { ...route } } };
 }

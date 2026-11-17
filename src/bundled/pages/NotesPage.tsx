@@ -155,12 +155,12 @@ export function NotesPage({
   return (
     <div className={styles.page}>
       <div className={styles.collection} hidden={reading}>
-        <Panel aria-label="Pages">
+        <Panel aria-label="Docs">
           <div className={styles.page}>
             <PanelHeader
               title={
                 <PanelHeaderLabel
-                  title={folder ? "Shared with me" : "Pages"}
+                  title={folder ? "Shared with me" : "Docs"}
                   icon={
                     folder ? (
                       <FolderSimpleIcon size={16} />
@@ -173,31 +173,31 @@ export function NotesPage({
                     <PopoverTrigger
                       render={
                         <IconButton
-                          aria-label="About pages"
-                          title="About pages"
+                          aria-label="About docs"
+                          title="About docs"
                           icon={<InfoIcon size={16} />}
                         />
                       }
                     />
                     <PopoverPopup>
-                      <PopoverTitle>About pages</PopoverTitle>
+                      <PopoverTitle>About Docs</PopoverTitle>
                       <PopoverDescription
                         render={<div className={styles.description} />}
                       >
                         <p>
-                          Create pages with people and agents. Open a title to
-                          read or edit the page, then use Back to pages to
-                          return to the list.
+                          Create docs with people and agents. Open a title to
+                          read or edit the doc, then use Back to docs to return
+                          to the list.
                         </p>
                         <p>
-                          Pages you create and pages from your verified agents
-                          stay together. Pages from other creators appear in
+                          Docs you create and docs from your verified agents
+                          stay together. Docs from other creators appear in
                           Shared with me. Grouping does not change access.
                         </p>
                         <p>
-                          Each page has its own sharing settings. Access
-                          includes retained revisions. The relay operator can
-                          read page contents. Don’t include secrets.
+                          Each doc has its own sharing settings. Access includes
+                          retained revisions. The relay operator can read doc
+                          contents. Don’t include secrets.
                         </p>
                       </PopoverDescription>
                     </PopoverPopup>
@@ -208,8 +208,8 @@ export function NotesPage({
                 folder ? (
                   <IconButton
                     ref={folderBackRef}
-                    aria-label="Back to pages"
-                    title="Back to pages"
+                    aria-label="Back to docs"
+                    title="Back to docs"
                     icon={<ArrowLeftIcon size={16} />}
                     onClick={() => showShared(false)}
                   />
@@ -218,8 +218,8 @@ export function NotesPage({
               actions={
                 <IconButton
                   ref={refreshRef}
-                  aria-label="Refresh pages"
-                  title="Refresh pages"
+                  aria-label="Refresh docs"
+                  title="Refresh docs"
                   icon={
                     <ArrowsClockwiseIcon
                       size={16}
@@ -238,7 +238,7 @@ export function NotesPage({
               <SearchField
                 variant="capsule"
                 inputRef={searchRef}
-                label="Search pages"
+                label="Search docs"
                 disabled={!entries.length && !query}
                 placeholder="Search"
                 value={query}
@@ -253,8 +253,8 @@ export function NotesPage({
                       disabled={!canFilter}
                       render={
                         <IconButton
-                          aria-label="Filter pages"
-                          title="Filter pages"
+                          aria-label="Filter docs"
+                          title="Filter docs"
                           variant={trash ? "prominent" : "ghost"}
                           icon={<Filter2Icon size={16} aria-hidden="true" />}
                         />
@@ -266,7 +266,7 @@ export function NotesPage({
                         onCheckedChange={showDeleted}
                         closeOnClick
                       >
-                        Show deleted pages
+                        Show deleted docs
                       </MenuCheckboxItem>
                     </MenuPopup>
                   </MenuRoot>
@@ -274,24 +274,24 @@ export function NotesPage({
               />
               {loading && (
                 <span role="status" className="sr-only">
-                  Reading pages…
+                  Reading docs…
                 </span>
               )}
               {error && <p role="alert">{error}</p>}
               {empty && (
                 <EmptyState
                   icon={null}
-                  title={folder ? "No shared pages" : "No pages yet"}
+                  title={folder ? "No shared docs" : "No docs yet"}
                   description={
                     folder
-                      ? "Pages shared by other creators appear here."
-                      : "Create a page or ask an agent to save one."
+                      ? "Docs shared by other creators appear here."
+                      : "Create a doc or ask an agent to save one."
                   }
                   action={
                     !folder ? (
                       <Button variant="subtle" onClick={create}>
                         <PlusIcon size={16} aria-hidden="true" />
-                        New page
+                        New doc
                       </Button>
                     ) : undefined
                   }
@@ -300,7 +300,7 @@ export function NotesPage({
               {!empty && (
                 <ul
                   className={styles.titleList}
-                  aria-label={folder ? "Shared with me" : "Pages"}
+                  aria-label={folder ? "Shared with me" : "Docs"}
                 >
                   {visible.map(titleLink)}
                   {!folder && (
@@ -308,7 +308,7 @@ export function NotesPage({
                       <NavigationItem
                         variant="text"
                         icon={<PlusIcon size={16} aria-hidden="true" />}
-                        label="New page"
+                        label="New doc"
                         onClick={create}
                       />
                     </li>
@@ -318,7 +318,7 @@ export function NotesPage({
                       <NavigationItem
                         ref={folderRef}
                         aria-label="Shared with me"
-                        aria-description={`${sharedCount} loaded pages`}
+                        aria-description={`${sharedCount} loaded docs`}
                         icon={<FolderSimpleIcon size={16} aria-hidden="true" />}
                         label="Shared with me"
                         trailing={
@@ -333,12 +333,12 @@ export function NotesPage({
                 </ul>
               )}
               {!loading && !error && query && !visible.length && (
-                <p role="status">No matching pages.</p>
+                <p role="status">No matching docs.</p>
               )}
               {more && (
                 <div>
                   <Button size="sm" loading={loading} onClick={loadMore}>
-                    Load more pages
+                    Load more docs
                   </Button>
                 </div>
               )}
@@ -347,19 +347,19 @@ export function NotesPage({
         </Panel>
       </div>
       <div className={styles.fullView} hidden={!reading}>
-        <Panel aria-label="Page details">
+        <Panel aria-label="Doc details">
           <PanelHeader
             title={
               <PanelHeaderLabel
-                title={active?.label ?? "Page"}
+                title={active?.label ?? "Doc"}
                 icon={<NoteIcon size={16} />}
               />
             }
             navigation={
               <IconButton
                 ref={backRef}
-                aria-label={folder ? "Back to Shared with me" : "Back to pages"}
-                title={folder ? "Back to Shared with me" : "Back to pages"}
+                aria-label={folder ? "Back to Shared with me" : "Back to docs"}
+                title={folder ? "Back to Shared with me" : "Back to docs"}
                 icon={<ArrowLeftIcon size={16} />}
                 onClick={browse}
               />

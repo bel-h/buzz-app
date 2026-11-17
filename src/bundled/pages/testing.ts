@@ -234,7 +234,7 @@ export async function notesFixture(options: { live?: boolean } = {}) {
       if (channel) throw new PublishRejected("duplicate: channel exists");
       channels.set(id, {
         id,
-        name: noteTag(event, "name") ?? "Page",
+        name: noteTag(event, "name") ?? "Doc",
         creator: who,
         type: noteTag(event, "channel_type") ?? "stream",
         labels: event.tags
@@ -396,7 +396,7 @@ export async function notesFixture(options: { live?: boolean } = {}) {
     const id = crypto.randomUUID();
     channels.set(id, {
       id,
-      name: `Page ${id.slice(0, 8)}`,
+      name: `Doc ${id.slice(0, 8)}`,
       creator: viewer.pubkey,
       type: "system",
       labels: [
@@ -422,12 +422,12 @@ export async function notesFixture(options: { live?: boolean } = {}) {
     heads.set(id, event);
     revisions.push(event);
     const note = parseNote(event);
-    if (!note) throw new Error("Invalid fixture page");
+    if (!note) throw new Error("Invalid fixture doc");
     return note;
   }
   async function edit(key: Key, note: Note, draft: NoteDraft) {
     const base = parseNote(heads.get(note.id) ?? note.event);
-    if (!base) throw new Error("No page head");
+    if (!base) throw new Error("No doc head");
     return client(key).publish(noteTemplate(base, draft, base));
   }
   return {

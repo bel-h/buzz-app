@@ -46,7 +46,7 @@ async function fixture() {
 
 describe("connected page revisions", () => {
   it.each([false, true])(
-    "preserves the conversation anchor through the page lifecycle (anchored=%s)",
+    "preserves the conversation anchor through the doc lifecycle (anchored=%s)",
     async (anchored) => {
       const f = await fixture();
       let original = f.seed("Plan", "Original");
@@ -64,7 +64,7 @@ describe("connected page revisions", () => {
           tags: [...original.event.tags.map((tag) => [...tag]), ["root", root]],
         });
         const note = parseNote(event);
-        if (!note) throw new Error("Expected anchored page");
+        if (!note) throw new Error("Expected anchored doc");
         original = note;
         f.heads.set(note.id, event);
         f.revisions.splice(0, 1, event);
@@ -219,7 +219,7 @@ describe("connected page revisions", () => {
       ),
     });
     expect(future?.editable).toBe(false);
-    if (!future) throw new Error("Expected readable future page");
+    if (!future) throw new Error("Expected readable future doc");
     expect(() =>
       noteTemplate(future, { title: "Plan", markdown: "Edit" }, future),
     ).toThrow(/unsupported/);
@@ -341,7 +341,7 @@ describe("channel orchestration", () => {
     f.heads.set(other.id, tombstone);
     await expect(
       f.workspace.setMember(note, f.sam.pubkey, "read"),
-    ).rejects.toThrow(/other pages/);
+    ).rejects.toThrow(/other docs/);
     const channel = f.channels.get(note.channel);
     if (!channel) throw new Error("Missing channel");
     channel.roles[f.carl.pubkey] = "admin";
@@ -353,7 +353,7 @@ describe("channel orchestration", () => {
         {},
         { ...note, pubkey: f.sam.pubkey, access: "read" },
       ),
-    ).rejects.toThrow(/other pages/);
+    ).rejects.toThrow(/other docs/);
     expect(channel.roles[f.sam.pubkey]).toBeUndefined();
   });
   it("refuses creation recovery in storage already containing another page", async () => {
@@ -371,7 +371,7 @@ describe("channel orchestration", () => {
         markdown: "Draft",
         agent: f.carl.pubkey,
       }),
-    ).rejects.toThrow(/another page/);
+    ).rejects.toThrow(/another doc/);
     expect(channel.roles[f.carl.pubkey]).toBeUndefined();
     expect(f.accepted.filter((event) => event.kind === 9000)).toEqual([]);
   });
@@ -446,7 +446,7 @@ describe("channel orchestration", () => {
     expect(f.accepted.filter((event) => event.kind === 9000)).toEqual([]);
   });
   it.each(["refused", "lost receipt"])(
-    "recovers a %s first revision using the same page and channel",
+    "recovers a %s first revision using the same doc and channel",
     async (failure) => {
       const f = await fixture();
       const draft = {
@@ -457,7 +457,7 @@ describe("channel orchestration", () => {
       if (failure === "refused") f.failNextArtifact();
       else f.loseNextReceipt();
       await expect(f.workspace.create(draft)).rejects.toThrow(
-        failure === "refused" ? /Reuse page ID/ : /not confirmed/,
+        failure === "refused" ? /Reuse doc ID/ : /not confirmed/,
       );
       expect(f.channels.size).toBe(1);
       expect(f.revisions).toHaveLength(failure === "refused" ? 0 : 1);
@@ -510,7 +510,7 @@ describe("channel orchestration", () => {
     const f = await fixture(),
       note = f.seed("Plan", "Work", false);
     const channel = f.channels.get(note.channel);
-    if (!channel) throw new Error("Missing page channel");
+    if (!channel) throw new Error("Missing doc channel");
     channel.roles[f.viewer.pubkey] = "member";
     channel.updated++;
     await expect(
@@ -656,7 +656,7 @@ it("does not call the owner’s writer when an unauthorized agent asks to share"
       {},
       { ...note, pubkey: f.sam.pubkey, access: "edit" },
     ),
-  ).rejects.toThrow(/needs Admin.*Share page.*grant this agent Admin/);
+  ).rejects.toThrow(/needs Admin.*Share doc.*grant this agent Admin/);
   expect(spy).not.toHaveBeenCalled();
   expect(f.channels.get(note.channel)?.roles[f.sam.pubkey]).toBeUndefined();
 });
@@ -672,7 +672,7 @@ it("confirms explicit agent invitations using the relay's participating role", a
       {},
       { ...note, pubkey: f.ned.pubkey, access: "edit" },
     ),
-  ).resolves.toBe("Page access updated.");
+  ).resolves.toBe("Doc access updated.");
   expect(f.channels.get(note.channel)?.roles[f.ned.pubkey]).toBe("bot");
 });
 

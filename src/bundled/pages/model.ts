@@ -76,7 +76,7 @@ export function noteAddress(value: unknown): NoteAddress {
     typeof address.channel !== "string" ||
     !UUID.test(address.channel)
   )
-    throw new Error("Invalid page address.");
+    throw new Error("Invalid doc address.");
   return { id: address.id, channel: address.channel };
 }
 /** Storage convention only; callers establish signed membership independently. */
@@ -142,7 +142,7 @@ export function parseNote(event: NoteEvent): Note | undefined {
     id,
     channel,
     revision: event.id,
-    title: deleted ? "Deleted page" : (title ?? ""),
+    title: deleted ? "Deleted doc" : (title ?? ""),
     markdown: event.content,
     deleted,
     editable:
@@ -154,9 +154,9 @@ export function parseNote(event: NoteEvent): Note | undefined {
 }
 export function validateDraft(draft: NoteDraft) {
   if (!draft.title.trim() || bytes(draft.title) > 512)
-    throw new Error("Give the page a title of at most 512 bytes.");
+    throw new Error("Give the doc a title of at most 512 bytes.");
   if (bytes(draft.markdown) > MAX_NOTE_BYTES)
-    throw new Error("Keep this page under 32 KiB of Markdown.");
+    throw new Error("Keep this doc under 32 KiB of Markdown.");
 }
 export function noteTemplate(
   address: NoteAddress,
@@ -173,9 +173,9 @@ export function noteTemplate(
     (previous &&
       (previous.id !== address.id || previous.channel !== address.channel))
   )
-    throw new Error("The page revision does not match this page.");
+    throw new Error("The doc revision does not match this doc.");
   if (previous && !previous.editable)
-    throw new Error("This page uses an unsupported page format.");
+    throw new Error("This doc uses an unsupported doc format.");
   const source = draft.restoreFrom;
   if (
     source &&
@@ -185,7 +185,7 @@ export function noteTemplate(
       !source.editable ||
       source.deleted)
   )
-    throw new Error("Choose a supported revision of this page to restore.");
+    throw new Error("Choose a supported revision of this doc to restore.");
   const extra =
     operation === "delete"
       ? []
@@ -214,7 +214,7 @@ export function noteTemplate(
     tags,
   };
   if (tags.length > 250 || bytes(JSON.stringify(template)) > 60_000)
-    throw new Error("This page and its metadata exceed the save limit.");
+    throw new Error("This doc and its metadata exceed the save limit.");
   return template;
 }
 
@@ -241,16 +241,16 @@ export async function readNote(
   signal?.throwIfAborted();
   const [event] = events;
   if (events.length !== 1 || !event)
-    throw new Error("This page is unavailable or you no longer have access.");
+    throw new Error("This doc is unavailable or you no longer have access.");
   const note = parseNote(event);
   if (!note || note.id !== address.id || note.channel !== address.channel)
-    throw new Error("The relay returned an unsupported page.");
+    throw new Error("The relay returned an unsupported doc.");
   return note;
 }
 export class NoteConflict extends Error {
   constructor(readonly current: Note) {
     super(
-      "This page changed since you opened it. Your draft is kept; compare it with the latest revision before saving again.",
+      "This doc changed since you opened it. Your draft is kept; compare it with the latest revision before saving again.",
     );
   }
 }
@@ -268,7 +268,7 @@ export async function saveNote(
     (operation === "update" && base.deleted) ||
     (operation === "restore" && !base.deleted)
   )
-    throw new Error("Refresh the page before changing its deletion state.");
+    throw new Error("Refresh the doc before changing its deletion state.");
   let saved: NoteEvent;
   try {
     saved = await publish(noteTemplate(base, draft, base, operation), signal);

@@ -1146,32 +1146,34 @@ and are asked to sign in again in Buzz.
   the Activity list and a conversation) works the same way. Each page remembers
   its own width within the same community and identity; double-click to reset.
 
-## Pages
+## Docs
 
-Pages is a bundled plugin for live Markdown documents shared with people and
-agents. Open Pages from the dock. Edits auto-save after a pause; Page actions →
+Docs is a bundled plugin for live Markdown documents shared with people and
+agents. Open Docs from the dock. Edits auto-save after a pause; Doc actions →
 Revision history lets you disable auto-save and use Save. Unsaved drafts survive
 browsing within the connected session, not app restarts.
 
-The main collection keeps your pages together with pages created by your verified
-agents. Pages from other creators are in **Shared with me**; open that folder to
-search them. An agent page stays there until ownership can be verified. These
-groups do not change creator attribution, ownership or access. Each page row shows
+The main collection keeps your docs together with docs created by your verified
+agents. Docs from other creators are in **Shared with me**; open that folder to
+search them. An agent doc stays there until ownership can be verified. These
+groups do not change creator attribution, ownership or access. Each doc row shows
 its last editor’s avatar beside the relative save time; hover for their name.
 
-Use Share page to grant access. New pages are private; View only allows community
+Use Share doc to grant access. New docs are private; View only allows community
 members to read. A link grants no access. Sharing includes retained revisions,
-and the relay operator can read content. Page actions also offers revision
+and the relay operator can read content. Doc actions also offers revision
 history with each revision’s author and avatar, Markdown export and recoverable
 deletion. Revision times are relative; hover to see the exact date and time.
 Restore saves a new revision.
 Conflicting edits preserve the draft until you reconcile the newer revision.
+Markdown exports include the source link and saved revision’s editor, public key,
+revision ID and date. Unsaved drafts are labelled separately from their saved base.
 
-Page references open beside the conversation, with normal Back/Forward and tab
-close behavior. Agents can call `page_help`, create and verify a Page, post its
+Doc references open beside the conversation, with normal Back/Forward and tab
+close behavior. Agents can call `page_help`, create and verify a Doc, post its
 returned reference, then update the same document on follow-ups. The execution
-host must have Pages enabled. Saving requires relay support for NIP-AR page
-records. Pages does not migrate Canvas or the separate Shared notes format.
+host must have Docs enabled. Saving requires relay support for NIP-AR doc
+records. Docs does not migrate Canvas or the separate Shared notes format.
 
 ## Saved Solo follow-ups
 
