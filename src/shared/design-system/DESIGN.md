@@ -1070,6 +1070,11 @@ other IconButtons.
 IconButton also offers `xs` (20px with 12px icons) for dense formatting actions. Mode
 toggles remain `sm`.
 
+An IconButton takes either `icon` or `emoji`. Use `emoji` when the action is
+best shown as an emoji, such as a skin-tone choice shown as a hand in that tone.
+The glyph uses `--font-emoji` at `--size-emoji-inline`, centred in the same
+control. Its accessible name still comes from `aria-label`.
+
 An `xs` Button whose label starts with an icon reduces its leading padding to its
 4px vertical padding, so the icon sits evenly in the capsule's leading corner.
 
@@ -1323,7 +1328,7 @@ PanelHeader owns one consistent header frame: leading `navigation`, title/icon,
 and trailing `actions`. `PanelHeaderLabel` supplies the smaller tab-aligned
 label role; omit its optional icon for image and video detail titles. Use a small IconButton with ArrowLeft for a local back
 action and X for closing the panel. The default 2.5rem (40px at the default root size) minimum height aligns conversation,
-thread, profile, tabbed workspace, and Todos headers. The compact variant shares
+thread, profile and tabbed workspace headers. The compact variant shares
 this height. Headers use 0.25rem inline padding (matching the centered 2rem controls’
 block inset), 1rem identity icons, and
 0.25rem gaps between action buttons without reducing their hit areas. Navigation
@@ -1616,7 +1621,7 @@ separate from status text and the overflow action.
 Selected rows can expand without painting the entire branch in the accent color.
 
 Its `text` variant is a text-only row action, such as a capped list's Show
-more and Show less: the base navigation item's type and padding with no fill, resting in
+more and Show fewer: the base navigation item's type and padding with no fill, resting in
 `--text-subtle` and strengthening to `--text-standard` on hover and keyboard
 focus. Use it where a fill would read as another destination.
 
@@ -1723,9 +1728,10 @@ Values scale with the host interface-size preference.
   independent from caption even though their sizes currently match. `text-mono-lg` and
   `text-mono-sm` are compatibility aliases for this same setting, not extra sizes.
 - Caption uses 12/16 and 0.0133em tracking. Buzz’s `text-body` uses 14/20; `text-label` uses 16/24 and `text-body-lg` uses 20/28.
-- Message prose uses `text-message`: 14px with 22/14 leading (22px at
-  default), keeping a compact reading rhythm for both sent and received
-  messages. The message renderer uses `space-4` between prose blocks, with
+- Message prose and composer text use `text-message`: 14px with 21.5/14 leading
+  (21.5px at default), Regular (400) weight and -0.01em tracking, keeping the
+  same compact reading rhythm while writing and reading messages. The message
+  renderer uses `space-4` between prose blocks, with
   `space-2` between an introductory paragraph and its following list. Labels,
   controls, code, tables and headings retain their existing type roles.
 - Preserve text preferences and browser zoom. Author values in scaled rem and
@@ -2235,8 +2241,9 @@ Inline search settings use the search variant of PreferenceRow with a gear icon 
 
 Proposed pending designer sign-off, as a narrow exception to the chat and
 conversation icon rule under Icons. Use `ChatCircleIcon` for a Solo chat in navigation, headers, tabs and chat cards.
-Use `MessageReplyIcon` (Tabler MessageReply) for thread tabs, thread links and
-Reply actions. Keep private Team channels' lock icon; privacy alone does not
+Use `ThreadIcon` (Tabler Message2) for thread tabs, thread links and Reply actions.
+Its text lines identify a conversation without the forward-like arrow in MessageReply.
+Keep private Team channels' lock icon; privacy alone does not
 replace a Solo chat's identity icon. Accessible chat cards end with a right
 chevron. Unavailable chat cards retain a lock and unavailable accessible text;
 unknown access does not earn a chevron. Display chat cards as **Chat:**, while

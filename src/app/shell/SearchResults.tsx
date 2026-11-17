@@ -37,7 +37,7 @@ import {
   ArrowsDownUpIcon,
   CalendarIcon,
   ChatCircleIcon,
-  MessageReplyIcon,
+  ThreadIcon,
 } from "../../shared/design-system/icons/index";
 import { Button } from "../../shared/design-system/ui/Button";
 import { Calendar } from "../../shared/design-system/ui/Calendar";
@@ -1473,13 +1473,13 @@ export function SearchResults({
     const name = thread.workflowOwnerId ? workflowLabel(resolved) : resolved;
     return {
       ...destination,
-      detailIcon: MessageReplyIcon,
+      detailIcon: ThreadIcon,
       detailIconLabel: "Thread reply",
       detail: thread.preview.trim()
         ? `${name}: ${thread.preview}`
         : `${name} replied in a thread`,
       run: choose(destination.key, () =>
-        openConversation(channel.id, thread.latestMessageId, thread.rootId),
+        openConversation(channel.id, thread.rootId, thread.rootId),
       ),
     };
   };
