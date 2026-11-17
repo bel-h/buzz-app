@@ -40,7 +40,7 @@ export type NotificationGate = Readonly<{
 /** Replaces the Dock dot with one bounded attention count while positive. */
 export type NotificationDockBadge = Readonly<{
   id: string;
-  count(): number;
+  count(allows: (target: OpenTarget) => boolean): number;
   subscribe(listener: () => void): () => void;
   /** Lower wins when more than one plugin contributes a count. */
   order?: number;
@@ -197,7 +197,7 @@ export class NotificationsService extends Service implements Notifications {
         }
         const update = () => {
           try {
-            const count = badge.count();
+            const count = badge.count((target) => this.gated(target));
             this.indicator.setBadgeCount(
               Number.isSafeInteger(count) && count >= 0 ? count : undefined,
             );
@@ -205,12 +205,18 @@ export class NotificationsService extends Service implements Notifications {
             this.indicator.setBadgeCount(undefined);
           }
         };
+        let stopContribution = () => {};
         try {
           const stop = badge.subscribe(update);
-          if (typeof stop === "function") stopBadge = stop;
+          if (typeof stop === "function") stopContribution = stop;
         } catch {
           // A broken plugin count never strands the host's ordinary dot.
         }
+        const stopGates = this.subscribeGates(update);
+        stopBadge = () => {
+          stopContribution();
+          stopGates();
+        };
         update();
       };
       const stopContributions = this.dockBadges.subscribe(sync);
@@ -345,7 +351,7 @@ export class NotificationsService extends Service implements Notifications {
       (badge.order !== undefined && !Number.isFinite(badge.order))
     )
       throw new Error(
-        "A Dock badge needs an id, count(), subscribe(), and finite order",
+        "A Dock badge needs an id, count(allows), subscribe(), and finite order",
       );
     return this.dockBadges.register(this.ctx, badge);
   }

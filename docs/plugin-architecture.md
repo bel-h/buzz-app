@@ -1244,12 +1244,14 @@ plugin submissions; the plugin decides what is still worth announcing.
 macOS Dock attention count. A positive safe integer replaces Buzz's ordinary
 unread dot with `1`…`99+`; zero or an invalid/throwing projection restores the
 ordinary dot. The lowest finite `order` wins, with the contribution key breaking
-ties, so activation order never chooses the owner. The host calls `count()` after
-subscribing and whenever the contribution calls its listener. Disabling or
-replacing the plugin removes its count. The plugin owns the meaning and evidence
-for its number; the host owns permission, bounding, ordered native writes and
-teardown clearing. Windows, Linux and browsers accept the contribution but have
-no shell badge in this version.
+ties, so activation order never chooses the owner. The host calls
+`count(allows)` after subscribing, whenever the contribution calls its listener,
+and whenever notification gates change. The plugin applies `allows(target)` to
+each conversation before aggregating. Disabling or replacing the plugin removes
+its count. The plugin owns the meaning and evidence for its number; the host owns
+notification gates, permission, bounding, ordered native writes and teardown
+clearing. Windows, Linux and browsers accept the contribution but have no shell
+badge in this version.
 
 `notifications.gate({ id, allows(target) })` narrows which targets may alert.
 While any gate is registered, a banner, its sound and the Dock unread dot need

@@ -264,12 +264,14 @@ it("lets one plugin own a bounded Dock count and restores the host dot on disabl
   const setBadgeCount = vi.spyOn(t.service.indicator, "setBadgeCount");
   let count = 3;
   let changed = () => {};
+  let addGate: Notifications["gate"] | undefined;
   t.install({
     inject: ["notifications"],
     apply(ctx) {
+      addGate = (gate) => ctx.notifications.gate(gate);
       ctx.notifications.dockBadge({
         id: "direct-messages",
-        count: () => count,
+        count: (allows) => (allows(target) ? count : 0),
         subscribe(listener) {
           changed = listener;
           return () => {
@@ -280,6 +282,10 @@ it("lets one plugin own a bounded Dock count and restores the host dot on disabl
     },
   });
   await vi.waitFor(() => expect(setBadgeCount).toHaveBeenLastCalledWith(3));
+  const removeGate = addGate?.({ id: "focus", allows: () => false });
+  expect(setBadgeCount).toHaveBeenLastCalledWith(0);
+  removeGate?.();
+  expect(setBadgeCount).toHaveBeenLastCalledWith(3);
   count = 8;
   changed();
   expect(setBadgeCount).toHaveBeenLastCalledWith(8);

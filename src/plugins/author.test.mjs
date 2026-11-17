@@ -66,7 +66,7 @@ export function apply(ctx: Context) {
   createElement(ctx.conversation.ui.MembersDialog, { ...picker, visit: true });
   const dockBadge: NotificationDockBadge = {
     id: "attention",
-    count: () => 3,
+    count: (allows) => allows({ version: 1, kind: "home" }) ? 3 : 0,
     subscribe: () => () => {},
   };
   ctx.notifications.dockBadge(dockBadge);
