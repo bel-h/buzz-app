@@ -10,6 +10,18 @@ import { spoilerDelimiter } from "./selection-copy";
 
 const { doc, paragraph, bullet_list, list_item, token } = composerSchema.nodes;
 
+it("copies aligned document tables with exact Markdown and pastes source in chat", () => {
+  const source = "| Value |\n| ---: |\n| `a\\|b` |";
+  const table = composerSchema.nodes.markdown_table.create({ source });
+  const original = doc.create(null, table);
+  const copied = composerClipboard(original, document, "document");
+  expect(copied.text).toBe(source);
+  expect(buzzCopyDocument(copied.html, "document")?.eq(original)).toBe(true);
+  const chat = buzzCopyDocument(copied.html);
+  expect(chat?.firstChild?.type).toBe(paragraph);
+  expect(chat?.textContent).toBe(source);
+});
+
 it("copies plain text and unlinked tokens as text and round-trips clipboard HTML", () => {
   const source = "<img src=x onerror=alert(1)> & text";
   const copied = composerClipboard(

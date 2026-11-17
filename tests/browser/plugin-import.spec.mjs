@@ -2375,14 +2375,23 @@ test("installed documents reuse host Markdown, workspace tabs and persisted spli
   await reader
     .getByRole("button", { name: "Markdown source", exact: true })
     .click();
-  const quoted = "> First point\n>\n> Second point\n\nEnd";
+  const tableSource = "| Key | Value |\n| :--- | ---: |\n| A \\| B | **12** |";
+  const quoted = `> First point\n>\n> Second point\n\n${tableSource}\n\nEnd`;
   await markdownSource.fill(quoted);
   await reader.getByRole("button", { name: "Rich text", exact: true }).click();
+  const grid = richEditor.getByRole("table");
+  await expect(grid.getByRole("cell", { name: "A | B" })).toBeVisible();
+  await expect(grid.getByRole("cell", { name: "12" })).toHaveCSS(
+    "text-align",
+    "right",
+  );
   await richEditor.evaluate((field) => {
     field.focus();
     field.setSelectionRange(field.value.length, field.value.length);
   });
   await richEditor.press("!");
+  await richEditor.press("ControlOrMeta+Enter");
+  await expect(reader.getByRole("status")).toContainText("Saved 2");
   await reader.getByRole("button", { name: "Read Guide", exact: true }).click();
   // The shared renderer owns the read-mode wrapper; the hidden editor is its sibling.
   const body = reader
@@ -2394,10 +2403,32 @@ test("installed documents reuse host Markdown, workspace tabs and persisted spli
     "Second point",
   ]);
   await expect(body.locator(":scope > p").last()).toHaveText("End!");
+  await expect(
+    body.getByRole("table").getByRole("cell", { name: "12" }),
+  ).toHaveCSS("text-align", "right");
   await reader.getByRole("button", { name: "Edit Guide", exact: true }).click();
+  await expect(
+    grid.getByRole("cell", { name: "12" }).locator("strong"),
+  ).toBeVisible();
   await reader
     .getByRole("button", { name: "Markdown source", exact: true })
     .click();
+  await expect(markdownSource).toHaveValue(`${quoted}!`);
+  await markdownSource.fill(tableSource);
+  await reader.getByRole("button", { name: "Rich text", exact: true }).click();
+  await richEditor.evaluate((field) =>
+    field.setSelectionRange(field.value.length, field.value.length),
+  );
+  await richEditor.press("Backspace");
+  await expect(grid).toBeVisible();
+  await richEditor.evaluate((field) =>
+    field.setSelectionRange(field.value.length, field.value.length),
+  );
+  await richEditor.pressSequentially("Notes");
+  await reader
+    .getByRole("button", { name: "Markdown source", exact: true })
+    .click();
+  await expect(markdownSource).toHaveValue(`${tableSource}\n\nNotes`);
   await markdownSource.fill("FirstSecond");
   await reader.getByRole("button", { name: "Rich text", exact: true }).click();
   await richEditor.evaluate((field) => field.setSelectionRange(5, 5));
@@ -2567,6 +2598,17 @@ test("installed documents reuse host Markdown, workspace tabs and persisted spli
     const bounds = await reader.boundingBox();
     expect(bounds.x).toBeGreaterThanOrEqual(0);
     expect(bounds.x + bounds.width).toBeLessThanOrEqual(480);
+    await expect(grid).toHaveAttribute("data-overflow", "true");
+    const tableBounds = await grid.boundingBox();
+    expect(tableBounds.x + tableBounds.width).toBeLessThanOrEqual(
+      bounds.x + bounds.width,
+    );
+    await grid.focus();
+    await expect(grid).toBeFocused();
+    await page.keyboard.press("ArrowRight");
+    await expect
+      .poll(() => grid.evaluate((table) => table.scrollLeft))
+      .toBeGreaterThan(0);
     await reader
       .getByRole("button", { name: "Read Guide", exact: true })
       .click();

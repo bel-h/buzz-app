@@ -105,6 +105,12 @@ html[data-keyboard-navigation] .input:focus-visible:not([aria-disabled]) {
 .input p {
   margin: 0;
 }
+.markdownTable {
+  margin-block: var(--space-2);
+}
+.input:focus .markdownTable[class~="ProseMirror-selectednode"] {
+  outline: 2px solid var(--border-focus);
+}
 
 .input code {
   border-radius: var(--radius-chip);

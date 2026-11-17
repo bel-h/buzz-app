@@ -174,6 +174,15 @@ function blocksMarkdown(doc: EditorNode, mode: ComposerMarkdownMode): string {
   let lastList: NodeType | undefined;
   let alternate = false;
   doc.forEach((block, offset) => {
+    // The trailing caret after a table needs an empty paragraph in the view.
+    // It becomes Markdown only when the user adds content to it.
+    if (
+      previous?.type.name === "markdown_table" &&
+      block.type.name === "paragraph" &&
+      block.content.size === 0 &&
+      offset + block.nodeSize === doc.content.size
+    )
+      return;
     const paragraphs =
       previous?.type.name === "paragraph" && block.type.name === "paragraph";
     const tightItem =
@@ -190,7 +199,9 @@ function blocksMarkdown(doc: EditorNode, mode: ComposerMarkdownMode): string {
       block.type.name === "bullet_list" || block.type.name === "ordered_list";
     if (list) alternate = lastList === block.type && !alternate;
     let output: string;
-    if (block.type.name === "code_block") {
+    if (block.type.name === "markdown_table") {
+      output = block.attrs.source;
+    } else if (block.type.name === "code_block") {
       const language: unknown = block.attrs.language;
       output = toMarkdown(
         {

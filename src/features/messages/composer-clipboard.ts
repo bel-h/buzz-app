@@ -6,12 +6,17 @@ import {
 import { parseBuzzLink } from "../navigation/buzz-links";
 import { profileKey, profileTarget } from "../profiles/target";
 import { safeLinkUrl, scanMarkdown } from "../relay/message-content";
-import { composerSchema, projectComposerDocument } from "./composer-document";
+import {
+  composerSchema,
+  projectComposerDocument,
+  readComposerSnapshot,
+} from "./composer-document";
 import {
   composerMarkdown,
   type ComposerMarkdownMode,
 } from "./composer-markdown";
 import { messageLinkParts } from "./message-link-parts";
+import { documentEditorDraft } from "./document-editor-markdown";
 import {
   copyDocument,
   serializeNode,
@@ -152,6 +157,7 @@ export function composerClipboard(
       ? new DOMSerializer(
           {
             ...serializer.nodes,
+            markdown_table: (node) => ["p", node.attrs.source],
             bullet_list: (node) => ["ul", spread(node), 0],
             ordered_list: (node) => [
               "ol",
@@ -231,6 +237,24 @@ function sourced(
 ): EditorNode | null {
   if (node.isText || (mode === "document" && node.type.name === "hard_break"))
     return node;
+  const first = node.firstChild;
+  if (
+    mode === "document" &&
+    node.type === composerSchema.nodes.paragraph &&
+    node.childCount === 1 &&
+    first?.type === composerSchema.nodes.token &&
+    /[\r\n]/.test(first.attrs.source)
+  ) {
+    const parsed = readComposerSnapshot(
+      documentEditorDraft(first.attrs.source).document,
+      mode,
+    );
+    if (
+      parsed?.childCount === 1 &&
+      parsed.firstChild?.type === composerSchema.nodes.markdown_table
+    )
+      return parsed.firstChild;
+  }
   // The schema refuses empty text nodes; a leaf without text contributes none.
   if (node.isLeaf)
     return node.textContent

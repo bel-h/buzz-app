@@ -26,6 +26,7 @@ export const composerSchema = new Schema<
   | "paragraph"
   | "blockquote"
   | "code_block"
+  | "markdown_table"
   | "bullet_list"
   | "ordered_list"
   | "list_item"
@@ -81,6 +82,13 @@ export const composerSchema = new Schema<
           }),
         },
       ],
+    },
+    markdown_table: {
+      group: "block",
+      isolating: true,
+      attrs: { source: { validate: "string" } },
+      leafText: (node) => node.attrs.source,
+      toDOM: (node) => ["div", { contenteditable: "false" }, node.attrs.source],
     },
     bullet_list: {
       ...bulletList,
@@ -442,6 +450,7 @@ const projections = new WeakMap<EditorNode, ReturnType<typeof project>>();
 
 function project(doc: EditorNode) {
   let text = "";
+  let hasBlock = false;
   const positions = new Array<number>(doc.content.size + 1).fill(0);
   const recipients: DraftRecipient[] = [];
   const pending: PendingMention[] = [];
@@ -453,10 +462,26 @@ function project(doc: EditorNode) {
     to: number;
     node: EditorNode;
   })[] = [];
+  const tables: {
+    from: number;
+    to: number;
+    start: number;
+    end: number;
+    node: EditorNode;
+  }[] = [];
   doc.descendants((node, position) => {
-    if (node.isTextblock) {
-      if (blocks.length) text += "\n";
+    if (node.isTextblock || node.type.name === "markdown_table") {
+      if (hasBlock) text += "\n";
+      hasBlock = true;
       positions[position] = text.length;
+      if (node.type.name === "markdown_table") {
+        const start = text.length;
+        text += node.attrs.source;
+        const to = position + node.nodeSize;
+        positions[to] = text.length;
+        tables.push({ from: position, to, start, end: text.length, node });
+        return false;
+      }
       positions[position + 1] = text.length;
       carets.push(position + 1);
       blocks.push({
@@ -525,6 +550,7 @@ function project(doc: EditorNode) {
     } satisfies MentionDraft,
     positions,
     tokens,
+    tables,
     blocks,
     source(position: number) {
       return (
@@ -572,6 +598,10 @@ export function composerMarkdownContext(
       text.slice(end);
   };
   doc.descendants((node, position) => {
+    if (node.type.name === "markdown_table") {
+      mask(position, position + node.nodeSize);
+      return false;
+    }
     if (node.isTextblock && node.type.spec.code) {
       mask(position + 1, position + node.nodeSize - 1);
       return false;
@@ -636,7 +666,8 @@ function read(
       if (typeof node.text !== "string") return;
       length += node.text.length;
     }
-    if (node.type === "token") {
+    if (node.type === "token" || node.type === "markdown_table") {
+      if (node.type === "markdown_table" && mode !== "document") return;
       if (
         !node.attrs ||
         typeof node.attrs !== "object" ||
@@ -645,7 +676,11 @@ function read(
       )
         return;
       length += node.attrs.source.length;
-      if ("semantic" in node.attrs && node.attrs.semantic !== null) {
+      if (
+        node.type === "token" &&
+        "semantic" in node.attrs &&
+        node.attrs.semantic !== null
+      ) {
         const token = composerToken(node.attrs.semantic);
         if (
           !token ||

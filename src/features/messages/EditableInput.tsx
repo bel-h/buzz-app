@@ -1,4 +1,5 @@
 import {
+  memo,
   useLayoutEffect,
   useRef,
   useState,
@@ -13,6 +14,7 @@ import {
   Plugin,
   Selection,
   AllSelection,
+  NodeSelection,
   TextSelection,
   type Transaction,
 } from "prosemirror-state";
@@ -31,6 +33,9 @@ import {
   deleteSelection,
   selectAll,
   splitBlockKeepMarks,
+  createParagraphNear,
+  selectNodeBackward,
+  selectNodeForward,
 } from "prosemirror-commands";
 import { sinkListItem, liftListItem } from "prosemirror-schema-list";
 import {
@@ -84,6 +89,12 @@ import {
   documentEditorDraft,
   documentEditorMarkdown,
 } from "./document-editor-markdown";
+import { DOCUMENT_PROFILE } from "../markdown/document-profile";
+import {
+  MarkdownDocument,
+  MarkdownTable,
+  sharedComponents,
+} from "../markdown/MarkdownDocument";
 import {
   annotationAt,
   annotationPlugin,
@@ -427,8 +438,49 @@ export type EditableInputProps = Omit<
   onAnnotationMenu?: ((request: AnnotationMenuRequest) => void) | undefined;
 };
 
-/** ProseMirror owns native editing, composition, selection and a single history.
- * React owns only the noneditable token artwork and the surrounding composer. */
+const tableComponents: typeof sharedComponents = {
+  ...sharedComponents,
+  a: ({ children }) => children,
+  table: (props) => (
+    <MarkdownTable
+      {...props}
+      tabIndex={0}
+      onKeyDown={(event) => {
+        const table = event.currentTarget;
+        if (
+          table.scrollWidth <= table.clientWidth ||
+          event.ctrlKey ||
+          event.metaKey ||
+          event.altKey ||
+          event.shiftKey
+        )
+          return;
+        const direction =
+          event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
+        if (!direction) return;
+        event.preventDefault();
+        table.scrollLeft += (direction * table.clientWidth) / 4;
+      }}
+    />
+  ),
+};
+const DocumentTable = memo(function DocumentTable({
+  source,
+}: {
+  source: string;
+}) {
+  return (
+    <MarkdownDocument
+      content={source}
+      profile={DOCUMENT_PROFILE}
+      components={tableComponents}
+      scale="inherit"
+    />
+  );
+});
+
+/** ProseMirror owns editing and history. React renders noneditable content
+ * and the surrounding composer. */
 export function EditableInput({
   ref,
   draft,
@@ -503,6 +555,9 @@ export function EditableInput({
     >(),
   );
   const [, refresh] = useState(0);
+  const tableHosts = useRef(
+    new Map<HTMLElement, { key: number; source: string }>(),
+  );
   const scrollAfterTokens = useRef(false);
   const composing = useRef(false);
   /** Pending-chip settles and extensions that landed during an IME
@@ -558,6 +613,25 @@ export function EditableInput({
     // keystroke; projectComposerDocument memoizes per immutable document.
     const projection = () => projectComposerDocument(editor.state.doc);
     const tokenViews = () => refresh((revision) => revision + 1);
+    const { markdown_table: table, paragraph } = composerSchema.nodes;
+    const endsWithTable = (doc: EditorNode) => doc.lastChild?.type === table;
+    const selectAdjacentTable = (backward: boolean) => {
+      if (!projection().tables.length) return false;
+      let selected = false;
+      (backward ? selectNodeBackward : selectNodeForward)(
+        editor.state,
+        (tr) => {
+          if (
+            tr.selection instanceof NodeSelection &&
+            tr.selection.node.type === table
+          ) {
+            selected = true;
+            editor.dispatch(tr);
+          }
+        },
+      );
+      return selected;
+    };
     let formats: string | undefined;
     const selected = () => {
       const { from, to, empty, $from } = editor.state.selection;
@@ -775,6 +849,14 @@ export function EditableInput({
             token.to,
             composerSchema.text(token.node.attrs.source, token.node.marks),
           );
+        if (endsWithTable(tr.doc)) {
+          tr.insert(tr.doc.content.size, paragraph.create());
+          if (
+            tr.selection instanceof NodeSelection &&
+            tr.selection.node.type === table
+          )
+            tr.setSelection(Selection.atEnd(tr.doc));
+        }
         if (!tr.docChanged) return;
         // ProseMirror never passes a plugin its own appended transaction.
         mapPending(tr.mapping);
@@ -819,22 +901,66 @@ export function EditableInput({
       styles.annotation ?? "",
       () => composing.current || !!editor?.composing,
     );
-    const state = (doc = initial) =>
-      EditorState.create({ doc, plugins: [history(), normalize, annotations] });
+    const state = (doc = initial) => {
+      if (endsWithTable(doc))
+        doc = doc.copy(doc.content.addToEnd(paragraph.create()));
+      const selection =
+        doc.firstChild?.type === table
+          ? Selection.findFrom(doc.resolve(0), 1, true)
+          : null;
+      return EditorState.create({
+        doc,
+        ...(selection ? { selection } : {}),
+        plugins: [history(), normalize, annotations],
+      });
+    };
     const setRange = (start: number, end: number, direction?: string) => {
       openTokens(start, end);
+      // A plugin can restore an exact saved source range inside a table. Open
+      // just that table as source, just as openTokens opens an indivisible chip.
+      const inside = projection().tables.filter(
+        (table) =>
+          (start > table.start && start < table.end) ||
+          (end > table.start && end < table.end),
+      );
+      if (inside.length) {
+        const tr = editor.state.tr;
+        const trailing = tr.doc.lastChild;
+        const last = inside.at(-1);
+        if (
+          tr.doc.childCount > 1 &&
+          trailing?.type === paragraph &&
+          !trailing.content.size &&
+          last?.to === tr.doc.content.size - trailing.nodeSize
+        )
+          tr.delete(last.to, tr.doc.content.size);
+        for (const { from, to, node } of inside.reverse())
+          tr.replaceWith(
+            from,
+            to,
+            paragraph.create(null, composerSchema.text(node.attrs.source)),
+          );
+        editor.dispatch(tr.setMeta("addToHistory", false));
+      }
       const source = projection();
       const first = source.position(start),
         last = source.position(end, -1);
-      editor.dispatch(
-        closeHistory(editor.state.tr).setSelection(
-          TextSelection.create(
-            editor.state.doc,
-            direction === "backward" ? last : first,
-            direction === "backward" ? first : last,
-          ),
-        ),
+      const doc = editor.state.doc;
+      const selectedTable = source.tables.find(
+        (item) => item.start === start && item.end === end,
       );
+      const selection = selectedTable
+        ? NodeSelection.create(doc, selectedTable.from)
+        : start === 0 &&
+            end === source.draft.text.length &&
+            doc.firstChild?.type === table
+          ? new AllSelection(doc)
+          : TextSelection.create(
+              doc,
+              direction === "backward" ? last : first,
+              direction === "backward" ? first : last,
+            );
+      editor.dispatch(closeHistory(editor.state.tr).setSelection(selection));
     };
     const openTokens = (start: number, end: number) => {
       const source = projection();
@@ -2036,6 +2162,27 @@ export function EditableInput({
           selected();
         },
         nodeViews: {
+          markdown_table(node) {
+            const dom = document.createElement("div");
+            dom.className = styles.markdownTable ?? "";
+            dom.contentEditable = "false";
+            tableHosts.current.set(dom, {
+              key: ++tokenHosts,
+              source: node.attrs.source,
+            });
+            tokenViews();
+            return {
+              dom,
+              ignoreMutation: (mutation) => mutation.type !== "selection",
+              stopEvent: (event) =>
+                event.type === "keydown" &&
+                event.target instanceof HTMLTableElement,
+              destroy() {
+                tableHosts.current.delete(dom);
+                tokenViews();
+              },
+            };
+          },
           // Tokens also come and go in transactions the normalizer appends,
           // which report no change of their own; render each new host's artwork.
           token(node, _view, getPos) {
@@ -2228,6 +2375,7 @@ export function EditableInput({
             )
               return true;
             if (event.altKey || primary) return false;
+            if (selectAdjacentTable(event.key === "Backspace")) return true;
             adjacent(event.key === "Backspace", false, false);
             const { empty, $from } = editor.state.selection;
             if (
@@ -2337,9 +2485,10 @@ export function EditableInput({
                 !event.isComposing &&
                 !composing.current &&
                 editable() &&
-                deleteSelection(editor.state, (tr) =>
+                (deleteSelection(editor.state, (tr) =>
                   editor.dispatch(closeHistory(tr)),
-                )
+                ) ||
+                  selectAdjacentTable(event.inputType.endsWith("Backward")))
               ) {
                 event.preventDefault();
                 return true;
@@ -2634,7 +2783,13 @@ export function EditableInput({
           if (editor.state.selection.empty && editor.hasFocus() && macWebKit())
             editor.dom.ownerDocument.getSelection()?.removeAllRanges();
           let tr: Transaction | undefined;
-          if (kind === "hard")
+          if (
+            editor.state.selection instanceof NodeSelection &&
+            editor.state.selection.node.type === table
+          ) {
+            const next = editor.state.tr;
+            if (apply(next, createParagraphNear)) tr = next;
+          } else if (kind === "hard")
             tr = editor.state.selection.$from.parent.type.spec.code
               ? editor.state.tr.insertText("\n")
               : editor.state.tr.replaceSelectionWith(
@@ -3025,6 +3180,13 @@ export function EditableInput({
           events.onCompositionEnd?.(event as never);
         }}
       />
+      {[...tableHosts.current].map(([element, { key, source }]) =>
+        createPortal(
+          <DocumentTable source={source} />,
+          element,
+          `table-${key}`,
+        ),
+      )}
       {[...hosts.current].map(([element, host]) => {
         const position = host.position();
         const source =

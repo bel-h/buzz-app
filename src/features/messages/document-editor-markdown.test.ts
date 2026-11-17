@@ -3,6 +3,7 @@ import { fromMarkdown } from "mdast-util-from-markdown";
 import {
   composerSchema as schema,
   projectComposerDocument,
+  readComposerSnapshot,
 } from "./composer-document";
 import {
   documentEditorDraft,
@@ -35,7 +36,7 @@ it.each([
   ">",
   "https://example.com",
   "- ```ts\n  const a = 1;\n  ```",
-  "| Column | Value |\n| --- | --- |\n| A | B |",
+  "| Column | Value |\n| --- | --- |\n| A | B | Extra |",
   "- [x] Completed\n- [ ] Pending",
   "![Image](https://example.com/image.png)",
   "Before [`code`](https://example.com) after",
@@ -55,6 +56,28 @@ it.each([
   "\\*literal stars\\* and `inline`",
 ])("preserves unsupported or literal source: %s", (markdown) => {
   expect(documentEditorMarkdown(documentEditorDraft(markdown))).toBe(markdown);
+});
+
+it("round-trips an aligned table while preserving renderable and raw blocks", () => {
+  const table = "| Name | Value |\n| :--- | ---: |\n| **A \\| B** | `2` |";
+  const raw = "| A | B |\n| - | - |\n| a | b | extra |";
+  const draft = documentEditorDraft(`${table}\n\n${raw}\n\nAfter`);
+  const doc = readComposerSnapshot(draft.document, "document");
+  if (!doc) throw new Error("Expected a structured draft");
+  expect(doc.child(0).type).toBe(schema.nodes.markdown_table);
+  expect(doc.child(1).type).toBe(schema.nodes.paragraph);
+  expect(readComposerSnapshot(draft.document)).toBeUndefined();
+  const edited = doc.copy(
+    doc.content.replaceChild(
+      2,
+      schema.nodes.paragraph.create(null, schema.text("Edited")),
+    ),
+  );
+  const saved = documentEditorMarkdown(projectComposerDocument(edited).draft);
+  expect(saved).toBe(`${table}\n\n${raw}\n\nEdited`);
+  expect(documentEditorDraft(saved)).toEqual(
+    projectComposerDocument(edited).draft,
+  );
 });
 
 it("keeps oversized and deeply nested input as literal source without Markdown parsing", () => {

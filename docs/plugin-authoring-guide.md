@@ -128,6 +128,10 @@ the same document format as `onChange`. Copy/paste retains that structure in bot
 plain Markdown and the app's rich HTML payload, including hard breaks and loose
 lists. Normal plain-text paste reads Markdown; paste-as-plain-text keeps the
 existing literal-text behavior.
+Supported top-level GFM tables appear as grids in rich mode and retain their
+Markdown through surrounding edits. Edit their cells in source mode. Tables
+that exceed the grid's display limits or need their enclosing Markdown stay
+visible as source.
 
 ```js
 const [value, onChange] = ctx.react.useState("A **document**.");
