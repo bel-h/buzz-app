@@ -4141,6 +4141,59 @@ it("links a Marketplace agent's Import to Manage plugins while no agent type plu
   }
 });
 
+it("marks the Marketplace search in the open shared agent's panel", async () => {
+  const user = userEvent.setup();
+  const view = setup([]);
+  const owner = createRelaySession(null);
+  const session = {
+    ...owner.session,
+    read: vi.fn().mockResolvedValue([
+      {
+        id: "ab".repeat(32),
+        pubkey: "cd".repeat(32),
+        kind: 30175,
+        created_at: 1,
+        tags: [
+          ["d", "helper"],
+          ["shared", "true"],
+        ],
+        content: JSON.stringify({
+          display_name: "Marketplace helper",
+          model: "test-model",
+          system_prompt: "Help with tasks.",
+        }),
+      },
+    ]),
+  };
+  const snapshot = { status: "ready" as const, generation: 1, session };
+  const relay = { ...view.relay, snapshot: () => snapshot };
+  try {
+    view.rerender(<AgentsPage agents={view.agents} relay={relay} />);
+    await user.click(screen.getByRole("tab", { name: "Marketplace" }));
+    await user.click(
+      await screen.findByRole("button", {
+        name: "More about Marketplace helper",
+      }),
+    );
+    const panel = await screen.findByRole("region", {
+      name: "Shared agent profile",
+    });
+    expect(panel.querySelectorAll("mark")).toHaveLength(0);
+    await user.type(
+      screen.getByRole("searchbox", { name: "Search agents" }),
+      "model",
+    );
+    await vi.waitFor(() =>
+      expect(
+        [...panel.querySelectorAll("mark")].map((mark) => mark.textContent),
+      ).toEqual(["model"]),
+    );
+  } finally {
+    view.unmount();
+    owner.dispose();
+  }
+});
+
 it("says in Settings where an agent's config lives, and why it is only here", async () => {
   const user = userEvent.setup();
   const { agents, notify } = setup([agent("Ada", 1)]);
