@@ -14,6 +14,7 @@ import type { ProtectionAction } from "../agent-protection/service";
 import type {
   Agent,
   AgentAttention,
+  WatchReadFailure,
   AgentVoicePipe,
   AgentType,
   AgentHandle,
@@ -26,6 +27,7 @@ import type {
   AgentHandoff,
   RegisteredAgentType,
   Trigger,
+  Agents,
 } from "./service";
 import type { LocalAgentActivity, WorkOutcome } from "./local-activity";
 import type { MentionRefusal } from "./owner-attestation";
@@ -79,6 +81,7 @@ import {
   type ClassifierInput,
 } from "./classifier";
 import type { Decisions } from "../decisions/service";
+import { readErrorKind } from "../relay/errors";
 import type { EventWatch } from "./attention";
 import {
   type AgentEventTemplate,
@@ -96,6 +99,7 @@ import {
   finished,
   heardOf,
   inStream,
+  MENTIONS,
   oldestFirst,
   POLL_OVERLAP,
   readWindow,
@@ -204,6 +208,8 @@ async function pickFor(
   }
 }
 
+type WakeOutcome = Awaited<ReturnType<Agents["wake"]>>;
+type WakeDropReason = Extract<WakeOutcome, { status: "dropped" }>["reason"];
 type Job = {
   work?: ReturnType<LocalAgentActivity["begin"]>;
   trigger: Trigger;
@@ -214,6 +220,11 @@ type Job = {
    * then does not run it. */
   matched?: { object: AttentionObject; epoch: number };
   sourceCurrent?: () => boolean;
+  guardedWake?: {
+    current(): boolean;
+    accepted(): void;
+    drop(reason?: WakeDropReason): void;
+  };
 };
 type WatchTrigger = Extract<Trigger, { type: "watch" }>;
 type CatchUpTrigger = Extract<Trigger, { type: "catch-up" }>;
@@ -312,7 +323,7 @@ type Runner = {
   /** Failed history streams keep their deadlines across reconnects. */
   readonly readRetries: Map<
     string,
-    { object: AttentionObject; delay: number; at: number }
+    { object: AttentionObject; delay: number; failure: WatchReadFailure }
   >;
   /** Watch jobs released from `waiting`, oldest first, going into the queue
    * as it has room. */
@@ -323,6 +334,11 @@ type Runner = {
    * other channels' traffic cannot push out one a replay sends again. Only the
    * `SEEN_CHANNELS` most recently active channels are kept. */
   readonly seenIn: Map<string, Set<string>>;
+  /** Mentions it was given, with their times, kept while a read can find
+   * them again, and seen as long. Any traffic pushes ids out of the seen
+   * sets, which only hold a count, and one pass can read a mention another
+   * gave. */
+  readonly mentioned: Map<string, number>;
   /** Replayed events waiting, oldest first, until the agent has room for the
    * jobs each makes. */
   readonly backlog: PendingEvent[];
@@ -380,18 +396,16 @@ export type Connection = {
 /** An agent's community while it is live: one object for as long as its
  * session lasts. */
 export type LiveCommunity = {
-  readonly session: Pick<
-    RelaySession,
-    "read" | "readRemote" | "live" | "attendPending"
-  >;
+  readonly session: Pick<RelaySession, "readRemote" | "live" | "attendPending">;
   /** Aborts when the session is replaced, so no work outlives it. */
   readonly controller: AbortController;
   readonly connection: Connection;
 };
-/** One agent's catch-up, for the attention, community and connect it started
- * under; any of them changing starts another. */
+/** One agent's catch-up, for the community and connect it started under, and
+ * for its watches, the attention; any of them changing starts another. The
+ * mention pass has no attention: an edit does not change what it reads. */
 type Pass = {
-  attention: Agent["attention"];
+  attention?: Agent["attention"];
   community: LiveCommunity;
   epoch: number;
   controller: AbortController;
@@ -417,7 +431,24 @@ const coveredSince = (stream: Stream, live: ReadonlyMap<string, number>) =>
 const overlapOf = (live: ReadonlyMap<string, number>) => (stream: Stream) =>
   coveredSince(stream, live) === undefined ? POLL_OVERLAP : 0;
 
+/** Never publish the relay's response text or error cause to plugins. */
+function watchReadErrorSummary(error: unknown): string {
+  switch (readErrorKind(error)) {
+    case "denied":
+      return "Channel history access was denied";
+    case "invalid-response":
+      return "The relay returned invalid channel history";
+    case "cancelled":
+      return "The channel history read was interrupted";
+    default:
+      return "Channel history could not be read";
+  }
+}
+
 const seconds = () => Math.floor(Date.now() / 1000);
+/** The key of an agent's mention or watch catch-up pass. */
+const passKey = (agent: AgentKey, mentions: boolean) =>
+  `${agent}:${mentions ? "mentions" : "watches"}`;
 const message = (error: unknown) =>
   String(error instanceof Error ? error.message : error);
 
@@ -437,6 +468,8 @@ export type RunnerMember = Readonly<{
 export type RunnerHost = {
   /** Session controls refresh when this copy gains or loses native custody. */
   ownershipChanged?(): void;
+  /** A failed watch read set or cleared its retry status. */
+  watchReadFailuresChanged(): void;
   /** The agent, while its community is live to run it in. */
   ready(key: AgentKey): Agent | undefined;
   /** A running agent, in any community. */
@@ -829,6 +862,82 @@ export class AgentRunners {
     if (!this.enqueue(runner, { trigger, channelId: trigger.channel }))
       throw new Error("The agent is busy and could not take this wake");
   }
+  wakeGuarded(
+    key: AgentKey,
+    trigger: PluginTrigger,
+    options: Parameters<Agents["wake"]>[2],
+    available: () => boolean,
+    lifetime: AbortSignal,
+  ): Promise<WakeOutcome> {
+    const runner = this.runners.get(key);
+    if (!runner || !this.runs(key) || !this.host.ready(key))
+      return Promise.resolve({ status: "dropped", reason: "unavailable" });
+    if (runner.type?.supportsGuardedWake !== true)
+      return Promise.resolve({ status: "dropped", reason: "refused" });
+    const controller = runner.controller.signal;
+    return new Promise((resolve) => {
+      let outcome: WakeOutcome | undefined;
+      const signals = [
+        controller,
+        lifetime,
+        ...(options.signal ? [options.signal] : []),
+      ];
+      const finish = (result: WakeOutcome) => {
+        if (outcome) return;
+        outcome = result;
+        for (const signal of signals)
+          signal.removeEventListener("abort", cancel);
+        if (result.status === "dropped") {
+          const index = runner.queues.mention.indexOf(job);
+          if (index >= 0) runner.queues.mention.splice(index, 1);
+          job.work?.remove();
+        }
+        resolve(result);
+      };
+      const drop = (reason: WakeDropReason = "refused") =>
+        finish({ status: "dropped", reason });
+      const current = () => {
+        if (outcome?.status === "dropped") return false;
+        if (controller.aborted || lifetime.aborted || !available()) {
+          drop("unavailable");
+          return false;
+        }
+        if (options.signal?.aborted) {
+          drop("aborted");
+          return false;
+        }
+        try {
+          const valid = options.current() === true;
+          if (controller.aborted || lifetime.aborted || !available())
+            drop("unavailable");
+          else if (options.signal?.aborted) drop("aborted");
+          else if (valid) return true;
+          else drop("stale");
+        } catch {
+          drop("guard-error");
+        }
+        return false;
+      };
+      const job: Job = {
+        trigger,
+        channelId: trigger.channel,
+        guardedWake: {
+          current,
+          accepted: () => finish({ status: "delivered" }),
+          drop,
+        },
+      };
+      const cancel = () => {
+        // An active harness owns its last guard and transport handoff. Let it
+        // settle that race; only work still in this queue can be removed here.
+        if (runner.queues.mention.includes(job)) current();
+      };
+      for (const signal of signals)
+        signal.addEventListener("abort", cancel, { once: true });
+      if (!current()) return;
+      if (!this.enqueue(runner, job)) drop();
+    });
+  }
   wakeSource(
     key: AgentKey,
     trigger: Extract<Trigger, { type: "source" }>,
@@ -1048,6 +1157,7 @@ export class AgentRunners {
       later: [],
       seen: new Set(),
       seenIn: new Map(),
+      mentioned: new Map(),
       backlog: [],
       working: 0,
       typing: new Map(),
@@ -1063,8 +1173,11 @@ export class AgentRunners {
     };
   }
   private retire(runner: Runner) {
-    this.passes.get(runner.key)?.controller.abort();
-    this.passes.delete(runner.key);
+    for (const mentions of [true, false]) {
+      const key = passKey(runner.key, mentions);
+      this.passes.get(key)?.controller.abort();
+      this.passes.delete(key);
+    }
     this.host.activity.clear(runner.scope, runner.member.pubkey);
     this.dropMentions(runner, true);
     this.dropWatchWork(runner);
@@ -1152,6 +1265,7 @@ export class AgentRunners {
   private hasSeen(runner: Runner, id: string, channel: string | undefined) {
     return (
       runner.seen.has(id) ||
+      runner.mentioned.has(id) ||
       (!!channel && !!runner.seenIn.get(channel)?.has(id))
     );
   }
@@ -1344,9 +1458,31 @@ export class AgentRunners {
       ]),
     };
   }
+  private currentReadRetry(
+    runner: Runner,
+    agent: Agent,
+    prior: AttentionObject,
+  ) {
+    if (!agent.attentionEnabled || !runner.type?.run) return false;
+    const object = agent.attention[prior.slug];
+    return (
+      object?.value.type === "event" &&
+      object.value.enabled &&
+      !interestPaused(agent.attention, object.value.interest_id) &&
+      // A new session can reload an unchanged saved definition into a new object.
+      (object === prior || JSON.stringify(object) === JSON.stringify(prior))
+    );
+  }
+  watchReadFailures(agent: Agent): readonly WatchReadFailure[] {
+    const runner = this.runners.get(agent.key);
+    if (!runner?.readRetries.size) return [];
+    return [...runner.readRetries.values()].flatMap(({ object, failure }) =>
+      this.currentReadRetry(runner, agent, object) ? [failure] : [],
+    );
+  }
   /** Keeps each agent's catch-up going: on start, and after each connect, its
-   * event watches read the events they missed from their saved checkpoints,
-   * up to the connect. From then on live events cover a stream whose channel
+   * mentions and event watches read the events they missed from their saved
+   * checkpoints, up to the connect. From then on live events cover a stream whose channel
    * is live, of kinds live hears, so while the connection stays up a `tick`
    * moves its checkpoint to now; a quit or a drop leaves the checkpoint where
    * the next catch-up starts. Any other stream, and one whose checkpoint is
@@ -1399,34 +1535,31 @@ export class AgentRunners {
       const on = !!agent?.attentionEnabled && !!runner.type?.run;
       const reading: Stream[] = [];
       const streams = agent ? streamsOf(agent) : [];
-      const active = new Set(
-        streams.filter((stream) => stream.enabled).map((stream) => stream.key),
-      );
-      // A disconnect can hide the agent row. Its saved watches still exist.
-      // A new session can also reload those definitions into new objects.
-      for (const [key, retry] of agent ? runner.readRetries : []) {
-        const object = agent?.attention[retry.object.slug];
+      // A disconnect can hide the agent row without changing its saved watches.
+      let retriesChanged = false;
+      for (const [key, retry] of runner.readRetries)
         if (
-          !on ||
-          !active.has(key) ||
-          (object !== retry.object &&
-            JSON.stringify(object) !== JSON.stringify(retry.object))
-        )
+          !shown ||
+          (agent && !this.currentReadRetry(runner, agent, retry.object))
+        ) {
           runner.readRetries.delete(key);
-        else if (object) retry.object = object;
-      }
+          retriesChanged = true;
+        }
+      if (retriesChanged) this.host.watchReadFailuresChanged();
       for (const stream of held ? [] : streams) {
         const checkpoint = this.checkpoints[stream.key];
-        if (!on || !stream.enabled) {
+        // Mentions are answered with Attention off or not shown.
+        const hidden = !shown && !stream.mentions;
+        if (!(stream.mentions ? runner.type?.run : on) || !stream.enabled) {
           // Saved too, so one turned on after a restart starts from about
           // when this copy last saw it off, or from when Attention is shown.
           this.quiet.add(stream.key);
           this.started.delete(stream.key);
           if (
             (checkpoint?.through ?? 0) < now ||
-            (!shown && !checkpoint?.hidden)
+            (hidden && !checkpoint?.hidden)
           )
-            move(stream.key, { through: now, ...(!shown && { hidden: true }) });
+            move(stream.key, { through: now, ...(hidden && { hidden: true }) });
         } else if (
           this.quiet.delete(stream.key) ||
           !checkpoint ||
@@ -1442,104 +1575,126 @@ export class AgentRunners {
         else if (
           (stream.channel === undefined ||
             !community?.session.attendPending(stream.channel)) &&
-          (runner.readRetries.get(stream.key)?.at ?? 0) <= Date.now()
+          (runner.readRetries.get(stream.key)?.failure.retryAt ?? 0) <=
+            Date.now()
         )
           reading.push(stream);
       }
-      const pass = this.passes.get(runner.key);
       const since = community?.connection.since;
       // Seen on every call, so a route that drops and comes back between
       // ticks is not taken as live all along.
       const live =
         community && since !== undefined ? liveOf(community) : undefined;
-      if (!agent || !community || since === undefined || !reading.length) {
-        pass?.controller.abort();
-        this.passes.delete(runner.key);
-        this.setCatching(runner, new Set());
-        continue;
-      }
-      if (
-        pass?.attention === agent.attention &&
-        pass.community === community &&
-        pass.epoch === community.connection.epoch &&
-        !(pass.failedAt && Date.now() - pass.failedAt >= CATCH_UP_RETRY_MS)
-      ) {
-        if (!pass.done) continue;
-        const channels = live ?? new Map<string, number>();
-        // Read up to the connect, and to when live began to cover it.
-        const due = (stream: Stream) =>
-          Math.max(since, coveredSince(stream, channels) ?? since);
-        // How far it was read: one read with an overlap keeps its
-        // checkpoint behind that.
-        const through = (stream: Stream) => {
-          const checkpoint = this.checkpoints[stream.key];
-          return checkpoint?.read ?? checkpoint?.through ?? 0;
+      // A mention a read cannot find again need not be remembered: below its
+      // stream's checkpoint, with an overlap's margin for the watches' reads.
+      const mentioned =
+        this.checkpoints[streamKey(runner.key, MENTIONS)]?.through ?? 0;
+      for (const [id, created] of runner.mentioned)
+        if (created < mentioned - POLL_OVERLAP) runner.mentioned.delete(id);
+      // Mentions have their own pass, so watch work waiting for room never
+      // holds up the next mention read.
+      for (const mentions of [true, false]) {
+        const key = passKey(runner.key, mentions);
+        const streams = reading.filter(
+          (stream) => !!stream.mentions === mentions,
+        );
+        const pass = this.passes.get(key);
+        // Only a watch's live events wait for its catch-up.
+        const catching = (slugs: readonly Stream[]) => {
+          if (!mentions)
+            this.setCatching(runner, new Set(slugs.map(({ slug }) => slug)));
         };
-        const ticks = (stream: Stream) =>
-          coveredSince(stream, channels) !== undefined &&
-          through(stream) >= due(stream);
-        if (tick)
-          for (const stream of reading.filter(ticks)) {
+        if (!agent || !community || since === undefined || !streams.length) {
+          pass?.controller.abort();
+          this.passes.delete(key);
+          catching([]);
+          continue;
+        }
+        const attention = mentions ? undefined : agent.attention;
+        if (
+          pass &&
+          pass.attention === attention &&
+          pass.community === community &&
+          pass.epoch === community.connection.epoch &&
+          !(pass.failedAt && Date.now() - pass.failedAt >= CATCH_UP_RETRY_MS)
+        ) {
+          if (!pass.done) continue;
+          const channels = live ?? new Map<string, number>();
+          // Read up to the connect, and to when live began to cover it.
+          const due = (stream: Stream) =>
+            Math.max(since, coveredSince(stream, channels) ?? since);
+          // How far it was read: one read with an overlap keeps its
+          // checkpoint behind that.
+          const through = (stream: Stream) => {
             const checkpoint = this.checkpoints[stream.key];
-            if (checkpoint && !checkpoint.upper && checkpoint.through < now)
-              move(stream.key, { through: now });
-          }
-        const behind = reading.filter(
-          (stream) => through(stream) < due(stream),
-        );
-        const poll = Date.now() - (pass.doneAt ?? 0) >= CATCH_UP_POLL_MS;
-        const polled = reading.filter(
-          (stream) =>
-            !ticks(stream) &&
-            (poll ||
-              behind.includes(stream) ||
-              runner.readRetries.has(stream.key)),
-        );
-        if (!polled.length) continue;
-        const next: Pass = { ...pass, controller: new AbortController() };
-        delete next.done;
-        if (poll) delete next.doneAt;
-        this.passes.set(runner.key, next);
-        // Only one behind holds its live events back, to go on in order.
-        this.setCatching(runner, new Set(behind.map(({ slug }) => slug)));
+            return checkpoint?.read ?? checkpoint?.through ?? 0;
+          };
+          const ticks = (stream: Stream) =>
+            coveredSince(stream, channels) !== undefined &&
+            through(stream) >= due(stream);
+          if (tick)
+            for (const stream of streams.filter(ticks)) {
+              const checkpoint = this.checkpoints[stream.key];
+              if (checkpoint && !checkpoint.upper && checkpoint.through < now)
+                move(stream.key, { through: now });
+            }
+          const behind = streams.filter(
+            (stream) => through(stream) < due(stream),
+          );
+          const poll = Date.now() - (pass.doneAt ?? 0) >= CATCH_UP_POLL_MS;
+          const polled = streams.filter(
+            (stream) =>
+              !ticks(stream) &&
+              (poll ||
+                behind.includes(stream) ||
+                runner.readRetries.has(stream.key)),
+          );
+          if (!polled.length) continue;
+          const next: Pass = { ...pass, controller: new AbortController() };
+          delete next.done;
+          if (poll || mentions) delete next.doneAt;
+          this.passes.set(key, next);
+          // Only one behind holds its live events back, to go on in order.
+          catching(behind);
+          void this.readMissed(
+            runner,
+            next,
+            polled,
+            // One behind reads up to when live began to cover it; any other
+            // stays behind now, for events the relay stores late.
+            (stream) =>
+              Math.max(
+                now - CATCH_UP_POLL_LAG,
+                behind.includes(stream) ? due(stream) : since,
+              ),
+            overlapOf(channels),
+          );
+          continue;
+        }
+        pass?.controller.abort();
+        const next: Pass = {
+          ...(attention && { attention }),
+          community,
+          epoch: community.connection.epoch,
+          controller: new AbortController(),
+        };
+        this.passes.set(key, next);
+        catching(streams);
+        const channels = live ?? new Map<string, number>();
         void this.readMissed(
           runner,
           next,
-          polled,
-          // One behind reads up to when live began to cover it; any other
-          // stays behind now, for events the relay stores late.
+          streams,
+          // A stream live does not cover is read as a poll reads it: an edit
+          // starts a new pass, and edits more often than the poll would
+          // otherwise keep it from being read.
           (stream) =>
-            Math.max(
-              now - CATCH_UP_POLL_LAG,
-              behind.includes(stream) ? due(stream) : since,
-            ),
+            coveredSince(stream, channels) === undefined
+              ? Math.max(since, now - CATCH_UP_POLL_LAG)
+              : since,
           overlapOf(channels),
         );
-        continue;
       }
-      pass?.controller.abort();
-      const next: Pass = {
-        attention: agent.attention,
-        community,
-        epoch: community.connection.epoch,
-        controller: new AbortController(),
-      };
-      this.passes.set(runner.key, next);
-      this.setCatching(runner, new Set(reading.map(({ slug }) => slug)));
-      const channels = live ?? new Map<string, number>();
-      void this.readMissed(
-        runner,
-        next,
-        reading,
-        // A stream live does not cover is read as a poll reads it: an edit
-        // starts a new pass, and edits more often than the poll would
-        // otherwise keep it from being read.
-        (stream) =>
-          coveredSince(stream, channels) === undefined
-            ? Math.max(since, now - CATCH_UP_POLL_LAG)
-            : since,
-        overlapOf(channels),
-      );
     }
     // Once each catch-up is under way, so they are heard after what it reads.
     if (!held && this.heldForStartup) {
@@ -1664,7 +1819,10 @@ export class AgentRunners {
     ]);
     const name = () => this.host.agent(runner.key)?.name;
     const read = async (filter: ReadFilter) => {
-      const events = await pass.community.session.read([filter], {
+      // Only the relay's page: read() also adds events the session observed
+      // meanwhile and the owner's messages not yet sent, and an older one of
+      // those would page past events the relay has not returned yet.
+      const events = await pass.community.session.readRemote([filter], {
         signal,
         priority: "background",
         fresh: true,
@@ -1672,8 +1830,7 @@ export class AgentRunners {
         ...(filter["#h"] ? {} : { resolveChannels: true }),
       });
       signal.throwIfAborted();
-      // Only what the relay signed: a read also returns the owner's own
-      // messages not yet sent, which can be older than its page.
+      // Only what the relay signed.
       const signed = events.filter(hasEventProof) as RelayEvent[];
       const agent = this.host.agent(runner.key);
       for (const event of signed)
@@ -1700,21 +1857,33 @@ export class AgentRunners {
             )
               .then((window) => {
                 signal.throwIfAborted();
-                runner.readRetries.delete(stream.key);
+                if (window && runner.readRetries.delete(stream.key))
+                  this.host.watchReadFailuresChanged();
                 return window;
               })
               .catch((error) => {
-                if (signal.aborted) throw error;
+                if (signal.aborted || stream.mentions) throw error;
+                const object = pass.attention?.[slug];
+                if (!object) throw error;
+                const prior = runner.readRetries.get(stream.key);
                 const delay = Math.min(
-                  (runner.readRetries.get(stream.key)?.delay ??
-                    CATCH_UP_RETRY_MS / 2) * 2,
+                  (prior?.delay ?? CATCH_UP_RETRY_MS / 2) * 2,
                   CATCH_UP_RETRY_BASE_MAX_MS,
                 );
-                runner.readRetries.set(stream.key, {
-                  object: pass.attention[slug] as AttentionObject,
-                  delay,
-                  at: Date.now() + delay * (1 + Math.random() / 4),
+                const failedAt = Date.now();
+                const failure = Object.freeze({
+                  agentKey: runner.key,
+                  watchSlug: slug,
+                  channelId: stream.channel ?? null,
+                  summary: watchReadErrorSummary(error),
+                  consecutiveFailures:
+                    (prior?.failure.consecutiveFailures ?? 0) + 1,
+                  failedAt,
+                  retryAt:
+                    failedAt + delay + Math.floor((delay * Math.random()) / 4),
                 });
+                runner.readRetries.set(stream.key, { object, delay, failure });
+                this.host.watchReadFailuresChanged();
                 console.warn(
                   `Agent ${name()} could not catch up ${slug} in ${stream.channel ?? "all channels"}`,
                   error,
@@ -1727,8 +1896,13 @@ export class AgentRunners {
                 `Agent ${name()} skipped the oldest events ${slug} missed: catch-up reads at most ${CATCH_UP_PAGES} pages`,
               );
             progress(stream.key, window.checkpoint);
-            const events = window.events.filter((event) =>
-              inStream(stream, event),
+            // A mention the owner's app would not hear for the owner wakes
+            // only watches, which their own pass reads: the mention pass
+            // passes it, so a full Interest cannot hold up the mentions.
+            const events = window.events.filter(
+              (event) =>
+                inStream(stream, event) &&
+                (!stream.mentions || !!this.readAddressable.get(event)),
             );
             let skipped = window.skipped;
             for (let index = 0; index < events.length; ) {
@@ -1762,17 +1936,20 @@ export class AgentRunners {
               ),
             );
           }
-        const catching = new Set(runner.catching);
-        catching.delete(slug);
-        this.setCatching(runner, catching);
+        if (runner.catching.has(slug)) {
+          const catching = new Set(runner.catching);
+          catching.delete(slug);
+          this.setCatching(runner, catching);
+        }
       }
       pass.done = true;
       pass.doneAt ??= Date.now();
     } catch (error) {
       if (signal.aborted) return;
       pass.failedAt = Date.now();
-      // Live events go on rather than wait for the next try.
-      this.setCatching(runner, new Set());
+      // Live events go on rather than wait for the next try. Mentions never
+      // wait, so their pass leaves the watches' catch-up alone.
+      if (!streams[0]?.mentions) this.setCatching(runner, new Set());
       console.warn(`Agent ${name()} could not catch up`, error);
     }
   }
@@ -1785,8 +1962,8 @@ export class AgentRunners {
    * watches, so a mention from before the app listened is not answered late.
    * A later one live would have heard, mentions too; catch-up may read it
    * before replay does, which then skips it as seen. Returns how many events
-   * were taken, or 0 when an edit since ends the pass: the next one reads them
-   * again. */
+   * were taken, or 0 when an edit since ends the watches' pass: the next one
+   * reads them again. */
   private async caughtUp(
     runner: Runner,
     pass: Pass,
@@ -1798,7 +1975,8 @@ export class AgentRunners {
     for (;;) {
       signal.throwIfAborted();
       const agent = this.host.ready(runner.key);
-      if (agent?.attention !== pass.attention) return 0;
+      if (!agent || (pass.attention && agent.attention !== pass.attention))
+        return 0;
       const taken = this.batch(runner, agent, pass, slug, events, skipped);
       if (taken) return taken;
       await new Promise<void>((resolve) => {
@@ -2006,14 +2184,17 @@ export class AgentRunners {
    * starts from the last saved one again, which `seen` dedupes until a
    * restart, and each stream's saved `heard` after one. */
   private saveCheckpoints() {
-    const keys = new Set(
-      this.host.records().flatMap((record) =>
+    const keys = new Set([
+      ...this.host.records().flatMap((record) =>
         // A record's `pubkey` is its membership's key.
         streamsOf({ key: record.pubkey, attention: record.attention }).map(
           (stream) => stream.key,
         ),
       ),
-    );
+      // Mentions need no record: a membership added to a community has none
+      // until something is saved for it there.
+      ...[...this.runners.keys()].map((key) => streamKey(key, MENTIONS)),
+    ]);
     this.checkpoints = Object.fromEntries(
       Object.entries(this.checkpoints).filter(([key]) => keys.has(key)),
     );
@@ -2367,6 +2548,7 @@ export class AgentRunners {
    * queued wakes nothing, even if it now matches again. */
   private current(runner: Runner, agent: Agent, job: Job): Job | undefined {
     const { trigger } = job;
+    if (job.guardedWake && !job.guardedWake.current()) return undefined;
     if (job.sourceCurrent && !job.sourceCurrent()) return undefined;
     if (trigger.type === "source" && job.matched) {
       const { object, epoch } = job.matched;
@@ -2426,6 +2608,7 @@ export class AgentRunners {
   /** Whether `job`, already started, should still run: the rule `current()`
    * applies to a queued job, asked again for work a type queued itself. */
   private stillCurrent(runner: Runner, job: Job) {
+    if (job.guardedWake && !job.guardedWake.current()) return false;
     const agent = this.host.agent(runner.key);
     if (!agent) return false;
     const { trigger } = job;
@@ -2528,6 +2711,8 @@ export class AgentRunners {
 
   /** Queues `job`, or drops it when the lane is full; returns whether queued. */
   private enqueue(runner: Runner, job: Job) {
+    if (job.trigger.type === "mention")
+      runner.mentioned.set(job.trigger.event.id, job.trigger.event.created_at);
     const now = Date.now();
     const lane = laneOf(job.trigger);
     const rate = runner.rates[lane];
@@ -2570,6 +2755,8 @@ export class AgentRunners {
     const resumed = runner.queues.mention.flatMap(({ trigger }) =>
       trigger.type === "mention" && trigger.resumed ? [trigger.event.id] : [],
     );
+    for (const job of [...runner.queues.mention])
+      job.guardedWake?.drop("unavailable");
     runner.queues.mention.length = 0;
     if (forget && resumed.length) this.unmark(runner.key, resumed);
   }
@@ -2628,7 +2815,7 @@ export class AgentRunners {
         ...(soloChat && conversationName ? { conversationName } : {}),
       },
       // A resumed mention must not reuse its resume marker on retry.
-      addressed(trigger)
+      addressed(trigger) && !job.guardedWake
         ? () =>
             void this.enqueue(runner, {
               trigger:
@@ -2847,6 +3034,7 @@ export class AgentRunners {
         ...pick,
         ...(team ? { team } : {}),
         signal,
+        ...(job.guardedWake ? { accepted: job.guardedWake.accepted } : {}),
         workingUntil: working.hold,
         ...(job.work
           ? {
@@ -2878,7 +3066,10 @@ export class AgentRunners {
             this.host.member(agent, wakeAnchor(destination)) === true),
       });
       const runOnce = type.runOnce?.bind(type);
-      if (addressed(trigger)) return invoke(delivery);
+      if (addressed(trigger)) {
+        if (job.guardedWake && !delivery.current()) return;
+        return invoke(delivery);
+      }
       if (anchor) {
         if (!delivery.current()) return;
         if (anchor.root) {
@@ -2925,6 +3116,8 @@ export class AgentRunners {
     });
     void working.settled
       .then(async () => {
+        job.guardedWake?.current();
+        job.guardedWake?.drop();
         this.sourceJobs.delete(job);
         if (
           lifetime.aborted ||

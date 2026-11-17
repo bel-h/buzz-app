@@ -134,6 +134,23 @@ test("watch catch-up survives one rejected history read and shows recovery in At
       .poll(() => page.evaluate(() => window.historyReadFailure.recovered))
       .toBe(true);
     await expect.poll(admitted).toEqual(["Healthy history marker"]);
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () =>
+            window.localAgentFixture.services().agents.snapshot()
+              .watchReadFailures,
+        ),
+      )
+      .toMatchObject([
+        {
+          agentKey: agent,
+          watchSlug: "watch/history",
+          channelId: blocked,
+          summary: "The relay returned invalid channel history",
+          consecutiveFailures: 1,
+        },
+      ]);
     expect(failures).toBe(1);
     await page
       .getByLabel("Show activity for History recovery", { exact: true })
@@ -152,6 +169,15 @@ test("watch catch-up survives one rejected history read and shows recovery in At
       .poll(admitted)
       .toEqual(["Healthy history marker", "Blocked history marker"]);
     await expect(activity).toContainText("Blocked history marker");
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () =>
+            window.localAgentFixture.services().agents.snapshot()
+              .watchReadFailures,
+        ),
+      )
+      .toEqual([]);
     await expect(activity.getByRole("listitem")).toHaveCount(2);
     await page.screenshot({ path: info.outputPath("history-recovered.png") });
   } finally {

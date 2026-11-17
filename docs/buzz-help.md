@@ -484,6 +484,14 @@ and are asked to sign in again in Buzz.
   channels. Reduced motion applies the new order immediately.
   Deleting or archiving the open chat keeps you in Solo and opens another chat
   or a new draft.
+  **Start Solo chat**, in the menu of any delivered message (and in a channel's
+  or DM's own menu), opens a private New chat draft with a link to that message
+  or conversation already in the composer. It works from channels, DMs and Solo
+  chats, including ones that are archived, read-only or not joined. The link is
+  ordinary, editable text: nothing is created until you send, and starting
+  again from the same source returns to its unsent draft. The link grants no
+  access to the source; the agent you tag, and anyone you later share the chat
+  with, can open it only if they can already read that conversation.
 - **Team** contains community channels and their threads. Choose **Reply** on a
   message to open or continue its thread. Use the **@** picker
   to address a channel member. A full name typed after **@** and followed by
@@ -511,6 +519,10 @@ and are asked to sign in again in Buzz.
   To rename one, open **Workspace settings** from its heading’s **…** or right-click
   menu, edit **Workspace name**, and choose **Save changes**. Chats, tasks and
   starting settings stay in place.
+  **Archive inactive chats** in the same menu shows how many of the workspace's
+  chats have had no messages for 14 days and archives them after you confirm.
+  It skips the open chat and chats with agent work running or messages still
+  queued or sending. **Undo** on the result restores them.
   Retrying an instructions-only draft keeps the current workspace name. If a
   workspace name edit conflicts, copy your draft before using
   **Review saved settings** to discard it and reload.
@@ -707,7 +719,10 @@ and are asked to sign in again in Buzz.
   - `from:me`, `from:@name`: messages by you or someone else.
   - `in:#channel`, `in:@person`: one channel, or your DM with someone
     (`in:@me` is your own). A name that matches several conversations, or
-    none, says so instead of searching.
+    none, says so instead of searching. Searching one conversation, by `in:`
+    or ⌘F, shows the same Messages results; where the relay supports it,
+    **Sort messages** in the field orders text matches by most relevant or
+    most recent.
   - `after:`, `before:`, `on:` a date (`YYYY-MM-DD`, `today`, `yesterday`), and
     `during:` a day, month (`2026-10`, `october`), or year, in local time, or a
     rolling period ending today (`7d`, `4w`, `3m`, `1y`). `after:` includes its
@@ -1029,6 +1044,12 @@ and are asked to sign in again in Buzz.
   for that community and identity. Collapsed section headings highlight when
   their channels have unread messages or thread replies. Muted channels do not
   highlight the heading.
+- **Custom Team sections** can have an optional Unicode or community emoji.
+  Choose it beside the name when creating a section, or use the section's
+  menu → **Rename section** to change its name or emoji, then **Rename**.
+  Open the emoji picker and choose **Remove emoji** to clear only the emoji;
+  the name and channels stay unchanged. These controls require
+  writable saved sidebar preferences.
 - **Dragging channels and DMs between sections**: drag a channel or DM row onto
   **Starred** or a saved group to move it there, or back to its home section:
   channels to **Channels** and DMs to **Direct messages**. **Channels** does not
@@ -1509,7 +1530,9 @@ available rather than silently discarding it.
   since the proposal.
   Agent reads also show saved model and thinking choices for supported local
   harnesses. They distinguish explicit choices, harness defaults, Recommended
-  policy and unavailable settings. They do not report an active turn's model.
+  policy and unavailable settings. For Codex and Claude, they also include
+  current defaults when Buzz can resolve them, with the source or a reason
+  they are unknown. They do not prove an active session's model.
 - Your agents can search messages (`search`) by words, person, channel or DM,
   and date, and link each message they cite. They search with their own access:
   channels they're in and open channels. They don't find messages in your
@@ -1529,7 +1552,9 @@ available rather than silently discarding it.
   once that turn is loaded. Working indicators describe current work,
   not a guarantee that an agent is available or that a message was delivered.
   Local work includes conversation wakes from plugins, watches, and timers.
-  These wakes have no message link of their own.
+  These wakes have no message link of their own. A plugin can cancel a pending
+  guarded wake when its work is no longer current. It cannot retract input
+  already handed to the agent.
   Expand grouped work updates to read each message; the collapsed excerpt names
   its speaker. Thread work appears inside its thread; the channel’s reply summary
   still shows when an agent is working there. While the activity under your
