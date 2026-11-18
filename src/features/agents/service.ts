@@ -1,3 +1,4 @@
+import type { PublishOptions } from "../../buzz-mcp/client";
 import { followUpQueue } from "../messages/follow-up-queue";
 import type {
   AgentModelSettings,
@@ -579,7 +580,11 @@ export type AgentHandle = Readonly<{
    * undefined while the channel is not known here yet. */
   threadsApart?(channel: string): boolean | undefined;
   /** Rechecks an operation lifetime after channel startup, before signing. */
-  publish(event: AgentEventTemplate, check?: () => void): Promise<RelayEvent>;
+  publish(
+    event: AgentEventTemplate,
+    check?: () => void,
+    options?: PublishOptions,
+  ): Promise<RelayEvent>;
   /** Reads the community as the agent, seeing only what it may see. */
   query(filters: readonly object[]): Promise<RelayEvent[]>;
   effectiveEdit(id: string, channel: string): Promise<RelayEvent>;

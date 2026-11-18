@@ -898,7 +898,12 @@ and are asked to sign in again in Buzz.
   send it names. If a background send fails, its notice names that conversation
   and, when you are elsewhere, can open it (except a huddle). Your message and
   files are back in that conversation's composer. Do not
-  promise support for every file type or size.
+  promise support for every file type or size. Some plugins supply temporary
+  attachment sources that may be released after a confirmed post; keep the posted
+  link for reuse, and do not assume local cleanup will happen automatically. Managed
+  cleanup is strictly a desktop-local behaviour: when an agent sends attachments
+  it read from a remote execution target, the post is published normally but no
+  local cleanup is triggered and no remote source is deleted.
 - **Emoji suggestions** appear when you type `:` and an emoji name. If a name
   is shortened with an ellipsis, hover over it or use the arrow keys to select
   it and see the full name in a tooltip. A chosen or picked emoji is followed
@@ -1885,7 +1890,9 @@ tab, asks **Discard changes?** first; **Keep editing** keeps them.
   individual watch settings. Running turns may finish; activating resumes enabled
   watches, and an overdue timer can run once. Delete in that menu
   removes the interest; if it has watches, confirm to delete those too.
-  Each watch shows its source and Active or Paused state. Expand a
+  Each watch shows its source and Active or Paused state. A timer shows its
+  interval and, while it is on, when it runs next in local time, or since when
+  that run is overdue. Expand a
   watch, then expand “Activity” for a compact event timeline. Expand an event to read its full
   content, or expand “Watch details” for conditions and the execution destination. Select its status pill to
   resume, pause, or delete it (Delete asks first), or its source pill to inspect the watched channels or source. “Responds in” shows where the agent runs and replies; select that destination to open the conversation.
