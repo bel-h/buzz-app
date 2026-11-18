@@ -40,6 +40,44 @@ test("agent changes wait for owner review in the agent's own settings form", asy
   ]);
 });
 
+test("a scope proposal shows the current and proposed settings before Save", async ({
+  page,
+}) => {
+  await page.goto(
+    "/tests/fixtures/agent-library.html?settingsSync=codex&proposeSettings",
+  );
+  const propose = (scope) =>
+    page.evaluate((scope) => window.proposeFixtureSettings({ scope }), scope);
+  await propose("community");
+  const review = page.getByRole("dialog", { name: "Edit Ada" });
+  const summary = review.getByRole("region", { name: "Proposed settings" });
+  await expect(summary).toContainText("Sessions");
+  await expect(summary).toContainText("One session per thread");
+  await expect(summary).toContainText("One session per community");
+  await expect(summary).not.toContainText("Workspace");
+
+  for (const theme of ["light", "dark"]) {
+    for (const width of [390, 1280]) {
+      await page.setViewportSize({ width, height: 950 });
+      await page.evaluate((theme) => {
+        document.documentElement.classList.toggle("dark", theme === "dark");
+        document.documentElement.style.fontSize = "20px";
+      }, theme);
+      await expect(summary).toBeInViewport();
+      await expect(
+        review.getByRole("button", { name: "Save" }),
+      ).toBeInViewport();
+    }
+  }
+
+  await review.getByRole("button", { name: "Close", exact: true }).click();
+  await expect(review).toHaveCount(0);
+  await propose("thread");
+  await expect(summary).toContainText(
+    "The proposed settings match the saved settings.",
+  );
+});
+
 test("a Codex agent's settings proposal persists only on the owner Save", async ({
   page,
 }) => {
@@ -59,6 +97,18 @@ test("a Codex agent's settings proposal persists only on the owner Save", async 
   const review = page.getByRole("dialog", { name: "Edit Ada" });
   const saved = () => page.evaluate(() => window.updateReviewResult());
   await propose();
+  const summary = review.getByRole("region", { name: "Proposed settings" });
+  for (const [label, value] of [
+    ["Model", "codex-fixture-model"],
+    ["Thinking", "high"],
+    ["Sessions", "One session per community"],
+    ["Workspace", "~/example"],
+    ["Huddle voice", "maple"],
+    ["Codex apps and plugins", "On"],
+  ]) {
+    await expect(summary.getByText(label, { exact: true })).toBeVisible();
+    await expect(summary).toContainText(value);
+  }
   await expect(review.getByRole("textbox", { name: "Workspace" })).toHaveValue(
     "~/example",
   );
@@ -82,6 +132,7 @@ test("a Codex agent's settings proposal persists only on the owner Save", async 
   await expect(
     review.getByRole("button", { name: "Huddle voice" }),
   ).toContainText("Cove");
+  await expect(summary).toContainText("maple");
   expect(await saved()).toEqual([]);
   await review.getByRole("button", { name: "Close", exact: true }).click();
   await expect(review).toHaveCount(0);

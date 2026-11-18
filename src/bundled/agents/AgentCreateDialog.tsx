@@ -9,6 +9,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { sessionScope } from "../../features/agent-harness/session-scope";
 import type { AgentCardDraft } from "../../features/agents/agent-card";
 import {
   agentAvatars,
@@ -22,6 +23,7 @@ import {
 import {
   bounded,
   followRecommended,
+  onRecommended,
   recommendedCandidates,
   withRecommended,
 } from "../../features/agents/recommended";
@@ -36,7 +38,10 @@ import type {
   AgentUpdateRequest,
 } from "../../features/agents/service";
 import { AgentSaveFooter } from "../../features/agents/AgentSaveButton";
-import { applySettingsProposal } from "../../features/agents/settings-proposal";
+import {
+  applySettingsProposal,
+  type AgentSettingsProposal,
+} from "../../features/agents/settings-proposal";
 import { PlugIcon, RobotIcon } from "../../shared/design-system/icons";
 import { Tooltip } from "../../shared/design-system/ui/Tooltip";
 import { Button } from "../../shared/design-system/ui/Button";
@@ -47,6 +52,7 @@ import styles from "./AgentCreate.module.css";
 import { SettingsGroup } from "../../shared/design-system/ui/SettingsGroup";
 import { PreferenceRow } from "../../shared/design-system/ui/PreferenceRow";
 import { Field } from "../../shared/design-system/ui/Field";
+import { InlineHeader } from "../../shared/design-system/ui/Header";
 import { Input } from "../../shared/design-system/ui/Input";
 import { useNamePrompt, useShake } from "./useNamePrompt";
 import { MigrationPreview } from "./AgentSettingsHost";
@@ -101,6 +107,73 @@ const startingConfig = (type: RegisteredAgentType | undefined) => {
     return undefined;
   }
 };
+
+function ProposedSettings({
+  saved,
+  proposed,
+}: {
+  saved: unknown;
+  proposed: AgentSettingsProposal;
+}) {
+  const headingId = useId();
+  const current = (saved ?? {}) as AgentSettingsProposal;
+  const labels = {
+    model: "Model",
+    effort: "Thinking",
+    scope: "Sessions",
+    workspace: "Workspace",
+    voice: "Huddle voice",
+    apps: "Codex apps and plugins",
+  } as const;
+  const value = (settings: AgentSettingsProposal, key: keyof typeof labels) => {
+    if (key === "scope")
+      return `One session per ${sessionScope(settings.scope)}`;
+    if (key === "apps") return settings.apps === true ? "On" : "Off";
+    if (key === "workspace")
+      return typeof settings.workspace === "string" && settings.workspace.trim()
+        ? settings.workspace.trim()
+        : "~/.buzz";
+    if ((key === "model" || key === "effort") && onRecommended(settings))
+      return "Recommended";
+    const text = settings[key];
+    return typeof text === "string" && text ? text : "Default";
+  };
+  const rows = (Object.keys(labels) as (keyof typeof labels)[]).flatMap(
+    (key) => {
+      if (proposed[key] === undefined) return [];
+      const before = value(current, key);
+      const after = value(proposed, key);
+      return before === after ? [] : [{ label: labels[key], before, after }];
+    },
+  );
+  return (
+    <section aria-labelledby={headingId} className="flex flex-col gap-2">
+      <InlineHeader id={headingId} level={2} title="Proposed settings" />
+      {rows.length ? (
+        <SettingsGroup>
+          {rows.map(({ label, before, after }) => (
+            <PreferenceRow
+              key={label}
+              title={label}
+              subtitle={
+                <>
+                  {before}
+                  <span aria-hidden="true"> → </span>
+                  <span className="sr-only"> to </span>
+                  {after}
+                </>
+              }
+            />
+          ))}
+        </SettingsGroup>
+      ) : (
+        <p className="m-0 text-body-sm text-subtle">
+          The proposed settings match the saved settings.
+        </p>
+      )}
+    </section>
+  );
+}
 
 export function AgentCreateDialog({
   agents,
@@ -579,6 +652,12 @@ export function AgentCreateDialog({
         }
       >
         <div className={styles.createStack}>
+          {update?.request.settings && (
+            <ProposedSettings
+              saved={update.agent.config}
+              proposed={update.request.settings}
+            />
+          )}
           <section aria-label="Identity" className={styles.profileIdentity}>
             <div>
               <AgentAvatarPicker
