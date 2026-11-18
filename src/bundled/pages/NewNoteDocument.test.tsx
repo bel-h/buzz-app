@@ -107,38 +107,52 @@ it("saves body-only pages with an untitled fallback and honors manual saving", a
   ).toBe(false);
 });
 
-it("retains edits and selection while creating and waits for IME before handing off", async () => {
-  const f = await fixture({ title: "First title" });
-  const pending = gate();
-  f.create.mockImplementationOnce(async (...args) => {
-    await pending.promise;
-    return f.realCreate(...args);
-  });
-  try {
-    await advance(1500);
-    expect(f.create).toHaveBeenCalledOnce();
-    fireEvent.compositionStart(f.title);
-    fireEvent.change(f.title, { target: { value: "Newer title" } });
-    f.title.focus();
-    if (!(f.title instanceof HTMLTextAreaElement))
-      throw new Error("Missing title field");
-    f.title.setSelectionRange(2, 5);
-    expect(f.title).toBeEnabled();
-    pending.release();
-    await act(async () => {
-      await f.create.mock.results[0]?.value;
+it.each(["typing", "composition"])(
+  "defers first-save handoff through %s and retains selection",
+  async (input) => {
+    const f = await fixture({ title: "First title" });
+    const pending = gate();
+    f.create.mockImplementationOnce(async (...args) => {
+      await pending.promise;
+      return f.realCreate(...args);
     });
-    expect(f.onCreated).not.toHaveBeenCalled();
-    fireEvent.compositionEnd(f.title);
-    expect(f.onCreated).toHaveBeenCalledOnce();
-    const [note, presentation] = f.onCreated.mock.calls[0] ?? [];
-    const focus = presentation.focus;
-    expect(f.workspace.drafts.get(noteKey(note))?.title).toBe("Newer title");
-    expect(focus).toMatchObject({ target: "title", start: 2, end: 5 });
-  } finally {
-    pending.release();
-  }
-});
+    try {
+      await advance(1500);
+      expect(f.create).toHaveBeenCalledOnce();
+      if (input === "composition") fireEvent.compositionStart(f.title);
+      fireEvent.change(f.title, { target: { value: "Newer title" } });
+      f.title.focus();
+      if (!(f.title instanceof HTMLTextAreaElement))
+        throw new Error("Missing title field");
+      f.title.setSelectionRange(2, 5);
+      expect(f.title).toBeEnabled();
+      pending.release();
+      await act(async () => {
+        await f.create.mock.results[0]?.value;
+      });
+      expect(f.onCreated).not.toHaveBeenCalled();
+      if (input === "composition") {
+        await advance(15_000);
+        expect(f.onCreated).not.toHaveBeenCalled();
+        fireEvent.compositionEnd(f.title);
+      }
+      await advance(1000);
+      fireEvent.change(f.title, { target: { value: "Still typing" } });
+      f.title.setSelectionRange(2, 5);
+      await advance(1499);
+      expect(f.onCreated).not.toHaveBeenCalled();
+      expect(f.title).toHaveFocus();
+      await advance(1);
+      expect(f.onCreated).toHaveBeenCalledOnce();
+      const [note, presentation] = f.onCreated.mock.calls[0] ?? [];
+      const focus = presentation.focus;
+      expect(f.workspace.drafts.get(noteKey(note))?.title).toBe("Still typing");
+      expect(focus).toMatchObject({ target: "title", start: 2, end: 5 });
+    } finally {
+      pending.release();
+    }
+  },
+);
 
 it("pauses on an uncertain receipt and retries the original identity and payload", async () => {
   const f = await fixture({ title: "First title" });
@@ -166,7 +180,7 @@ it("pauses on an uncertain receipt and retries the original identity and payload
   expect(f.heads.size).toBe(1);
 });
 
-it("defers hidden drafts and saves by the maximum interval during continuous typing", async () => {
+it("defers first save while a draft is hidden or the user is still typing", async () => {
   const f = await fixture();
   fireEvent.change(f.title, { target: { value: "Hidden draft" } });
   f.view.rerender(
@@ -182,15 +196,19 @@ it("defers hidden drafts and saves by the maximum interval during continuous typ
     </StrictMode>,
   );
   const title = screen.getByRole("textbox", { name: "Title" });
-  for (let index = 0; index < 10; index++) {
+  for (let index = 0; index < 12; index++) {
     fireEvent.change(title, { target: { value: `Plan ${index}` } });
     await advance(1000);
+    expect(f.create).not.toHaveBeenCalled();
   }
+  await advance(499);
+  expect(f.create).not.toHaveBeenCalled();
+  await advance(1);
   await act(async () => {
     await f.create.mock.results[0]?.value;
   });
   expect(f.create).toHaveBeenCalledOnce();
-  expect(f.create.mock.calls[0]?.[0].title).toBe("Plan 9");
+  expect(f.create.mock.calls[0]?.[0].title).toBe("Plan 11");
 });
 
 it("creates a private empty page when Share is explicitly requested", async () => {

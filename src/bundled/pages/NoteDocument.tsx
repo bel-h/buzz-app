@@ -67,6 +67,13 @@ export type NoteFocus = {
 
 const nothing = () => {};
 
+function hasEdits(base: Note, draft: Pick<Note, "title" | "markdown">) {
+  // Saved titles are trimmed. Keep the input intact while comparing with the relay.
+  return (
+    base.title.trim() !== draft.title.trim() || base.markdown !== draft.markdown
+  );
+}
+
 export function NoteDocument({
   address,
   workspace,
@@ -113,13 +120,14 @@ export function NoteDocument({
     if (active) needsFocus.current = true;
   }, [active]);
   const [canEdit, setCanEdit] = useState(false);
-  const [busy, setBusy] = useState(true);
+  const [blocking, setBlocking] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const busy = blocking || refreshing;
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
   const [composing, setComposing] = useState(false);
   const saveRequest = useRef<AbortController | null>(null);
   const refreshAfterSave = useRef(false);
-  const changedAt = useRef<number | undefined>(undefined);
   const autoSaveKey = `note-auto-save:${noteKey(address)}`;
   const [autoSave, setAutoSave] = useState(
     () =>
@@ -166,7 +174,7 @@ export function NoteDocument({
   const [restoreFrom, setRestoreFrom] = useState<Note | undefined>(
     cachedDraft?.restoreFrom,
   );
-  const dirty = !!note && (title !== note.title || markdown !== note.markdown);
+  const dirty = !!note && hasEdits(note, { title, markdown });
   const editing =
     (view ? (view.edit ?? true) : localEditing) &&
     ((canEdit && !note?.deleted) || dirty || !!restoreFrom);
@@ -284,14 +292,22 @@ export function NoteDocument({
     callbacks.current.onChange(next);
   }, []);
   const refresh = useCallback(
-    async (signal?: AbortSignal) => {
+    async ({
+      signal,
+      background,
+    }: {
+      signal?: AbortSignal;
+      background?: boolean;
+    } = {}) => {
       // A local revision may echo before its save receipt. Reconcile after the
       // transaction settles so our own write cannot conflict with its draft.
       if (saveRequest.current) {
         refreshAfterSave.current = true;
         return;
       }
-      setBusy(true);
+      // Keep an open editor interactive during passive relay reconciliation.
+      const setPending = background ? setRefreshing : setBlocking;
+      setPending(true);
       setError("");
       try {
         const current = await workspace.open(address, signal);
@@ -304,14 +320,14 @@ export function NoteDocument({
           ) && current.editable,
         );
         const previous = latest.current;
-        const unsaved =
-          previous.note &&
-          (previous.title !== previous.note.title ||
-            previous.markdown !== previous.note.markdown ||
-            previous.restoreFrom);
-        if (unsaved && previous.note?.revision !== current.revision)
-          setConflict(current);
-        else if (!unsaved) adopt(current);
+        if (previous.note?.revision !== current.revision) {
+          if (
+            previous.note &&
+            (hasEdits(previous.note, previous) || previous.restoreFrom)
+          )
+            setConflict(current);
+          else adopt(current);
+        }
         callbacks.current.onChange(current);
       } catch (error) {
         if (!signal?.aborted) {
@@ -323,14 +339,14 @@ export function NoteDocument({
           callbacks.current.onUnavailable(address);
         }
       } finally {
-        if (!signal?.aborted) setBusy(false);
+        if (!signal?.aborted) setPending(false);
       }
     },
     [workspace, address, adopt, setDialog],
   );
   useEffect(() => {
     const controller = new AbortController();
-    void refresh(controller.signal);
+    void refresh({ signal: controller.signal });
     return () => controller.abort();
   }, [refresh]);
   useEffect(() => {
@@ -342,7 +358,7 @@ export function NoteDocument({
       if (next === prior) return;
       const known = prior !== undefined;
       prior = next;
-      if (known) void refresh();
+      if (known) void refresh({ background: true });
     });
   }, [workspace, address, refresh]);
   const [deletedPreview, setDeletedPreview] = useState<Note>();
@@ -397,19 +413,19 @@ export function NoteDocument({
             events.some(
               (event) =>
                 event.kind !== 45010 ||
-                (event.id !== currentRevision &&
+                (event.id !== latest.current.note?.revision &&
                   noteTag(event, "d") === address.id &&
                   noteTag(event, "h") === address.channel),
             )
           )
-            void refresh();
+            void refresh({ background: true });
         },
-        () => void refresh(),
+        () => void refresh({ background: true }),
       ),
-    [workspace, address, currentRevision, refresh],
+    [workspace, address, refresh],
   );
   const run = async (action: () => Promise<void>) => {
-    setBusy(true);
+    setBlocking(true);
     setError("");
     setStatus("");
     try {
@@ -418,7 +434,7 @@ export function NoteDocument({
       if (error instanceof NoteConflict) setConflict(error.current);
       setError(errorText(error));
     } finally {
-      setBusy(false);
+      setBlocking(false);
     }
   };
   const save = useCallback(
@@ -432,21 +448,17 @@ export function NoteDocument({
         !current.canEdit ||
         current.unavailable ||
         current.conflict ||
-        (!revision &&
-          base.title === current.title &&
-          base.markdown === current.markdown &&
-          !current.restoreFrom) ||
+        (!revision && !hasEdits(base, current) && !current.restoreFrom) ||
         (base.deleted && !current.restoreFrom && !revision)
       )
         return;
       const request = new AbortController();
       saveRequest.current = request;
-      changedAt.current = undefined;
       const restoration = base.deleted
         ? (revision ?? current.restoreFrom)
         : undefined;
       setSaving(true);
-      if (revision) setBusy(true);
+      if (revision) setBlocking(true);
       setSaveError("");
       setStatus("");
       try {
@@ -496,10 +508,10 @@ export function NoteDocument({
         saveRequest.current = null;
         if (!request.signal.aborted) {
           setSaving(false);
-          if (revision) setBusy(false);
+          if (revision) setBlocking(false);
           if (refreshAfterSave.current) {
             refreshAfterSave.current = false;
-            void refresh();
+            void refresh({ background: true });
           }
         }
       }
@@ -511,25 +523,19 @@ export function NoteDocument({
       !autoSave ||
       dialog === "history" ||
       !note ||
-      (title === note.title && markdown === note.markdown) ||
+      !hasEdits(note, { title, markdown }) ||
       !canEdit ||
       unavailable ||
       note.deleted ||
       restoreFrom ||
       conflict ||
       saveError ||
-      composing
-    ) {
-      changedAt.current = undefined;
+      composing ||
+      busy ||
+      saving
+    )
       return;
-    }
-    if (busy || saving) return;
-    const started = changedAt.current ?? Date.now();
-    changedAt.current = started;
-    const timer = window.setTimeout(
-      () => void save(true),
-      Math.max(0, Math.min(1500, 10_000 - (Date.now() - started))),
-    );
+    const timer = window.setTimeout(() => void save(true), 1500);
     return () => window.clearTimeout(timer);
   }, [
     autoSave,
@@ -659,7 +665,7 @@ export function NoteDocument({
             !startedOnBlank ||
             !editing ||
             !canEdit ||
-            busy ||
+            blocking ||
             event.button !== 0 ||
             event.metaKey ||
             event.ctrlKey ||
@@ -694,7 +700,7 @@ export function NoteDocument({
             ref={titleInput}
             value={title}
             onValueChange={setTitle}
-            disabled={busy}
+            disabled={blocking}
             readOnly={!editing}
           />
         ) : (
@@ -711,7 +717,7 @@ export function NoteDocument({
               note.deleted
                 ? "Deleted"
                 : canEdit
-                  ? saving || (dirty && autoSave && !saveError && !conflict)
+                  ? saving
                     ? "Saving…"
                     : saveError
                       ? "Save paused"
@@ -918,7 +924,7 @@ export function NoteDocument({
                 value={markdown}
                 editing={editing}
                 onChange={setMarkdown}
-                disabled={busy}
+                disabled={blocking}
                 notes={catalogue}
                 community={community}
                 linkOpen={dialog === "link"}

@@ -1149,9 +1149,10 @@ and are asked to sign in again in Buzz.
 ## Docs
 
 Docs is a bundled plugin for live Markdown documents shared with people and
-agents. Open Docs from the dock. Edits auto-save after a pause; Doc actions →
-Revision history lets you disable auto-save and use Save. Unsaved drafts survive
-browsing within the connected session, not app restarts.
+agents. Open Docs from the dock. Auto-save waits until you pause typing. You can
+keep editing while a save is in progress. Use Doc actions → Revision history to
+disable auto-save and use Save. Unsaved drafts survive browsing within the
+connected session and are cleared when you restart the app.
 
 The main collection keeps your docs together with docs created by your verified
 agents. Docs from other creators are in **Shared with me**; open that folder to

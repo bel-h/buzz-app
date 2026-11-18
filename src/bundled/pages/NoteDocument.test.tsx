@@ -210,7 +210,7 @@ it("saves changed content after idle, stays in Editing and skips unchanged conte
   await advance(10_000);
   expect(f.save).not.toHaveBeenCalled();
   f.change("New plan");
-  expect(screen.getByRole("status")).toHaveTextContent("Saving…");
+  expect(screen.getByRole("status")).toHaveTextContent("Unsaved changes");
   expect(
     screen.queryByRole("button", { name: "Discard changes" }),
   ).not.toBeInTheDocument();
@@ -234,23 +234,36 @@ it("saves changed content after idle, stays in Editing and skips unchanged conte
   expect(f.save).toHaveBeenCalledOnce();
 });
 
-it("saves by ten seconds during continuous typing and waits for composition to finish", async () => {
+it("waits for idle throughout continuous typing and composition", async () => {
   const f = await fixture();
-  for (let index = 0; index < 10; index++) {
+  for (let index = 0; index < 12; index++) {
     f.change(`Plan ${index}`);
     await advance(1000);
+    expect(f.save).not.toHaveBeenCalled();
   }
-  await saved(f.save);
-  expect(f.save).toHaveBeenCalledOnce();
-  expect(f.save.mock.calls[0]?.[1].title).toBe("Plan 9");
   fireEvent.compositionStart(f.title);
   f.change("Composing");
   await advance(15_000);
-  expect(f.save).toHaveBeenCalledOnce();
+  expect(f.save).not.toHaveBeenCalled();
   fireEvent.compositionEnd(f.title);
+  await advance(1499);
+  expect(f.save).not.toHaveBeenCalled();
+  await advance(1);
+  await saved(f.save);
+  expect(f.save).toHaveBeenCalledOnce();
+  expect(f.save.mock.calls[0]?.[1].title).toBe("Composing");
+});
+
+it("saves a trimmed title once while preserving the text in the active field", async () => {
+  const f = await fixture();
+  f.change("New plan ");
   await advance(1500);
   await saved(f.save);
-  expect(f.save).toHaveBeenCalledTimes(2);
+  expect((await f.workspace.open(f.note)).title).toBe("New plan");
+  expect(f.title).toHaveValue("New plan ");
+  expect(screen.getByRole("status")).toHaveTextContent(/^Saved/);
+  await advance(15_000);
+  expect(f.save).toHaveBeenCalledOnce();
 });
 
 it("pauses after a failed save, retains the draft, and retries only on request", async () => {
@@ -281,6 +294,7 @@ it("keeps typing through a pending receipt and reconciles its live echo against 
   });
   f.change("First revision");
   await advance(1500);
+  expect(screen.getByRole("status")).toHaveTextContent("Saving…");
   await act(async () => {
     await accepted.promise;
   });
@@ -291,19 +305,42 @@ it("keeps typing through a pending receipt and reconciles its live echo against 
   expect(f.title).toHaveValue("Newer draft");
   await advance(15_000);
   expect(f.save).toHaveBeenCalledOnce();
-  const read = vi.spyOn(f.workspace, "open");
+  const refresh = gate();
+  const open = f.workspace.open;
+  const read = vi
+    .spyOn(f.workspace, "open")
+    .mockImplementationOnce(async (...args) => {
+      await refresh.promise;
+      return open(...args);
+    });
   await act(async () => f.echo(event));
   expect(read).not.toHaveBeenCalled();
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-  receipt.release();
-  await saved(f.save);
-  expect(f.title).toHaveValue("Newer draft");
+  try {
+    f.title.focus();
+    receipt.release();
+    await saved(f.save);
+    expect(read).toHaveBeenCalledOnce();
+    expect(f.title).toBeEnabled();
+    expect(f.title).toHaveFocus();
+    expect(
+      screen.getByRole("textbox", { name: "Doc body" }),
+    ).not.toHaveAttribute("aria-disabled", "true");
+    f.change("Typing during reconciliation");
+  } finally {
+    receipt.release();
+    await act(async () => {
+      refresh.release();
+      await read.mock.results[0]?.value;
+    });
+  }
+  expect(f.title).toHaveValue("Typing during reconciliation");
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   await advance(1500);
   await saved(f.save);
   expect(f.save).toHaveBeenCalledTimes(2);
   expect(f.save.mock.calls[1]?.[0].revision).toBe(event.id);
-  expect(f.save.mock.calls[1]?.[1].title).toBe("Newer draft");
+  expect(f.save.mock.calls[1]?.[1].title).toBe("Typing during reconciliation");
   expect(f.workspace.drafts.size).toBe(0);
 });
 

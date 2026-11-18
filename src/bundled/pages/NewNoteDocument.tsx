@@ -22,6 +22,8 @@ import { NoteTitle } from "./NoteTitle";
 import readerStyles from "./NotesPage.module.css";
 import styles from "./WorkingNotes.module.css";
 
+const AUTO_SAVE_IDLE_MS = 1500;
+
 export type NewDraft = {
   id: string;
   title: string;
@@ -60,7 +62,10 @@ export function NewNoteDocument({
   const [share, setShare] = useState(false);
   const [composing, setComposing] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [accepted, setAccepted] = useState<Note>();
+  const [accepted, setAccepted] = useState<{
+    note: Note;
+    editAtStart: number;
+  }>();
   const pending = useRef(false);
   const request = useRef<AbortController | null>(null);
   useEffect(() => () => request.current?.abort(), []);
@@ -73,7 +78,7 @@ export function NewNoteDocument({
   const editor = useRef<NoteEditorHandle>(null);
   const body = useRef<HTMLDivElement>(null);
   const blankPress = useRef(false);
-  const changedAt = useRef<number | undefined>(undefined);
+  const lastEditAt = useRef(-Infinity);
   const attempt = useRef<NewDraft | undefined>(undefined);
   const draft = useMemo(
     () => ({ id: initial.id, title, markdown, autoSave }),
@@ -93,38 +98,56 @@ export function NewNoteDocument({
     return () => cancelAnimationFrame(frame);
   }, [active]);
   useEffect(() => {
-    if (!accepted || composing || handedOff.current) return;
-    handedOff.current = true;
-    const nextTitle = title.trim() || "Untitled doc";
-    if (nextTitle !== accepted.title || markdown !== accepted.markdown)
-      workspace.drafts.set(noteKey(accepted), {
-        base: accepted,
-        title: nextTitle,
-        markdown,
+    if (!accepted || composing || linkOpen || handedOff.current) return;
+    const { note, editAtStart } = accepted;
+    const handOff = () => {
+      handedOff.current = true;
+      const nextTitle = title.trim() ? title : "Untitled doc";
+      if (nextTitle !== note.title || markdown !== note.markdown)
+        workspace.drafts.set(noteKey(note), {
+          base: note,
+          title: nextTitle,
+          markdown,
+        });
+      writeView(
+        workspace.session.scope,
+        `note-auto-save:${noteKey(note)}`,
+        autoSave,
+      );
+      const selection = editor.current?.selection();
+      const focus: NoteFocus | undefined =
+        document.activeElement === titleInput.current
+          ? {
+              target: "title",
+              start: titleInput.current?.selectionStart ?? 0,
+              end: titleInput.current?.selectionEnd ?? 0,
+              source: false,
+            }
+          : selection
+            ? { target: "body", ...selection }
+            : undefined;
+      callbacks.current.onCreated(note, {
+        autoSave,
+        focus: share ? undefined : focus,
+        share,
       });
-    writeView(
-      workspace.session.scope,
-      `note-auto-save:${noteKey(accepted)}`,
-      autoSave,
-    );
-    const selection = editor.current?.selection();
-    const focus: NoteFocus | undefined =
-      document.activeElement === titleInput.current
-        ? {
-            target: "title",
-            start: titleInput.current?.selectionStart ?? 0,
-            end: titleInput.current?.selectionEnd ?? 0,
-            source: false,
-          }
-        : selection
-          ? { target: "body", ...selection }
-          : undefined;
-    callbacks.current.onCreated(accepted, {
-      autoSave,
-      focus: share ? undefined : focus,
-      share,
-    });
-  }, [accepted, composing, title, markdown, autoSave, workspace, share]);
+    };
+    // Creation replaces this editor. Wait again if typing resumed in flight.
+    const remaining = AUTO_SAVE_IDLE_MS - (Date.now() - lastEditAt.current);
+    if (share || lastEditAt.current === editAtStart || remaining <= 0)
+      return handOff();
+    const timer = window.setTimeout(handOff, remaining);
+    return () => window.clearTimeout(timer);
+  }, [
+    accepted,
+    composing,
+    linkOpen,
+    title,
+    markdown,
+    autoSave,
+    workspace,
+    share,
+  ]);
   useEffect(() => {
     if (!dirty) return;
     const prevent = (event: BeforeUnloadEvent) => event.preventDefault();
@@ -140,6 +163,7 @@ export function NewNoteDocument({
     )
       return;
     const controller = new AbortController();
+    const editAtStart = lastEditAt.current;
     request.current = controller;
     pending.current = true;
     setBusy(true);
@@ -153,7 +177,7 @@ export function NewNoteDocument({
       };
       const note = await workspace.create(attempt.current, controller.signal);
       controller.signal.throwIfAborted();
-      setAccepted(note);
+      setAccepted({ note, editAtStart });
     } catch (error) {
       if (controller.signal.aborted) return;
       setError(
@@ -175,16 +199,13 @@ export function NewNoteDocument({
       accepted ||
       error ||
       composing ||
-      linkOpen
-    ) {
-      changedAt.current = undefined;
+      linkOpen ||
+      busy
+    )
       return;
-    }
-    if (busy) return;
-    changedAt.current ??= Date.now();
     const timer = window.setTimeout(
       () => void saveRef.current(),
-      Math.max(0, Math.min(1500, 10_000 - (Date.now() - changedAt.current))),
+      AUTO_SAVE_IDLE_MS,
     );
     return () => window.clearTimeout(timer);
   }, [
@@ -206,7 +227,10 @@ export function NewNoteDocument({
         className={readerStyles.document}
         aria-label="Doc contents"
         onCompositionStart={() => setComposing(true)}
-        onCompositionEnd={() => setComposing(false)}
+        onCompositionEnd={() => {
+          lastEditAt.current = Date.now();
+          setComposing(false);
+        }}
         onPointerDown={(event) => {
           blankPress.current = event.target === event.currentTarget;
         }}
@@ -231,16 +255,15 @@ export function NewNoteDocument({
           ref={titleInput}
           placeholder="Untitled doc"
           value={title}
-          onValueChange={setTitle}
+          onValueChange={(next) => {
+            lastEditAt.current = Date.now();
+            setTitle(next);
+          }}
         />
         {(busy || dirty) && (
           <p className={`${readerStyles.byline} text-caption text-secondary`}>
             <span role="status">
-              {busy || (autoSave && !error)
-                ? "Saving…"
-                : error
-                  ? "Save paused"
-                  : "Unsaved changes"}
+              {busy ? "Saving…" : error ? "Save paused" : "Unsaved changes"}
             </span>
           </p>
         )}
@@ -314,7 +337,10 @@ export function NewNoteDocument({
             value={markdown}
             editing
             disabled={false}
-            onChange={setMarkdown}
+            onChange={(next) => {
+              lastEditAt.current = Date.now();
+              setMarkdown(next);
+            }}
             notes={catalogue}
             community={community}
             linkOpen={active && linkOpen}
