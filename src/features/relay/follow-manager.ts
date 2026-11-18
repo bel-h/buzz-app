@@ -56,6 +56,7 @@ const DECODE_BYTES = 512 * 1024;
 const MAX_AT = 4294967295;
 const encoder = new TextEncoder();
 const PEER = /^thread-follows:[0-9a-f]{32}$/;
+const FOLLOWS_CHANGED = "follows";
 const EMPTY_STORED: StoredFollows = { state: EMPTY_FOLLOW_SYNC, slots: [] };
 
 const version = (raw: unknown) =>
@@ -215,6 +216,7 @@ export function createThreadFollowSync({
   debounceMs = 2000,
   notify = (listener) => listener(),
   capacity,
+  broadcastName,
 }: {
   viewer: string;
   reader: RelayReader;
@@ -236,6 +238,9 @@ export function createThreadFollowSync({
       listener: (events: readonly RelayEvent[], complete: boolean) => void,
     ): () => void;
   };
+  /** The read-state journal's cross-window channel: follow commits are
+   * announced on it so other owners reload the shared journal. */
+  broadcastName?: string | undefined;
 }) {
   const synced =
     !!host?.decodeFollows && !!host.signFollows && !!host.publishFollows;
@@ -269,6 +274,10 @@ export function createThreadFollowSync({
     snapshot = next;
     emit();
   };
+  const broadcast =
+    broadcastName && typeof BroadcastChannel !== "undefined"
+      ? new BroadcastChannel(broadcastName)
+      : undefined;
   const settled = () =>
     health({
       status:
@@ -300,7 +309,19 @@ export function createThreadFollowSync({
     });
     stored = saved.follows ?? EMPTY_STORED;
     clientId = saved.clientId;
+    broadcast?.postMessage(FOLLOWS_CHANGED);
     return saved;
+  }
+  /** Loads the latest journal into this owner without writing it back. */
+  async function load() {
+    const journal = await storage.update((current) => {
+      if (!current) throw new Error("Saved read state unavailable");
+      return current;
+    });
+    stored = journal.follows ?? EMPTY_STORED;
+    clientId = journal.clientId;
+    stored = { ...stored, state: hydrate(stored.state) };
+    emit();
   }
   /** Before every allocation: the shared high-water from read state. */
   const shared = (current: StoredFollows, journal: ReadJournal) => ({
@@ -365,9 +386,13 @@ export function createThreadFollowSync({
    * journal: owned heads are observed, everything else is a cached peer. */
   async function ingest(events: readonly RelayEvent[], signal: AbortSignal) {
     const heads = await decodeNewest(events, signal);
-    if (!heads.length) return;
+    // Every own kind-30078 event read counts toward the shared snapshot
+    // budget, read state included, so a follow write is admitted against
+    // the growth this read just fetched.
     for (const event of events)
-      if (followCoordinate(event)) capacity?.observeSize(event);
+      if (event.pubkey === viewer && event.kind === 30078)
+        capacity?.observeSize(event);
+    if (!heads.length) return;
     await save((current, journal) => {
       let next = shared(current, journal);
       const peerHeads: Record<string, FollowHead> = { ...next.peers };
@@ -670,65 +695,65 @@ export function createThreadFollowSync({
       }),
     }));
   }
+  /** After either complete recovery path: the legacy import once, then any
+   * pending work, dirty slots and retained packets alike. */
+  async function recovered() {
+    // Legacy import once, after a complete merge, only for unsynced keys.
+    if (complete && !stored.imported) {
+      const local = legacy.read();
+      const known = mergeFollows([
+        ownChoices(stored.state, clientId),
+        ...peers().map(
+          (head) => new Map(Object.entries(head.payload?.threads ?? {})),
+        ),
+      ]);
+      // Decided inside the transaction: another window may have imported,
+      // or tapped a key, since this one read the relay.
+      await save((current, journal) => {
+        if (current.imported) return current;
+        let next = shared(current, journal);
+        const own = ownChoices(current.state, journal.clientId);
+        let batch: number | undefined;
+        for (const [key, follow] of local) {
+          if (known.has(key) || own.has(key)) continue;
+          const placed = place(next, key, follow);
+          next = {
+            ...placed.current,
+            state: tap(
+              placed.current.state,
+              placed.slot,
+              key,
+              follow,
+              now(),
+              "legacy-import",
+              batch,
+            ),
+          };
+          batch ??= next.state.reserved;
+        }
+        return { ...next, imported: true };
+      });
+    }
+    settled();
+    if (
+      dirtySlots(stored.state).length ||
+      Object.keys(stored.state.packets).length
+    )
+      schedule(0);
+  }
   async function refresh() {
     if (closed) return;
     return queue(async () => {
       try {
-        const journal = await storage.update((current) => {
-          if (!current) throw new Error("Saved read state unavailable");
-          return current;
-        });
-        stored = journal.follows ?? EMPTY_STORED;
-        clientId = journal.clientId;
-        stored = { ...stored, state: hydrate(stored.state) };
+        // Cached choices show now; taps stay closed until recovery.
+        await load();
         if (!synced) {
           health({ status: "local", complete: false });
           return;
         }
         const signal = budget(snapshotted());
         complete = (await recover(signal, "background")) && !unreadable();
-        // Legacy import once, after a complete merge, only for unsynced keys.
-        if (complete && !stored.imported) {
-          const local = legacy.read();
-          const known = mergeFollows([
-            ownChoices(stored.state, clientId),
-            ...peers().map(
-              (head) => new Map(Object.entries(head.payload?.threads ?? {})),
-            ),
-          ]);
-          // Decided inside the transaction: another window may have imported,
-          // or tapped a key, since this one read the relay.
-          await save((current, journal) => {
-            if (current.imported) return current;
-            let next = shared(current, journal);
-            const own = ownChoices(current.state, journal.clientId);
-            let batch: number | undefined;
-            for (const [key, follow] of local) {
-              if (known.has(key) || own.has(key)) continue;
-              const placed = place(next, key, follow);
-              next = {
-                ...placed.current,
-                state: tap(
-                  placed.current.state,
-                  placed.slot,
-                  key,
-                  follow,
-                  now(),
-                  "legacy-import",
-                  batch,
-                ),
-              };
-              batch ??= next.state.reserved;
-            }
-            return { ...next, imported: true };
-          });
-        }
-        settled();
-        if (
-          dirtySlots(stored.state).length ||
-          Object.keys(stored.state.packets).length
-        )
-          schedule(0);
+        await recovered();
       } catch (error) {
         if (!closed)
           health({ status: "failed", complete, error: errorText(error) });
@@ -745,14 +770,26 @@ export function createThreadFollowSync({
         // A complete snapshot, durably ingested, opens the startup gate.
         ready = true;
         complete = !unreadable();
-        settled();
-        if (dirtySlots(stored.state).length) schedule(0);
+        await recovered();
       } catch (error) {
         if (!closed)
           health({ status: "failed", complete, error: errorText(error) });
       }
     });
   });
+  // Another window committed follow choices: reload, never echo.
+  if (broadcast)
+    broadcast.onmessage = (message: MessageEvent) => {
+      if (message.data !== FOLLOWS_CHANGED || closed) return;
+      void queue(async () => {
+        try {
+          await load();
+        } catch (error) {
+          if (!closed)
+            health({ status: "failed", complete, error: errorText(error) });
+        }
+      });
+    };
   return {
     read: choices,
     /** Legacy whole-map write: unsupported once synced. */
@@ -830,6 +867,7 @@ export function createThreadFollowSync({
     },
     dispose() {
       closed = true;
+      broadcast?.close();
       stopOwn?.();
       clearTimeout(timer);
       lifetime.abort();

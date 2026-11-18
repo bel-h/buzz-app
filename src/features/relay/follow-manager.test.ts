@@ -150,6 +150,7 @@ function setup(
     snapshot?: boolean;
     reader?: RelayReader;
     lock?: ReturnType<typeof mutex>;
+    broadcastName?: string;
   } = {},
 ) {
   const storage = options.storage ?? memoryStorage().storage;
@@ -186,6 +187,7 @@ function setup(
     now: () => clock.now,
     debounceMs: 60_000,
     ...(options.capacity ? { capacity: options.capacity } : {}),
+    ...(options.broadcastName ? { broadcastName: options.broadcastName } : {}),
   });
 }
 /** A fresh device reads the relay. */
@@ -1035,4 +1037,161 @@ it("startup gate: a reconnect's complete snapshot opens the gate without a follo
   repair([], true);
   await vi.waitFor(() => expect(sync.set(K, true)).resolves.toBeUndefined());
   expect(sync.read().get(K)).toBe(true);
+});
+
+const offlineReader = () =>
+  ({
+    read: async () => {
+      throw new Error("Relay is disconnected");
+    },
+    readStateSnapshot: async () => {
+      throw new Error("Relay is disconnected");
+    },
+  }) as unknown as RelayReader;
+/** Read state's own-author reads, driven by the test. */
+function ownReads(
+  capacity: { observeSize?: (event: RelayEvent) => void } = {},
+) {
+  let repair!: (events: readonly RelayEvent[], complete: boolean) => void;
+  return {
+    repair: (events: readonly RelayEvent[]) => repair(events, true),
+    capacity: {
+      admit() {},
+      observeSize: capacity.observeSize ?? (() => {}),
+      async refresh() {},
+      subscribeOwn(
+        listener: (events: readonly RelayEvent[], complete: boolean) => void,
+      ) {
+        repair = listener;
+        return () => {};
+      },
+    },
+  };
+}
+
+it("every own event in the follow snapshot is sized, even with no follow heads", async () => {
+  const r = relay();
+  const unrelated = finalizeEvent(
+    {
+      kind: 30078,
+      created_at: 900,
+      tags: [["d", "read-state:x"]],
+      content: "",
+    },
+    secret,
+  ) as RelayEvent;
+  r.others.push(unrelated);
+  const sized: string[] = [];
+  const own = ownReads({ observeSize: (event) => sized.push(event.id) });
+  const sync = setup(r, { now: 1000 }, { capacity: own.capacity });
+  await sync.refresh();
+  expect(sized).toContain(unrelated.id);
+});
+
+it("a reconnect's complete snapshot imports legacy choices", async () => {
+  const r = relay();
+  const disk = memoryStorage();
+  const legacy = memoryThreadFollows();
+  legacy.write(new Map([[K, true]]));
+  const own = ownReads();
+  const sync = setup(
+    r,
+    { now: 1000 },
+    {
+      storage: disk.storage,
+      legacy,
+      reader: offlineReader(),
+      capacity: own.capacity,
+    },
+  );
+  await sync.refresh();
+  expect(disk.backup().follows?.imported).toBeUndefined();
+  own.repair([]);
+  await vi.waitFor(() =>
+    expect(disk.backup().follows?.state.edits[K]).toMatchObject({
+      origin: "legacy-import",
+    }),
+  );
+  expect(disk.backup().follows?.imported).toBe(true);
+  sync.dispose();
+});
+
+it("a reconnect's complete snapshot retries a retained packet with no dirty slot", async () => {
+  const r = relay();
+  const disk = memoryStorage();
+  const own = ownReads();
+  let fail = true;
+  const follows = setup(
+    r,
+    { now: 1000 },
+    {
+      storage: disk.storage,
+      capacity: own.capacity,
+      publish: async (event) => {
+        if (fail) throw new Error("Relay delivery could not be confirmed");
+        r.put(event);
+      },
+    },
+  );
+  await follows.refresh();
+  await follows.set(K, true);
+  await follows.flush();
+  expect(Object.keys(disk.backup().follows?.state.packets ?? {})).toHaveLength(
+    1,
+  );
+  fail = false;
+  own.repair([]);
+  await vi.waitFor(() => expect(r.heads.size).toBe(1));
+  follows.dispose();
+});
+
+it("hydrated choices show before a slow startup snapshot, with taps still closed", async () => {
+  const r = relay();
+  const disk = memoryStorage();
+  const online = setup(r, { now: 1000 }, { storage: disk.storage });
+  await online.refresh();
+  await online.set(K, true);
+  online.dispose();
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const slow = setup(
+    r,
+    { now: 1000 },
+    { storage: disk.storage, beforeRead: () => held },
+  );
+  expect(slow.read().get(K)).toBeUndefined();
+  const notified = vi.fn();
+  const stop = slow.subscribe(notified);
+  const refreshing = slow.refresh();
+  await vi.waitFor(() => expect(slow.read().get(K)).toBe(true));
+  expect(notified).toHaveBeenCalled();
+  await expect(slow.set(K, false)).rejects.toThrow("not ready");
+  release();
+  await refreshing;
+  stop();
+  slow.dispose();
+});
+
+it("a follow commit reloads the other window's owner, without an echo", async () => {
+  const r = relay();
+  const disk = memoryStorage();
+  const broadcastName = `follows:${crypto.randomUUID()}`;
+  const options = { storage: disk.storage, snapshot: false, broadcastName };
+  const a = setup(r, { now: 1000 }, options);
+  const b = setup(r, { now: 1000 }, options);
+  await a.refresh();
+  await b.refresh();
+  expect(b.read().get(K)).toBeUndefined();
+  const heard = vi.fn();
+  const spy = new BroadcastChannel(broadcastName);
+  spy.onmessage = heard;
+  await a.set(K, false);
+  await vi.waitFor(() => expect(b.read().get(K)).toBe(false));
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  expect(heard).toHaveBeenCalledOnce();
+  spy.close();
+  a.dispose();
+  b.dispose();
 });

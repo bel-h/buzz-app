@@ -329,6 +329,10 @@ function channelOwnership(find: (id: string) => RelayEvent | undefined) {
   }
   return owners;
 }
+/** Shown when another device's follow choices can't be read here. */
+const FOLLOWS_INCOMPLETE =
+  "Some follow choices from your other devices can't be read here, so their replies may not count as unread";
+
 /** Bounded verified evidence and one projection; no sidebar counters, sockets or implicit reads. */
 export function createUnread({
   reads,
@@ -800,15 +804,30 @@ export function createUnread({
   function sync(): ReadSyncSnapshot {
     const current = reads.snapshot();
     const health = follows.syncHealth?.();
+    const failed = health?.status === "failed";
+    // Missing peer choices are a warning, not a failed read sync.
+    const incomplete =
+      health?.complete === false &&
+      (health.status === "synchronized" || health.status === "pending");
     const error =
-      health?.status === "failed" && current.status !== "error"
-        ? health.error
-        : undefined;
+      current.status === "error"
+        ? undefined
+        : failed
+          ? health.error
+          : incomplete
+            ? FOLLOWS_INCOMPLETE
+            : undefined;
     if (shown?.reads !== current || shown.error !== error)
       shown = {
         reads: current,
         ...(error ? { error } : {}),
-        out: error ? { ...current, status: "error", error } : current,
+        out: error
+          ? {
+              ...current,
+              ...(failed ? { status: "error" as const } : {}),
+              error,
+            }
+          : current,
       };
     return shown.out;
   }

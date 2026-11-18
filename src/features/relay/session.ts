@@ -1341,6 +1341,9 @@ export function createRelaySession(
     legacy: options.threadFollows ?? browserThreadFollows(readScope),
     notify,
     capacity: reads,
+    broadcastName: transport?.readState
+      ? `buzz-read-state:${readScope}`
+      : undefined,
   });
   void reads.ready.then(() => threadFollows.refresh());
   const unread = createUnread({

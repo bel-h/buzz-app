@@ -609,3 +609,14 @@ it("startup gate: a refused Inbox follow changes nothing while mark unread still
   });
   await unread.markUnreadLocal({ kind: "channel", channelId: "c1" });
 });
+
+it("warns when a peer's follow choices can't be read, without failing read sync", async () => {
+  const saved = memoryThreadFollows();
+  const follows: ThreadFollowStorage = {
+    ...saved,
+    syncHealth: () => ({ status: "synchronized", complete: false }),
+  };
+  const { unread } = await setup(follows);
+  expect(unread.sync().status).not.toBe("error");
+  expect(unread.sync().error).toMatch("can't be read here");
+});

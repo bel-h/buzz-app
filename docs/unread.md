@@ -86,26 +86,16 @@ pixel past the edge. At the physical bottom, 300 ms visibility of the newest
 message's bottom edge also earns catch-up (including a message taller than the
 viewport):
 
-- `activity:<channel>` uses the newest retained verified event timestamp at dwell
-  completion, including replies newer than the visible top-level head. It reads
-  ordinary top-level backlog only. It never acknowledges replies: replies that
-  count (see [Relevant replies](#relevant-replies)) are all attention, and stay
-  unread until read in their thread. Replies outside the viewer's conversations
-  do not count at all, so there is no reply activity to quiet. Mentions,
-  broadcasts and marked messages are not quieted by this mark: a timestamp
-  would also read attention delivered later with an older one (a retried send,
-  a fast clock). Participation discovered later makes a reply relevant again,
-  with its own unread state intact.
-- The same channel catch-up also writes `msg:` marks for the top-level mentions
-  and broadcast replies retained at dwell completion through the bottom row, as
-  in Slack and Discord, so a mention taller than the viewport is still read. One
-  that arrives while the catch-up is saving waits for its own dwell. Messages
-  marked unread keep their intent. These catch-up marks stay on this device;
-  only an explicit per-message Mark read publishes its `msg:` frontier, and
-  sync still reads `msg:` marks from older clients.
-- `thread-activity:<root>` acknowledges replies through the newest reply only in
-  that thread. A collapsed newest reply, or one outside the bottom viewport in a
+- Channel catch-up moves the channel's main read mark (`<channel>`) to the
+  newest top-level post reached, never to a reply (a broadcast reply included).
+  Everything at or below it is read on every device, replies included. Reaching
+  the live bottom also ends a manual unread on the channel, synced or local;
+  marked messages stay unread.
+- Thread catch-up moves the thread's mark (`thread:<root>`) to its newest reply.
+  A collapsed newest reply, or one outside the bottom viewport in a
   branch-ordered thread, cannot earn catch-up; visible rows still read individually.
+- Catch-up no longer writes `activity:<channel>` or `thread-activity:<root>`.
+  Those marks from older clients are still read, as compatibility only.
 - `seen:<channel>` quiets the channel's sidebar row, and reads nothing.
   Opening a channel (`enterChannel`) while the document is visible and focused
   hides everything in the row, including arrivals during that active visit.
