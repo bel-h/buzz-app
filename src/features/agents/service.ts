@@ -2431,6 +2431,7 @@ export class AgentsService extends Service implements Agents {
         this.attend(this.state.running);
         this.notify();
       },
+      transitionChanged: () => this.notify(),
       ready: (key) => this.ready(key),
       agent: (key) => this.agent(key),
       member: (agent, event) => this.member(agent, event),
@@ -3591,7 +3592,10 @@ export class AgentsService extends Service implements Agents {
       sources.reconcile(
         this.attentionProvider(source),
         source,
-        this.state.running.filter((agent) => this.runners.runs(agent.key)),
+        this.state.running.filter(
+          ({ key }) =>
+            this.runners.runs(key) && !this.runners.transitioning(key),
+        ),
       );
     const unsubscribe = this.subscribe(update);
     update();
