@@ -826,10 +826,11 @@ Each slot has its own error boundary and Retry. A source failure replaces its
 slots with one unavailable-and-Retry placeholder; a source returning no
 publication settles empty. Registrations and publications are fenced by owner
 incarnation, so disabling or replacing a source retires its old content.
-The bundled Messages context mounts the Channels inventory as its one preferences,
-view, action and status owner. Its failures retain the whole-sidebar fallback;
-a thin Team source failure affects Team and its version-1 slots while Solo stays
-mounted. Both built-in sources require the required Channels plugin to activate.
+The Messages context mounts one inventory for workspace preferences, rows and
+actions. The built-in source publishes the workspace and home sections. Solo
+region sources publish their own region content. A primary region can compose
+ordinary chats in its task view. Starred and mixed workspaces keep their unified
+placement. Both bundled sources activate with the required Channels plugin.
 
 The viewport waits for every current section key to commit before consuming a
 saved scroll position. Container refs and portal publication settle during layout,
@@ -838,20 +839,18 @@ drag hit testing: a DOM emulator cannot establish their geometry.
 
 ### Solo-only sidebar
 
-`sidebarScope.restrict({ id, scope: "solo", banner })` shows only the Solo
-inventory while it is registered. The All/Solo/Team tabs and page destinations
-give way to the plugin's `banner` component, and the person's saved tab returns
-when the last restriction is removed. It returns a remover; disable, replacement
-and teardown remove it too, so a restriction can never outlive its plugin. A
-banner that throws renders nothing and leaves the sidebar usable. It changes
-only the sidebar: links, search and alert clicks still open any conversation.
-Focus is the first caller and registers its restriction only while Focus is on.
+`sidebarScope.restrict({ id, scope: "solo", banner })` filters the sidebar to
+Solo-labelled chats across sections. Empty sections, Team contributions and
+pinned page destinations are hidden. The banner is isolated from the sidebar by
+an error boundary. Links, search and alert clicks can still open conversations.
+The call returns a remover. Disable, replacement and teardown remove the
+restriction. Focus registers it while active.
 
 ### Decorating host sidebar rows and adding sort modes
 
 `ctx.reflect.get("sidebarRows")` is an optional version-1 capability for host
 Team channel, direct-message and ordinary Solo rows, including rows moved into
-custom Team groups or Solo workspaces. Plugin-owned Solo regions render their
+personal workspaces. Plugin-owned Solo regions render their
 own rows and are not decorated here. Use the reflective lookup rather than
 required `inject` so the plugin still activates on older hosts.
 
@@ -1619,11 +1618,11 @@ are also deferred; opt in when the contribution's static title is sufficient unt
 selection.
 
 A plugin panel, which cannot import host modules, names its tab with
-`ctx.panels.useTabTitle(label)`, a React hook called in the panel component (for
+`ctx.panels.useTabTitle(label, icon?)`, a React hook called in the panel component (for
 example `ctx.panels.useTabTitle("#12554892")` for a build opened from a link). The
 label replaces the static `title` while the component is mounted and the static
-`title` returns when it unmounts; outside a panel tab the call does nothing. It
-takes a label only, no icon. Hosts that predate it lack the hook, so plugins that
+`title` returns when it unmounts; outside a panel tab the call does nothing. The
+optional `icon` is a React node. Hosts that predate it lack the hook, so plugins that
 support them test `typeof ctx.panels.useTabTitle === "function"` first.
 
 Channels keeps layout and channel/thread selection. The Terminal plugin binds its
@@ -3247,8 +3246,9 @@ The existing native and browser upload adapters prepare `voice-note-*.wav` files
 as the old Buzz H.264/AAC MP4 envelope. Voice Notes adds no uploader, signer or
 outbox. Files upload on Send, retain the shared progress/recovery behavior, and
 carry bounded duration and waveform metadata through ordinary `imeta` tags.
-Recordings stop at five minutes. Pending files have the same tab-local lifetime
-and limits as other attachment drafts; they do not survive app restart.
+Recordings stop at five minutes. Pending files have the same lifetime and limits
+as other attachment drafts: uploaded files survive app restart with the draft;
+files still uploading do not.
 
 The player loads audio on Play, supports seeking and playback speed, and pauses
 when its conversation is hidden. Existing voice notes are recognized from signed
