@@ -3555,7 +3555,9 @@ export function apply(ctx: Context) {
     id: "example",
     label: "Example",
     description: "Use your Example account.",
-    status: () => "ready", // or "checking", "unconfirmed", "needs-setup"
+    // or "checking", "unconfirmed", "needs-setup"; `community` (a relay URL)
+    // asks about one community, as for a provider that bills it.
+    status: (community?: string) => "ready",
     subscribe: (listener) => () => {}, // call listener when status changes
     async decide(request, { signal }) {
       // request is already checked and has its timeoutMs; signal aborts at it.
@@ -3579,12 +3581,15 @@ and can answer (`ready` or `unconfirmed`) does: Builderlab
 (`block.builderlab/builderlab`), then TypeSafe (`buzz.typesafe/typesafe`).
 When none can, TypeSafe is the provider, and the status is `checking` while
 another default is still finding out whether it can answer. The same holds
-while a chosen default is not on.
+while a chosen default is not on. Each request is routed in its `community`:
+a provider answers there only if its `status(community)` can, and where a
+chosen Builderlab cannot, TypeSafe, the user's own key, answers instead.
 Decision text can include private messages, so no other provider gets it
 without that choice: while a chosen provider that is not a default is not on,
-decisions are `unavailable` and are not sent to another provider. `ctx.decisions.backend()`
-is the answering provider's key (`<plugin id>/<provider id>`), or undefined
-when none is on, and `ctx.decisions.status()` its status. `Decisions` exposes
+decisions are `unavailable` and are not sent to another provider. `ctx.decisions.backend(community?)`
+is the key (`<plugin id>/<provider id>`) of the provider that answers in that
+community, or undefined when none is on, and `ctx.decisions.status(community?)`
+its status. Without a community, a choice is its own answer. `Decisions` exposes
 no way to choose the provider. `state` and every question go to the provider,
 so send only what the decision needs.
 
@@ -3597,7 +3602,7 @@ scope. It does not register a provider or let a plugin select another provider.
 | Provider | Plugin | Credentials |
 |----------|--------|-------------|
 | `buzz.typesafe/typesafe` | TypeSafe (bundled, on by default) | The user's TypeSafe key, kept and read only by native code (`src-tauri/src/decisions.rs`) |
-| `block.builderlab/builderlab` | Builderlab (bundled, in desktop builds with a Builderlab); registered while the user is signed in, and `needs-setup` unless Builderlab allows the account decisions | The user's Builderlab sign-in, which native code sends with each call. Builderlab answers with Jev and bills the request's `community`; its server allows up to 32 questions per call |
+| `block.builderlab/builderlab` | Builderlab (bundled, in desktop builds with a Builderlab); registered while the user is signed in to any community's sign-in server, and in a community `needs-setup` unless that community's sign-in server covers it and allows the account decisions | The Builderlab sign-in of the request's community, which native code sends with each call. Builderlab answers with Jev and bills that `community`; its server allows up to 32 questions per call |
 
 ## In-app keyboard shortcuts
 

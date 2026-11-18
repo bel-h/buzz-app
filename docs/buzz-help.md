@@ -1789,8 +1789,11 @@ tab, asks **Discard changes?** first; **Keep editing** keeps them.
   uses that provider for requests. Choosing TypeSafe without a key opens
   **Connect TypeSafe**, with a link to create a key in the TypeSafe console.
   Saving the key completes the switch; closing setup keeps the current provider.
-  If a selected Builderlab account lacks Decisions API access, the pane explains
-  that you can use your own TypeSafe key or contact your account administrator.
+  Builderlab answers in each community whose Builderlab sign-in offers your
+  account decisions; elsewhere your TypeSafe key answers. With Builderlab
+  selected, **Communities** lists which provider answers in each community. If
+  none of your communities offer Builderlab decisions to your account, the pane
+  says so and suggests contacting your account administrator.
 - In **Settings → Decisions API**, TypeSafe’s saved API key stays masked. Its
   chevron menu offers **Replace / Remove**. Replacement starts blank and masked,
   with inline **Cancel / Save** controls. **Save** stays disabled until you enter
