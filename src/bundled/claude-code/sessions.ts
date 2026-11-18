@@ -495,12 +495,18 @@ export class AgentSessions {
   }
   /** Compacts the conversation's session, resuming it when its process has
    * stopped. Without a session there is nothing to compact. `attribute`
-   * sets the compaction's own attribution, as a new turn's. */
-  async compact(key: string, attribute?: Attribute): Promise<Settled> {
+   * sets the compaction's own attribution, as a new turn's. Once `signal`
+   * aborts before `/compact` is sent, it sends nothing and settles
+   * undelivered; an idle process has no turn for Interrupt to stop. */
+  async compact(
+    key: string,
+    attribute?: Attribute,
+    signal?: AbortSignal,
+  ): Promise<Settled> {
     // Its process is not stopped to make room before `/compact` is sent.
     const arrived = this.incoming(key);
     try {
-      return await this.compacted(key, attribute);
+      return await this.compacted(key, attribute, signal);
     } finally {
       arrived();
     }
@@ -508,8 +514,10 @@ export class AgentSessions {
   private async compacted(
     key: string,
     attribute?: Attribute,
+    signal?: AbortSignal,
   ): Promise<Settled> {
     if (this.disposed) return { ok: false, error: "Claude was stopped" };
+    if (signal?.aborted) return { ok: true, undelivered: true };
     let live = this.live.get(key);
     const saved = this.options.store.get(key);
     if (!live && !saved) return { ok: true };
@@ -520,11 +528,14 @@ export class AgentSessions {
     }
     if (attribute && !live.process.busy)
       await this.attribute(key, live, attribute);
+    // Interrupt may have come while attribution read or wrote settings.
+    if (signal?.aborted) return { ok: true, undelivered: true };
     if (this.options.strictResume) {
       live.submitted = true;
       await this.touch(key, live);
       if (this.disposed || this.live.get(key) !== live || !live.process.running)
         return { ok: false, error: "Claude was stopped", undelivered: true };
+      if (signal?.aborted) return { ok: true, undelivered: true };
     }
     // Claude takes the command in stream-json input as it does in a terminal.
     const settled = await this.answer(key, live, "/compact", {});

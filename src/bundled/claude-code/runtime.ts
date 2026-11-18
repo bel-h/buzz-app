@@ -845,11 +845,15 @@ export class ClaudeRuntime {
     const kept = new Set(
       held.slice(0, Math.max(at, 0)).map((t) => t.sessionId),
     );
-    return this.prompts(conversation.agent)
-      .shown(turns)
-      .map((turn, index) =>
-        kept.has(turn.sessionId) ? (turns[index] ?? turn) : turn,
-      );
+    // Decorated as a full read is, since these replace the turns it showed.
+    return withNotices(
+      this.prompts(conversation.agent)
+        .shown(turns)
+        .map((turn, index) =>
+          kept.has(turn.sessionId) ? (turns[index] ?? turn) : turn,
+        ),
+      this.notices.get(conversation.agent) ?? new Map(),
+    );
   }
   /** What each of the agent's sessions started with. */
   private prompts(agent: AgentKey) {
@@ -1032,7 +1036,9 @@ export class ClaudeRuntime {
             "resume",
             warned,
           ),
+          signal,
         );
+        signal.throwIfAborted();
         if (!result.ok) throw new Error(result.error);
       }
       signal.throwIfAborted();

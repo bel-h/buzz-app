@@ -242,8 +242,8 @@ import type { AgentPlugins } from "../../plugins/requests";
 import type { DeviceSettings } from "../../shared/device-settings";
 import type { TurnContext } from "./gateway/contract";
 import {
+  type BlockedReason,
   type EligibleRoute,
-  type FallbackReason,
   gatewayRoutes,
 } from "./gateway/route";
 
@@ -849,14 +849,16 @@ export type Delivery<Config = unknown> = Readonly<{
     upstream: Readonly<{ base: string }>;
   }>;
   /** A blocked route sent this turn to the type's own configuration, decided
-   * before dispatch, after waiting up to `TURN_READINESS_WAIT_MS` for an
-   * access check in flight; never with `gateway`. Every blocked reason
-   * falls back this way except a 401 or 403 (`auth`) and a route still
-   * pending after the wait, which fail the turn before dispatch instead. The
-   * host owns the decision and `notice`; a type shows `notice` in this turn's
-   * visible activity where the host can't (any turn but a mention, whose
-   * request it already notes). */
-  gatewayFallback?: Readonly<{ reason: FallbackReason; notice: string }>;
+   * before dispatch; never with `gateway`. For a `forwarding` type, after
+   * waiting up to `TURN_READINESS_WAIT_MS` for an access check in flight,
+   * every blocked reason falls back this way except a 401 or 403 (`auth`)
+   * and a route still pending after the wait, which fail the turn before
+   * dispatch instead. For an `attribution` type, nothing waits and every
+   * blocked reason, those two included, leaves the turn unattributed this
+   * way. The host owns the decision and `notice`; a type shows `notice` in
+   * this turn's visible activity where the host can't (any turn but a
+   * mention, whose request it already notes). */
+  gatewayFallback?: Readonly<{ reason: BlockedReason; notice: string }>;
   /** Whether the trigger should still run, asked again now. False once the
    * agent is removed or its type replaced; for a watch or timer, also once
    * attention was turned off or its object disabled or removed; and for a
@@ -1147,8 +1149,16 @@ export type AgentType<Config = unknown> = {
    * `Delivery.gateway`, under this stable harness name (e.g. "pi"). It does
    * only when this build configures an upstream for the harness and the
    * membership's gateway enables it; otherwise, and for types without it,
-   * turns keep their existing behavior. */
-  gateway?: Readonly<{ harness: string }>;
+   * turns keep their existing behavior. `mode` is `forwarding` by default:
+   * the turn's inference depends on the route, so a gateway refusal or an
+   * access check still pending after a short wait fails the turn before
+   * dispatch. An `attribution` type only adds the gateway's headers where
+   * its own checks allow, so its turns never wait on or fail for the route;
+   * they run unattributed instead (see `gatewayFallback`). */
+  gateway?: Readonly<{
+    harness: string;
+    mode?: "forwarding" | "attribution";
+  }>;
   /** Makes the type hosted: its provider runs each agent, so it has no `run`,
    * `models` or `timeoutMs`, and its agents have no attention. */
   remote?: RemoteAgentType;

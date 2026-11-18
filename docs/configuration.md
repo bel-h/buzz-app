@@ -179,7 +179,13 @@ harness's own turn activity for other turns, which receive it as
 `delivery.gatewayFallback`. The note stays under the request even when a
 later message supersedes it. That choice is made before dispatch; a turn whose
 gateway access is revoked after dispatch fails visibly and is never
-replayed. Memberships in other communities and hosted agents are unchanged.
+replayed. A type that declares its harness with `mode: "attribution"`, as
+Claude Code does, only adds the gateway's headers where its own checks allow,
+so none of this holds or fails its turns: it takes the route as it stands
+without waiting, and any blocked route, a pending check or a 401/403
+included, runs the turn unattributed with the note "Ran without gateway
+attribution" and the reason. Memberships in other communities and hosted
+agents are unchanged.
 See `src/features/agents/gateway/` for the shared route, session and request
 context contract that harnesses consume.
 

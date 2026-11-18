@@ -224,8 +224,10 @@ export const apply: PluginModule["apply"] = (ctx) => {
   });
   agents.register<Config>({
     id: TYPE_ID,
-    // Declares its harness to the gateway, which attributes its turns.
-    gateway: { harness: HARNESS },
+    // Declares its harness to the gateway, which attributes its turns. Only
+    // attributes: Claude keeps its own endpoint, so the route never holds
+    // or fails a turn.
+    gateway: { harness: HARNESS, mode: "attribution" },
     execution: true,
     conversationFolders: true,
     hooks: { events: CLAUDE_HOOK_EVENTS },

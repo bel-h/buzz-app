@@ -113,6 +113,7 @@ import {
   fallbackNotice,
   gatewayRoutes,
   TURN_READINESS_WAIT_MS,
+  unattributedNotice,
 } from "./gateway/route";
 import { turnContextFor } from "./gateway/turn";
 
@@ -2869,7 +2870,9 @@ export class AgentRunners {
    * Buzz context, as `gatewayFallback`, and notes that on a mention's
    * request. The choice is made here, before dispatch, so nothing is ever
    * replayed. A turn whose access is revoked after dispatch is the harness's
-   * to fail visibly. */
+   * to fail visibly. An `attribution` type's turn never waits or fails here:
+   * it takes the route as it stands, and any blocked route, `auth` and
+   * `readiness_pending` included, runs it unattributed with a notice. */
   private async gatewayRouting(
     agent: Agent,
     type: RegisteredAgentType,
@@ -2880,13 +2883,28 @@ export class AgentRunners {
     const harness = type.gateway?.harness;
     const upstream = harness && gatewayRoutes.upstream(harness);
     if (!upstream) return {};
+    const attribution = type.gateway?.mode === "attribution";
+    // Attribution never holds a turn for an access check: it takes the
+    // route as it stands, while any check carries on for later turns.
     const route = await gatewayRoutes.routeForTurn(
       agent.key,
-      AbortSignal.any([signal, AbortSignal.timeout(TURN_READINESS_WAIT_MS)]),
+      attribution
+        ? undefined
+        : AbortSignal.any([
+            signal,
+            AbortSignal.timeout(TURN_READINESS_WAIT_MS),
+          ]),
     );
     signal.throwIfAborted();
     if (route.kind === "external") return {};
     if (route.kind === "blocked") {
+      if (attribution) {
+        const notice = unattributedNotice(route.reason);
+        job.work?.notice(notice);
+        return {
+          gatewayFallback: Object.freeze({ reason: route.reason, notice }),
+        };
+      }
       if (route.reason === "auth" || route.reason === "readiness_pending")
         throw new Error(route.message);
       const notice = fallbackNotice(route.reason);

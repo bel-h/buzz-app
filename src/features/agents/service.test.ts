@@ -20890,7 +20890,7 @@ describe("agent gateway gate", () => {
 
   /** An agent of `gateway`-capable (or not) type, mentioned once. */
   async function mentioned(
-    capable: boolean,
+    capable: boolean | "attribution",
     asked = mention,
     channelId = channel,
     prepare?: (f: Awaited<ReturnType<typeof setup>>) => void,
@@ -20908,7 +20908,11 @@ describe("agent gateway gate", () => {
       defaults: () => ({ config: {} }),
       run,
       models,
-      ...(capable ? { gateway: { harness: "relay" } } : {}),
+      ...(capable === "attribution"
+        ? { gateway: { harness: "relay", mode: "attribution" as const } }
+        : capable
+          ? { gateway: { harness: "relay" } }
+          : {}),
     });
     await f.service.create({ type: "example/relay", name: "Relay" });
     f.emit({ events: [asked], channelId });
@@ -21109,6 +21113,100 @@ describe("agent gateway gate", () => {
       expect(f.models).not.toHaveBeenCalled();
       gatewayRoutes.removeMembership(bot as never);
     }
+  });
+
+  it("runs an attribution-only type's turn unattributed on a 401 or 403, with a notice, instead of failing it", async () => {
+    for (const status of [401, 403]) {
+      const { answer } = liveRoutes();
+      answer(status);
+      const f = await mentioned(
+        "attribution",
+        event(`attr-auth-${status}`, {
+          pubkey: viewer,
+          tags: [
+            ["h", channel],
+            ["p", bot],
+          ],
+        }),
+      );
+      await vi.waitFor(() => expect(f.run).toHaveBeenCalledTimes(1));
+      const delivery = f.run.mock.calls[0]?.[0];
+      expect(delivery).not.toHaveProperty("gateway");
+      const notice =
+        "Ran without gateway attribution: the agent gateway didn't accept your sign-in or denied this agent.";
+      expect(delivery?.gatewayFallback).toEqual({ reason: "auth", notice });
+      expect(f.activity.reader.work()[0]).toMatchObject({ notice });
+      expect(f.activity.reader.work()[0]).not.toHaveProperty("error");
+      gatewayRoutes.removeMembership(bot as never);
+    }
+  });
+
+  it("runs an attribution-only type's turn at once while its access check is pending, unattributed, and routes the next once it settles", async () => {
+    const timeout = vi.spyOn(AbortSignal, "timeout");
+    try {
+      const { routes, request, answer } = liveRoutes();
+      expect(request).toHaveBeenCalledTimes(1);
+      const f = await mentioned("attribution");
+      await vi.waitFor(() => expect(f.run).toHaveBeenCalledTimes(1));
+      expect(ready).toHaveBeenCalledWith(bot, undefined);
+      expect(timeout).not.toHaveBeenCalledWith(TURN_READINESS_WAIT_MS);
+      const first = f.run.mock.calls[0]?.[0];
+      expect(first).not.toHaveProperty("gateway");
+      expect(first?.gatewayFallback).toEqual({
+        reason: "readiness_pending",
+        notice:
+          "Ran without gateway attribution: Buzz was still checking this agent's gateway access.",
+      });
+      answer(200, '{"harnesses":["relay"]}');
+      await vi.waitFor(() =>
+        expect(routes.routeFor(bot as never)).toMatchObject({
+          kind: "eligible",
+        }),
+      );
+      f.emit({
+        events: [
+          event("b2", {
+            pubkey: viewer,
+            tags: [
+              ["h", channel],
+              ["p", bot],
+            ],
+          }),
+        ],
+        channelId: channel,
+      });
+      await vi.waitFor(() => expect(f.run).toHaveBeenCalledTimes(2));
+      const next = f.run.mock.calls[1]?.[0];
+      expect(next?.gateway?.route).toMatchObject({
+        kind: "eligible",
+        harnesses: ["relay"],
+      });
+      expect(next).not.toHaveProperty("gatewayFallback");
+    } finally {
+      timeout.mockRestore();
+    }
+  });
+
+  it("falls back an attribution-only type's turn on any other blocked route with attribution wording", async () => {
+    ready.mockResolvedValue(blockedRoute);
+    const f = await mentioned("attribution");
+    await vi.waitFor(() => expect(f.run).toHaveBeenCalledTimes(1));
+    expect(ready).toHaveBeenCalledWith(bot, undefined);
+    expect(f.run.mock.calls[0]?.[0]?.gatewayFallback).toEqual({
+      reason: "network",
+      notice:
+        "Ran without gateway attribution: Buzz couldn't reach the gateway.",
+    });
+  });
+
+  it("hands an eligible route to an attribution-only type, as to a forwarding one", async () => {
+    ready.mockResolvedValue(eligible);
+    const f = await mentioned("attribution");
+    await vi.waitFor(() => expect(f.run).toHaveBeenCalledTimes(1));
+    const delivery = f.run.mock.calls[0]?.[0];
+    expect(delivery?.gateway?.route).toBe(eligible);
+    expect(delivery?.gateway?.upstream).toBe(RELAY_UPSTREAM);
+    expect(delivery).not.toHaveProperty("gatewayFallback");
   });
 
   it("fails the next turn when a 403 from inference re-probes as 403, instead of falling back while pending", async () => {

@@ -1000,6 +1000,7 @@ it("shows a session's prompt once over the latest turns it swaps in", async () =
         spawn,
         reads: () => undefined,
         prompts: () => prompts,
+        notices: new Map(),
         place: (_agent: string, _key: string, workspace: string) => workspace,
       } as never,
       conversation,

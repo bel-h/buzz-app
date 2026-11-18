@@ -1637,7 +1637,11 @@ available rather than silently discarding it.
   policy's or another tool's Claude settings, which Buzz leaves alone. It
   also happens when custom headers are set only in the environment Buzz was
   started from; Buzz leaves those as they are, and Claude itself doesn't go
-  back to them once a settings file's headers are removed. Protected Claude
+  back to them once a settings file's headers are removed. The gateway's own
+  access check never holds or fails a Claude turn: while it is still running,
+  such as just after Buzz starts, or when the gateway refuses the sign-in or
+  can't be reached, the turn runs unattributed and notes "Ran without gateway
+  attribution" with the reason. Protected Claude
   agents are not attributed yet: their pinned launch ignores Claude's
   settings files, including a gateway app's. Claude agents running on a
   remote execution target are not attributed either; Buzz leaves their

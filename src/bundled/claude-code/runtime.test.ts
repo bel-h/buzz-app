@@ -9,8 +9,10 @@ import { createAgentMemories } from "../../features/agents/memory";
 import {
   promptMessage,
   promptSections,
+  type TranscriptTurn,
 } from "../../features/agents/activity-transcript";
-import { pubkeyOf } from "../../features/agents/membership";
+import { type AgentKey, pubkeyOf } from "../../features/agents/membership";
+import { withLatest } from "../../features/agents/TranscriptPanel";
 import { ownerReads } from "../../features/agents/reads";
 import { localStore } from "../../features/agents/state";
 import {
@@ -65,8 +67,28 @@ vi.mock("@tauri-apps/api/core", async (actual) => ({
   invoke: native.invoke,
 }));
 
+/** Transcript reads a test answers itself; others read as they do. */
+const transcriptReads = vi.hoisted(() => ({
+  full: undefined as undefined | (() => Promise<unknown>),
+  latest: undefined as undefined | (() => Promise<unknown>),
+}));
+vi.mock("./transcript", async (actual) => {
+  const real = await actual<typeof import("./transcript")>();
+  return {
+    ...real,
+    readTranscript: ((...args: Parameters<typeof real.readTranscript>) =>
+      transcriptReads.full?.() ??
+      real.readTranscript(...args)) as typeof real.readTranscript,
+    readLatestTurns: ((...args: Parameters<typeof real.readLatestTurns>) =>
+      transcriptReads.latest?.() ??
+      real.readLatestTurns(...args)) as typeof real.readLatestTurns,
+  };
+});
+
 afterEach(() => {
   vi.restoreAllMocks();
+  transcriptReads.full = undefined;
+  transcriptReads.latest = undefined;
 });
 
 const self = "c".repeat(64);
@@ -4173,6 +4195,58 @@ it("attributes a compaction under the control's own context, and never refuses o
   f.runtime.dispose();
 });
 
+it("sends no /compact when Interrupt comes while a compaction's attribution reads settings", async () => {
+  const f = setup([], { env: onGateway, gatewayRoute: () => eligible });
+  const root = message("2", "@Claude hi", {
+    tags: [
+      ["h", channel],
+      ["p", self],
+    ],
+  });
+  const place = { channelId: channel, root: root.id };
+  const agent = { ...f.agent, config: DEFAULT_CONFIG } as unknown as Agent;
+  await f.deliver({ type: "mention", event: root }, dispatched(root.id));
+  await settled(f);
+  const idle = () =>
+    vi.waitFor(() => expect(f.runtime.sessionState(agent, place)).toBe("idle"));
+  await idle();
+  const [claude] = f.claudes();
+  if (!claude) throw new Error("No Claude");
+  const prompts = claude.prompts.length;
+  const reads = () =>
+    claude.received.filter(
+      (sent) =>
+        (sent.request as { subtype?: string } | undefined)?.subtype ===
+        "get_settings",
+    ).length;
+  const before = reads();
+  claude.withhold = "get_settings";
+  const compacting = f.runtime.session(agent, place, "compact").then(
+    () => undefined,
+    (error: unknown) => error,
+  );
+  await vi.waitFor(() => expect(reads()).toBeGreaterThan(before));
+  await f.runtime.session(agent, place, "interrupt");
+  claude.withhold = undefined;
+  claude.answerLate();
+  expect(await compacting).toMatchObject({
+    message: "Session action interrupted",
+  });
+  await flush();
+  expect(claude.prompts).toHaveLength(prompts);
+  expect(
+    claude.received.some(
+      (sent) =>
+        sent.type === "user" && JSON.stringify(sent).includes("/compact"),
+    ),
+  ).toBe(false);
+  // The session is free again: the next compaction runs.
+  await idle();
+  await f.runtime.session(agent, place, "compact");
+  expect(claude.prompts.at(-1)).toBe("/compact");
+  f.runtime.dispose();
+});
+
 it("attributes a standalone wake on a fresh Buzz session it never saves", async () => {
   const f = setup([], { env: onGateway });
   const config = DEFAULT_CONFIG;
@@ -4590,4 +4664,69 @@ describe("a conversation given its own folder", () => {
       false,
     );
   });
+});
+
+it("keeps a turn's notice under its prompt when a live refresh replaces the turns a full read showed", async () => {
+  const f = setup([]);
+  const agent = f.agent.key as AgentKey;
+  const conversation = { agent, channelId: channel, root: "r" } as never;
+  const turn = (reply: string): TranscriptTurn =>
+    ({
+      turnId: "t1",
+      channelId: channel,
+      threadRootId: "r",
+      triggeringEventIds: [],
+      sessionId: "s1",
+      newSession: true,
+      config: [],
+      startedAt: 1,
+      partial: false,
+      items: [
+        { id: "u1", at: 1, type: "prompt", text: "hi" },
+        { id: "a1", at: 2, type: "text", text: reply },
+      ],
+    }) as unknown as TranscriptTurn;
+  const notice = "Ran without gateway attribution: a reason.";
+  (
+    f.runtime as unknown as {
+      noted(agent: AgentKey, uuid: string, notice: string): void;
+    }
+  ).noted(agent, "u1", notice);
+  const notices = (turns: readonly TranscriptTurn[] | undefined) =>
+    (turns ?? []).flatMap((t) =>
+      t.items.filter((item) => item.type === "status" && item.text === notice),
+    );
+  transcriptReads.full = async () => ({ turns: [turn("working")] });
+  const full = await f.runtime.transcript(
+    conversation,
+    "~/.buzz",
+    true,
+    new AbortController().signal,
+  );
+  expect(notices(full?.turns)).toHaveLength(1);
+  transcriptReads.latest = async () => [turn("done")];
+  const latest = await f.runtime.latestTurns(
+    conversation,
+    "~/.buzz",
+    true,
+    new AbortController().signal,
+    full?.turns ?? [],
+  );
+  const merged = full && latest && withLatest(full, latest);
+  expect(notices(merged?.turns)).toHaveLength(1);
+  const items = merged?.turns[0]?.items ?? [];
+  expect(items.map((item) => item.id)).toEqual(["u1", "u1:notice", "a1"]);
+  // A prompt that first arrives in a live update shows its notice too.
+  expect(
+    notices(
+      await f.runtime.latestTurns(
+        conversation,
+        "~/.buzz",
+        true,
+        new AbortController().signal,
+        [],
+      ),
+    ),
+  ).toHaveLength(1);
+  f.runtime.dispose();
 });
