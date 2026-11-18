@@ -248,7 +248,7 @@ export function memberAdministrationTemplate(
   channelId: string,
   viewer: string,
   change: MemberChange,
-  soloRoleUpdate: boolean,
+  soloRoleUpdate = false,
 ): EventTemplate {
   const h = ["h", lifecycleChannelId(channelId)];
   return {
