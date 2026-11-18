@@ -220,15 +220,15 @@ html[data-keyboard-navigation] .document pre code:focus-visible {
   vertical-align: middle;
   accent-color: var(--affordance-prominent);
 }
-.document a:not([data-solo-link]),
-.inline a:not([data-solo-link]) {
+.document a,
+.inline a {
   color: var(--text-link);
   text-decoration: underline;
   text-decoration-thickness: 1px;
   text-underline-offset: 2px;
 }
-.document a:not([data-solo-link], [aria-disabled="true"]):hover,
-.inline a:not([data-solo-link], [aria-disabled="true"]):hover {
+.document a:not([aria-disabled="true"]):hover,
+.inline a:not([aria-disabled="true"]):hover {
   text-decoration-thickness: 2px;
 }
 .imageAlt {
