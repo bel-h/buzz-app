@@ -593,6 +593,37 @@ describe("AgentSessions", () => {
     await expect(again).resolves.toMatchObject({ ok: true });
     await expect(other).resolves.toMatchObject({ ok: true });
     expect(fake.geese[0]?.killed).toBe(false);
+    // Once its last session closes, it stops.
+    await sessions.reset("a", "new");
+    await vi.waitFor(() => expect(fake.geese[0]?.killed).toBe(true));
+    expect(fake.geese[1]?.killed).toBe(false);
+  });
+
+  it("stops a replaced goose whose last session closes during an open only once the open settles", async () => {
+    let limit: number | undefined;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const { fake, sessions } = setup({}, false, {
+      compactAt: () => limit,
+      wrap: (spawn) => async (id, options) => {
+        const process = await spawn(id, options);
+        const [, second] = fake.geese;
+        if (second && fake.geese.length === 2) second.promptGate = gate;
+        return process;
+      },
+    });
+    await sessions.deliver("a", "one", 1);
+    limit = 200000;
+    const opening = sessions.deliver("b", "other", 2);
+    await vi.waitFor(() => expect(fake.geese[1]?.opened).toHaveLength(1));
+    await sessions.reset("a", "new");
+    await vi.waitFor(() => expect(fake.geese[0]?.closed).toHaveLength(1));
+    await flush(30);
+    expect(fake.geese[0]?.killed).toBe(false);
+    release();
+    await expect(opening).resolves.toMatchObject({ ok: true });
+    await vi.waitFor(() => expect(fake.geese[0]?.killed).toBe(true));
+    expect(fake.geese[1]?.killed).toBe(false);
   });
 
   it("stops a drained goose before starting one with a changed compaction threshold", async () => {
@@ -608,14 +639,14 @@ describe("AgentSessions", () => {
         const first = fake.geese[0];
         if (first && !first.killed) throw new Error("Too many processes");
         const process = await spawn(id, options);
+        // Like the host's, kill returns once it signals; exit comes later.
         return first
           ? process
           : {
               ...process,
               kill: async () => {
                 stopping = true;
-                await exit;
-                await process.kill();
+                void exit.then(() => process.kill());
               },
             };
       },
