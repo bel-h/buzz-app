@@ -13,7 +13,7 @@ import { composerLinkUrl } from "./composer-link";
 import { mentionDraft, type MentionDraft } from "./mention-draft";
 import { composerMarkdown } from "./composer-markdown";
 import { MAX_MARKDOWN_LENGTH, scanMarkdown } from "../relay/message-content";
-import { DOCUMENT_RENDER_CELLS } from "../markdown/document-profile";
+import { fitsDocumentRenderBudget } from "../markdown/document-profile";
 
 /** Use the existing editor schema; unsupported syntax remains editable source. */
 export function documentEditorDraft(markdown: string) {
@@ -135,16 +135,18 @@ export function documentEditorDraft(markdown: string) {
       );
     return schema.nodes.paragraph.create(null, text(raw(node)));
   };
+  const withinTableBudget =
+    !tree.children.some((node) => node.type === "table") ||
+    fitsDocumentRenderBudget(markdown);
   const blocks = tree.children.map((node) => {
     if (supportedBlock(node)) return block(node);
     const source = raw(node);
-    if (node.type === "table") {
+    if (node.type === "table" && withinTableBudget) {
       const columns = node.children[0]?.children.length ?? 0;
       // GFM pads short rows and hides extra cells. Keep excessive expansion
       // and any cells the grid would hide visible in the source fallback.
       if (
-        columns * node.children.length <=
-          Math.min(DOCUMENT_RENDER_CELLS, source.length) &&
+        columns * node.children.length <= source.length &&
         node.children.every((row) => row.children.length <= columns)
       )
         return schema.nodes.markdown_table.create({ source });

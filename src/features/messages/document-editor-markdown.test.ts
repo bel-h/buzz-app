@@ -69,6 +69,26 @@ it("round-trips an aligned table while preserving renderable and raw blocks", ()
   );
 });
 
+it("falls back to exact table source when their combined cells exceed the reader limit", () => {
+  const table = (rows: number) =>
+    [
+      `| ${"Value | ".repeat(10).trimEnd()}`,
+      `|${" --- |".repeat(10)}`,
+      ...Array.from({ length: rows - 1 }, () => "| row value |"),
+    ].join("\n");
+  for (const [rows, grids] of [
+    [500, 2],
+    [501, 0],
+  ] as const) {
+    const markdown = `${table(500)}\n\n${table(rows)}`;
+    const draft = documentEditorDraft(markdown);
+    const doc = readComposerSnapshot(draft.document, "document");
+    if (!doc) throw new Error("Expected a structured draft");
+    expect.soft(projectComposerDocument(doc).tables).toHaveLength(grids);
+    expect(documentEditorMarkdown(draft)).toBe(markdown);
+  }
+});
+
 it("keeps oversized and deeply nested input as literal source without Markdown parsing", () => {
   for (const markdown of ["x".repeat(200_000), `${"> ".repeat(1000)}nested`]) {
     const draft = documentEditorDraft(markdown);

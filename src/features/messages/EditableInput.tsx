@@ -90,7 +90,10 @@ import {
   documentEditorDraft,
   documentEditorMarkdown,
 } from "./document-editor-markdown";
-import { DOCUMENT_PROFILE } from "../markdown/document-profile";
+import {
+  DOCUMENT_PROFILE,
+  fitsDocumentRenderBudget,
+} from "../markdown/document-profile";
 import {
   MarkdownDocument,
   MarkdownTable,
@@ -632,6 +635,25 @@ export function EditableInput({
     const tokenViews = () => refresh((revision) => revision + 1);
     const { markdown_table: table, paragraph } = composerSchema.nodes;
     const endsWithTable = (doc: EditorNode) => doc.lastChild?.type === table;
+    const tableTextSelection = () => {
+      if (!tableHosts.current.size) return;
+      const selection = editor.dom.ownerDocument.getSelection();
+      if (!selection?.anchorNode || !selection.focusNode) return;
+      for (const element of tableHosts.current.keys())
+        if (
+          element.contains(selection.anchorNode) &&
+          element.contains(selection.focusNode)
+        )
+          return selection;
+    };
+    const copyTableText = (event: ClipboardEvent) => {
+      const selection = tableTextSelection();
+      if (!selection) return false;
+      if (!selection.isCollapsed)
+        event.clipboardData?.setData("text/plain", selection.toString());
+      event.preventDefault();
+      return true;
+    };
     const selectAdjacentTable = (backward: boolean) => {
       if (!projection().tables.length) return false;
       let selected = false;
@@ -1197,12 +1219,40 @@ export function EditableInput({
           tr.replaceSelection(new Slice(doc.content, 0, 0));
         }
       }
-      if (
-        current.current.serializeDraft(projectComposerDocument(tr.doc).draft)
-          .length > current.current.maxLength
-      ) {
+      const projected = projectComposerDocument(tr.doc);
+      const markdown = current.current.serializeDraft(projected.draft);
+      if (markdown.length > current.current.maxLength) {
         current.current.onPasteTooLong?.();
         return null;
+      }
+      if (projected.tables.length) {
+        const overBudget = !fitsDocumentRenderBudget(markdown);
+        const roots = new Set<number>();
+        for (const { from } of projected.tables) {
+          const position = tr.doc.resolve(from);
+          if (position.depth) roots.add(position.before(1));
+          else if (overBudget) roots.add(from);
+        }
+        // Source fallback keeps the enclosing list/quote prefixes and matches
+        // the editor's representation after a save and reload.
+        for (const position of [...roots].reverse()) {
+          const block = tr.doc.nodeAt(position);
+          if (!block) continue;
+          const source = documentEditorMarkdown(
+            projectComposerDocument(nodes.doc.create(null, block)).draft,
+          );
+          const end = position + block.nodeSize;
+          const { head } = tr.selection;
+          tr.replaceWith(
+            position,
+            end,
+            nodes.paragraph.create(null, composerSchema.text(source)),
+          );
+          if (head >= position && head <= end)
+            tr.setSelection(
+              TextSelection.create(tr.doc, position + 1 + source.length),
+            );
+        }
       }
       editor.dispatch(tr.scrollIntoView());
       editor.focus();
@@ -1904,6 +1954,7 @@ export function EditableInput({
       scroll = false,
       directional = false,
     } = {}) => {
+      if (tableTextSelection()) return;
       const selection = editor.dom.ownerDocument.getSelection();
       if (
         !selection?.anchorNode ||
@@ -1923,6 +1974,14 @@ export function EditableInput({
       };
       const anchor = position(selection.anchorNode, selection.anchorOffset);
       const head = position(selection.focusNode, selection.focusOffset);
+      const currentSelection = editor.state.selection;
+      if (
+        currentSelection instanceof NodeSelection &&
+        currentSelection.node.type === table &&
+        Math.min(anchor, head) === currentSelection.from &&
+        Math.max(anchor, head) === currentSelection.to
+      )
+        return;
       const doc = editor.state.doc;
       // DOM select-all may end at text nodes or at the editor's child boundaries.
       // Preserve whole-document intent so deletion also clears block structure.
@@ -2309,6 +2368,8 @@ export function EditableInput({
           return true;
         },
         handleKeyDown(_view, event) {
+          if (tableTextSelection())
+            return event.key === "Backspace" || event.key === "Delete";
           if (composing.current || event.isComposing || event.keyCode === 229)
             return false;
           syncNativeSelection();
@@ -2475,6 +2536,10 @@ export function EditableInput({
             return false;
           },
           beforeinput(_view, event) {
+            if (tableTextSelection()) {
+              event.preventDefault();
+              return true;
+            }
             flushTokens();
             // Native insertion can restore focus before its input/selectionchange
             // events. That focus must not overwrite the just-advanced caret.
@@ -2534,10 +2599,12 @@ export function EditableInput({
             return false;
           },
           copy(_view, event) {
+            if (copyTableText(event)) return true;
             copySelection(event);
             return true;
           },
           cut(_view, event) {
+            if (copyTableText(event)) return true;
             flushTokens();
             copySelection(event);
             if (editable())
@@ -2546,6 +2613,7 @@ export function EditableInput({
           },
           paste(_view, event) {
             event.preventDefault();
+            if (tableTextSelection()) return true;
             flushTokens();
             const raw = plainPaste;
             plainPaste = false;

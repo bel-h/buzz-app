@@ -2252,12 +2252,7 @@ test("a failed update check stays on its Settings row, and Check again clears it
   await expect(page.getByText("Update Standup Notes")).toHaveCount(0);
 });
 
-// Browser-only boundary: an external blob module uses the host React tree,
-// host styles, focus targets and durable split across a real document reload.
-test("installed documents reuse host Markdown, workspace tabs and persisted split", async ({
-  page,
-  app,
-}) => {
+async function installedDocumentReader(page, app) {
   await nativeImports(
     page,
     [
@@ -2280,10 +2275,19 @@ test("installed documents reuse host Markdown, workspace tabs and persisted spli
   await expectOnlySettings(page);
   await closeSettings(page);
   await openPage(page, "Documents");
-  const reader = page.getByRole("region", {
+  return page.getByRole("region", {
     name: "Document reader",
     exact: true,
   });
+}
+
+// Browser-only boundary: an external blob module uses the host React tree,
+// host styles, focus targets and durable split across a real document reload.
+test("installed documents reuse host Markdown, workspace tabs and persisted split", async ({
+  page,
+  app,
+}) => {
+  const reader = await installedDocumentReader(page, app);
   const tab = (name) => reader.getByRole("tab", { name, exact: true });
   const draft = (name) =>
     reader.getByRole("textbox", { name: `${name} draft` });
@@ -2616,4 +2620,172 @@ test("installed documents reuse host Markdown, workspace tabs and persisted spli
   }
   await reader.getByRole("link", { name: "the alpha room" }).click();
   await expect(page.locator('[data-channel-timeline="alpha"]')).toBeVisible();
+});
+
+async function openTableEditor(page, app) {
+  const reader = await installedDocumentReader(page, app);
+  await reader.getByRole("button", { name: "Edit Guide" }).click();
+  return {
+    reader,
+    rich: reader.getByRole("textbox", { name: "Document body" }),
+    source: reader.getByRole("textbox", { name: "Markdown", exact: true }),
+    markdown: reader.getByRole("button", { name: "Markdown source" }),
+    formatted: reader.getByRole("button", { name: "Rich text", exact: true }),
+  };
+}
+
+async function tableClipboard(rich, type, payload = {}) {
+  return rich.evaluate(
+    (field, { type, text, html, placement }) => {
+      if (placement) {
+        field.focus();
+        const end = field.value.length;
+        field.setSelectionRange(placement === "all" ? 0 : end, end);
+      }
+      const data = new DataTransfer();
+      if (html) data.setData("text/html", html);
+      if (text) data.setData("text/plain", text);
+      field.dispatchEvent(
+        new ClipboardEvent(type, {
+          bubbles: true,
+          cancelable: true,
+          clipboardData: data,
+        }),
+      );
+      return {
+        text: data.getData("text/plain"),
+        html: data.getData("text/html"),
+      };
+    },
+    { type, ...payload },
+  );
+}
+
+const smallTable = "| Cell | Value |\n| --- | --- |\n| cellword | 2 |";
+
+test("document table selection keeps clipboard and deletion scoped", async ({
+  page,
+  app,
+}) => {
+  const { reader, rich, source, markdown, formatted } = await openTableEditor(
+    page,
+    app,
+  );
+  const original = `Before\n\n${smallTable}\n\nAfter`;
+  await markdown.click();
+  await source.fill(original);
+  await formatted.click();
+
+  const cell = rich.getByRole("cell", { name: "cellword" });
+  for (const type of ["copy", "cut"]) {
+    await rich.evaluate((field, type) => {
+      field.focus();
+      field.setSelectionRange(0, type === "cut" ? "Before".length : 0);
+    }, type);
+    const points = await cell.evaluate((element) => {
+      const range = document.createRange();
+      range.setStart(element.firstChild, 0);
+      range.setEnd(element.firstChild, 4);
+      const { left, right, y, height } = range.getBoundingClientRect();
+      return { left: left + 0.5, right: right - 0.5, y: y + height / 2 };
+    });
+    await page.mouse.move(points.left, points.y);
+    await page.mouse.down();
+    await page.mouse.move(points.right, points.y, { steps: 5 });
+    await page.mouse.up();
+    await expect
+      .poll(() => page.evaluate(() => getSelection()?.toString()))
+      .toBe("cell");
+    const { text } = await tableClipboard(rich, type);
+    expect.soft(text).toBe("cell");
+  }
+  await markdown.click();
+  await expect.soft(source).toHaveValue(original);
+  await source.fill(original);
+  await formatted.click();
+  await rich.evaluate((field) => {
+    field.focus();
+    const start = field.value.lastIndexOf("After");
+    field.setSelectionRange(start, start);
+  });
+  await rich.press("Backspace");
+  await expect(rich.getByRole("table")).toBeVisible();
+  await rich.press("Backspace");
+  await rich.press("ControlOrMeta+Enter");
+  await expect(reader.getByRole("status")).toContainText("Saved 1");
+  await reader.getByRole("button", { name: "Read Guide" }).click();
+  await reader.getByRole("button", { name: "Edit Guide" }).click();
+  await markdown.click();
+  await expect(source).toHaveValue("Before\n\nAfter");
+});
+
+test("nested document table paste stays source through save and reopen", async ({
+  page,
+  app,
+}) => {
+  const { reader, rich, source, markdown, formatted } = await openTableEditor(
+    page,
+    app,
+  );
+  await markdown.click();
+  await source.fill(smallTable);
+  await formatted.click();
+  const { html } = await tableClipboard(rich, "copy", { placement: "all" });
+  expect(html).toContain('data-buzz-copy="document"');
+  for (const [index, prefix, htmlPaste] of [
+    [1, "- ", ""],
+    [2, "> ", html],
+  ]) {
+    await markdown.click();
+    await source.fill(`${prefix}Note`);
+    await formatted.click();
+    await tableClipboard(rich, "paste", {
+      placement: "end",
+      ...(htmlPaste ? { html: htmlPaste } : { text: smallTable }),
+    });
+    const marker = prefix === "> " ? "> " : "  ";
+    const expected =
+      prefix +
+      "Note" +
+      (prefix === "> " ? "\n>\n" : "\n") +
+      smallTable
+        .split("\n")
+        .map((line) => marker + line)
+        .join("\n");
+    await expect
+      .soft(rich.getByRole("table"))
+      .toHaveCount(0, { timeout: 1000 });
+    await rich.press("ControlOrMeta+Enter");
+    await expect(reader.getByRole("status")).toContainText(`Saved ${index}`);
+    await reader.getByRole("button", { name: "Read Guide" }).click();
+    await reader.getByRole("button", { name: "Edit Guide" }).click();
+    await expect(rich.getByRole("table")).toHaveCount(0);
+    await markdown.click();
+    await expect(source).toHaveValue(expected);
+    await formatted.click();
+  }
+});
+
+test("document table paste observes the combined cell budget", async ({
+  page,
+  app,
+}) => {
+  const { rich, source, markdown, formatted } = await openTableEditor(
+    page,
+    app,
+  );
+  // Ten columns and 501 rows per table, with the reader's GFM padding.
+  const table = [
+    `|${" Header |".repeat(10)}`,
+    `|${" --- |".repeat(10)}`,
+    ...Array(500).fill("| row value |"),
+  ].join("\n");
+  await markdown.click();
+  await source.fill(table);
+  await formatted.click();
+  await expect(rich.getByRole("table")).toHaveCount(1);
+  await tableClipboard(rich, "paste", { placement: "end", text: table });
+  await expect(rich.getByRole("table")).toHaveCount(0);
+  await markdown.click();
+  await expect(source).toHaveValue(`${table}\n\n${table}`);
 });
