@@ -138,13 +138,6 @@ const withBlockedClear = (
     ? { ...rest, blockedClear: error, blockedKeys: keys }
     : { ...rest, blockedClear: error };
 };
-const overflowed = (
-  unread: UnreadJournal,
-  overflow: boolean,
-): UnreadJournal => {
-  const { heldOverflow: _, ...rest } = unread;
-  return overflow ? { ...rest, heldOverflow: true } : rest;
-};
 const same = (a: unknown, b: unknown): boolean => {
   if (Object.is(a, b)) return true;
   if (!a || !b || typeof a !== "object" || typeof b !== "object") return false;
@@ -196,11 +189,8 @@ const localState = (journal: ReadJournal, now: number): ReadState => {
     ),
   });
 };
-/** Held keys, plus one while a skipped group awaits recovery: either keeps
- * unread actions and publication closed. */
 const heldCount = (journal: ReadJournal | undefined) =>
-  Object.keys(journal?.unread?.held ?? {}).length +
-  (journal?.unread?.heldOverflow ? 1 : 0);
+  Object.keys(journal?.unread?.held ?? {}).length;
 /** Every save: resolve held groups the clock has reached (incoming cutoff
  * first, so a stale baseline never merges), expire and drop accepted groups
  * at the expiry clock (discard guard), and advance the durable watermark. */
@@ -767,7 +757,6 @@ export function createReadState({
         [...groups],
       ]),
     );
-    let overflow = false;
     const states = incoming.map((state) => {
       const overrides: Record<string, ReadState["overrides"][string]> = {};
       for (const [key, value] of Object.entries(state.overrides)) {
@@ -790,22 +779,20 @@ export function createReadState({
             if (group[3] > (list[at]?.[3] ?? 0))
               held[key] = list.map((other, i) => (i === at ? group : other));
           } else {
-            // A full list skips only this group; a complete refresh once
-            // the list drains recovers the peer's latest record.
-            if (list.length >= HELD_GROUPS_PER_KEY) overflow = true;
-            else held[key] = [...list, group];
+            // A full list drops this version; every other group still
+            // merges, and a later refresh brings the peer's latest.
+            if (list.length < HELD_GROUPS_PER_KEY) held[key] = [...list, group];
           }
         }
       }
       return { frontiers: state.frontiers, overrides };
     });
-    return { states, held, overflow };
+    return { states, held };
   }
   async function ingest(
     events: readonly RelayEvent[],
     signal: AbortSignal,
     generation = epoch,
-    complete = false,
   ) {
     const committed = await decode(events, signal);
     // Merge locally before admitting slot versions. Failed storage must remain retryable.
@@ -828,7 +815,7 @@ export function createReadState({
           owned.includes(readCoordinate(event) ?? "")
         )
           own = advanceOwn(own, parsed.state.frontiers, true);
-      const { states, held, overflow } = receiveGroups(
+      const { states, held } = receiveGroups(
         current,
         committed.map(({ parsed }) => parsed.state),
       );
@@ -840,10 +827,7 @@ export function createReadState({
           current.recent ?? {},
         ),
         ...(own && { own }),
-        unread: overflowed(
-          { ...(current.unread ?? newUnreadJournal()), held },
-          overflow || (!complete && !!current.unread?.heldOverflow),
-        ),
+        unread: { ...(current.unread ?? newUnreadJournal()), held },
       };
     });
     if (closed || generation !== epoch) return;
@@ -951,7 +935,7 @@ export function createReadState({
                 ],
                 { signal, priority },
               );
-        await ingest(events, signal, generation, complete);
+        await ingest(events, signal, generation);
         if (closed || generation !== epoch) return;
         if (complete) basis(events);
         for (const listener of ownListeners) listener(events, complete);
@@ -1031,8 +1015,9 @@ export function createReadState({
       );
       if (!blockedKeys.length) blockedClear = undefined;
     };
+    // A capacity refusal never hides a clock or held warning.
     const refuse = (error: string) => {
-      blockedClear = error;
+      if (error !== UNREAD_CAPACITY || !blockedClear) blockedClear = error;
       blockedKeys = [...new Set([...blockedKeys, ...live])];
     };
     const live = [...new Set([key, ...clearKeys])].filter(
@@ -1644,16 +1629,7 @@ export function createReadState({
         health({ status: "error", error: errorText(error) });
         armUpkeep(60);
       }
-    }).then(recoverOverflow);
-  }
-  /** Held lists drained with a group skipped: one complete refresh rereads
-   * every peer's latest record, outside the queue job. */
-  function recoverOverflow() {
-    if (
-      journal?.unread?.heldOverflow &&
-      !Object.keys(journal.unread.held).length
-    )
-      void refresh();
+    });
   }
   let upkeepTimer: ReturnType<typeof setTimeout> | undefined;
   /** The next moment a mark expires or a held group's time comes, if any. */

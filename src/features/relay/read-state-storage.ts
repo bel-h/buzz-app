@@ -84,9 +84,6 @@ export type UnreadJournal = Readonly<{
   /** The channels whose clears it refused: it clears once each has had a
    * successful clear or its group is no longer active. */
   blockedKeys?: readonly string[];
-  /** A group was skipped because its key's held list was full: unread
-   * actions stay closed until a complete refresh recovers it. */
-  heldOverflow?: true;
 }>;
 export const HELD_GROUPS_PER_KEY = 8;
 export const newUnreadJournal = (): UnreadJournal => ({
@@ -135,8 +132,7 @@ function readUnread(raw: unknown, slots: readonly string[]): UnreadJournal {
       (raw.blockedClear === undefined ||
         !Array.isArray(raw.blockedKeys) ||
         raw.blockedKeys.length > READ_STATE_KEYS / 3 ||
-        !raw.blockedKeys.every(channelContext))) ||
-    (raw.heldOverflow !== undefined && raw.heldOverflow !== true)
+        !raw.blockedKeys.every(channelContext)))
   )
     throw new Error("Invalid saved unread state");
   const held: Record<string, readonly HeldGroup[]> = {};
@@ -166,7 +162,6 @@ function readUnread(raw: unknown, slots: readonly string[]): UnreadJournal {
     ...(raw.blockedKeys === undefined
       ? {}
       : { blockedKeys: Object.freeze([...(raw.blockedKeys as string[])]) }),
-    ...(raw.heldOverflow && { heldOverflow: true as const }),
   });
 }
 /** Keeps only the covers of marks still saved at the same revision. */
