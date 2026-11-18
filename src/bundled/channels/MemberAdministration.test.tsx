@@ -781,10 +781,10 @@ it("keeps resolved rows and focus while refreshing, and reopens warm without a s
 
 it.each([
   ["owner", true, true],
-  ["owner", false, false],
+  ["owner", false, true],
   ["admin", true, false],
 ] as const)(
-  "Solo %s sees agent=%s role controls only when permitted",
+  "Solo %s sees downgrade controls for a current Admin (agent=%s)",
   async (actor, agent, allowed) => {
     const t = await setup(
       actor,
@@ -826,8 +826,37 @@ it.each([
       ).toBe("confirmed"),
     );
     expect(t.publish).toHaveBeenCalledOnce();
+    expect(t.publish.mock.calls[0]?.[0]).toMatchObject({
+      kind: 9050,
+      tags: expect.arrayContaining([["expected_role", "admin"]]),
+    });
   },
 );
+it("offers only a downgrade for a Solo participant with an unattested agent profile", async () => {
+  const t = await setup(
+    "owner",
+    "member",
+    true,
+    undefined,
+    true,
+    undefined,
+    false,
+    true,
+    undefined,
+    undefined,
+    "solo",
+  );
+  await t.user.click(
+    screen.getByRole("button", { name: /^Actions for Morgan$/ }),
+  );
+  await screen.findByRole("menuitemradio", { name: "Viewing only" });
+  expect(
+    screen.getByRole("menuitemradio", { name: "Participating" }),
+  ).toHaveAttribute("aria-checked", "true");
+  expect(
+    screen.queryByRole("menuitemradio", { name: "Admin" }),
+  ).not.toBeInTheDocument();
+});
 it("presents verified roles, protects owners/self, and confirms a separate deliberate role intent", async () => {
   const t = await setup();
   await expectProfileOnly(t.user, "Carl");

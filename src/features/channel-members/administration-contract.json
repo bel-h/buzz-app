@@ -1,6 +1,23 @@
 {
   "accepted": [
     {
+      "name": "conditional Solo role change",
+      "event": {
+        "kind": 9050,
+        "created_at": 1700000010,
+        "content": "",
+        "tags": [
+          ["h", "11111111-1111-4111-8111-111111111111"],
+          [
+            "p",
+            "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+          ],
+          ["role", "member"],
+          ["expected_role", "admin"]
+        ]
+      }
+    },
+    {
       "name": "remove",
       "event": {
         "kind": 9001,
@@ -65,6 +82,44 @@
     }
   ],
   "rejected": [
+    {
+      "name": "Solo role change without expected role",
+      "event": {
+        "kind": 9050,
+        "created_at": 1700000010,
+        "content": "",
+        "tags": [
+          ["h", "11111111-1111-4111-8111-111111111111"],
+          [
+            "p",
+            "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+          ],
+          ["role", "member"],
+          ["expected_role", "admin"],
+          ["role", "guest"]
+        ]
+      }
+    },
+    {
+      "name": "Solo role change targeting an owner role",
+      "event": {
+        "kind": 9050,
+        "created_at": 1700000010,
+        "content": "",
+        "tags": [
+          ["h", "11111111-1111-4111-8111-111111111111"],
+          [
+            "p",
+            "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+          ],
+          ["role", "member"],
+          ["expected_role", "admin"],
+          ["role", "guest"],
+          ["role", "guest"],
+          ["expected_role", "owner"]
+        ]
+      }
+    },
     {
       "name": "wrong kind",
       "event": {

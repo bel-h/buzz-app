@@ -1,6 +1,5 @@
 import { test, expect } from "./fixture.mjs";
 import { openPage } from "./navigation.mjs";
-import { generateSecretKey } from "nostr-tools";
 import { animationsSettled } from "./animations.mjs";
 
 const chat = "33333333-3333-4333-8333-333333333333";
@@ -32,13 +31,11 @@ test("the Solo owner changes an existing agent's access from its menu", async ({
   page,
   app,
 }, info) => {
-  const agent = app.serveProfile(generateSecretKey(), {
-    name: "Review assistant",
-    is_agent: true,
-  });
-  app.serveMembers(chat, [agent.pubkey]);
+  const agent = app.ownerAgent;
+  expect(agent).toBeDefined();
+  app.serveMembers(chat, [agent]);
   const grants = () =>
-    app.report.publications.filter(({ event }) => event.kind === 9000);
+    app.report.publications.filter(({ event }) => event.kind === 9050);
   await page.route("**/api/relay/primary/query", async (route) => {
     const response = await route.fetch();
     const events = await response.json();
@@ -52,10 +49,10 @@ test("the Solo owner changes an existing agent's access from its menu", async ({
         )
           return event;
         const tags = event.tags.filter(
-          ([tag, key]) => tag !== "p" || key !== agent.pubkey,
+          ([tag, key]) => tag !== "p" || key !== agent,
         );
-        if (event.kind === 39002) tags.push(["p", agent.pubkey, "", role]);
-        else if (role === "admin") tags.push(["p", agent.pubkey, "admin"]);
+        if (event.kind === 39002) tags.push(["p", agent, "", role]);
+        else if (role === "admin") tags.push(["p", agent, "admin"]);
         return app.signRelay({
           ...event,
           tags,
@@ -82,7 +79,7 @@ test("the Solo owner changes an existing agent's access from its menu", async ({
   );
   await page.getByRole("button", { name: /^Share access to / }).click();
   const actions = page.getByRole("button", {
-    name: "Actions for Review assistant",
+    name: "Actions for Owner Agent",
     exact: true,
   });
   await actions.click();
@@ -122,8 +119,9 @@ test("the Solo owner changes an existing agent's access from its menu", async ({
   await expect.poll(() => grants().length).toBe(1);
   expect(grants()[0].event.tags).toEqual([
     ["h", chat],
-    ["p", agent.pubkey],
+    ["p", agent],
     ["role", "admin"],
+    ["expected_role", "bot"],
   ]);
   await actions.click();
   await expect(

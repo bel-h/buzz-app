@@ -10,6 +10,7 @@ import {
 } from "../relay/channel-lifecycle-protocol.ts";
 
 export const editableMemberRoles = ["admin", "member", "guest"] as const;
+export const SOLO_MEMBER_ROLE_KIND = 9050;
 export type EditableMemberRole = (typeof editableMemberRoles)[number];
 export type MemberRole = EditableMemberRole | "owner" | "bot" | "unknown";
 export type MemberChange = Readonly<{
@@ -22,8 +23,8 @@ export type MemberChange = Readonly<{
 export type MemberAuthority = Readonly<{
   roles: Readonly<Record<string, MemberRole>>;
   canManage: boolean;
-  /** Solo owners may edit existing agents, without enabling other role changes. */
-  canManageAgents: boolean;
+  /** Solo owners use the conditional role-update command for current members. */
+  canManageSolo: boolean;
   canRemove: boolean;
   canRemoveOwnedAgent: boolean;
   /** A NIP-CL system channel, where administration may also add members. */
@@ -97,12 +98,15 @@ export function memberAuthority(
       "Member roles are inconsistent. Refresh members and roles.",
     );
   const activeChannel = type !== "dm" && archived !== "true";
-  // Solo role edits are limited to the owner's existing agent participants.
   const solo = !!soloLabels(channelIdentity(metadata).labels);
   return Object.freeze({
     roles: Object.freeze(roles),
     canManage: activeChannel && !solo && elevated.has(viewer),
-    canManageAgents: activeChannel && solo && elevated.get(viewer) === "owner",
+    canManageSolo:
+      type === "stream" &&
+      activeChannel &&
+      solo &&
+      elevated.get(viewer) === "owner",
     canRemove: activeChannel && elevated.has(viewer),
     canRemoveOwnedAgent:
       activeChannel && !solo && !!roles[viewer] && roles[viewer] !== "unknown",
@@ -110,20 +114,25 @@ export function memberAuthority(
   });
 }
 
-export function canManageMember(
+function isRoleTarget(state: MemberAuthority, viewer: string, key: string) {
+  const role = state.roles[key];
+  return key !== viewer && !!role && role !== "owner" && role !== "unknown";
+}
+
+export function canSetMemberRole(
   state: MemberAuthority,
   viewer: string,
   key: string,
-  agent = false,
+  next: EditableMemberRole,
+  agentOwner?: string,
 ) {
-  const role = state.roles[key];
-  return (
-    (state.canManage || (state.canManageAgents && agent)) &&
-    key !== viewer &&
-    !!role &&
-    role !== "owner" &&
-    role !== "unknown"
-  );
+  if (!isRoleTarget(state, viewer, key)) return false;
+  if (state.canManage) return true;
+  if (!state.canManageSolo) return false;
+  const current = state.roles[key];
+  if (next === "admin") return current !== "admin" && agentOwner === viewer;
+  if (next === "guest") return current !== "guest";
+  return current === "admin" || (current === "guest" && !!agentOwner);
 }
 
 /** Ownership permits removal only; it never grants role-edit authority. */
@@ -158,7 +167,8 @@ export function canTransferOwnership(
     !state.system &&
     state.roles[viewer] === "owner" &&
     state.roles[key] !== "bot" &&
-    canManageMember(state, viewer, key)
+    state.canManage &&
+    isRoleTarget(state, viewer, key)
   );
 }
 
@@ -167,7 +177,7 @@ export function authorizeMemberChange(
   viewer: string,
   change: MemberChange,
   owner?: string,
-  /** Verified target identity; unknown cannot grant access or receive ownership. */
+  /** A possibly-agent target cannot receive ownership. */
   agent?: boolean,
 ) {
   if (change.expectedRole === "none") {
@@ -195,8 +205,14 @@ export function authorizeMemberChange(
         ? canRemoveMember(state, viewer, change.pubkey, owner)
         : change.role === "owner"
           ? canTransferOwnership(state, viewer, change.pubkey, agent !== false)
-          : canManageMember(state, viewer, change.pubkey, agent === true) &&
-            isEditableMemberRole(change.role)) ||
+          : isEditableMemberRole(change.role) &&
+            canSetMemberRole(
+              state,
+              viewer,
+              change.pubkey,
+              change.role,
+              owner,
+            )) ||
     (change.expectedRole !== "absent" &&
       state.roles[change.pubkey] !== change.expectedRole) ||
     change.expectedRole === change.role
@@ -232,10 +248,15 @@ export function memberAdministrationTemplate(
   channelId: string,
   viewer: string,
   change: MemberChange,
+  soloRoleUpdate: boolean,
 ): EventTemplate {
   const h = ["h", lifecycleChannelId(channelId)];
   return {
-    kind: change.role === "remove" ? 9001 : 9000,
+    kind: soloRoleUpdate
+      ? SOLO_MEMBER_ROLE_KIND
+      : change.role === "remove"
+        ? 9001
+        : 9000,
     created_at: Math.floor(Date.now() / 1000),
     content: "",
     // The relay decides each person in order, so the heir's promotion lets
@@ -247,6 +268,7 @@ export function memberAdministrationTemplate(
             h,
             ["p", change.pubkey],
             ...(change.role === "remove" ? [] : [["role", change.role]]),
+            ...(soloRoleUpdate ? [["expected_role", change.expectedRole]] : []),
           ],
   };
 }
@@ -256,7 +278,8 @@ export function validateMemberAdministrationTemplate(
   event: EventTemplate,
   viewer: string,
 ) {
-  const [h, p, last] = event?.tags ?? [];
+  const [h, p, last, expected] = event?.tags ?? [];
+  const soloRoleUpdate = event?.kind === SOLO_MEMBER_ROLE_KIND;
   const transfer =
     event?.kind === 9000 &&
     p?.length === 3 &&
@@ -268,28 +291,34 @@ export function validateMemberAdministrationTemplate(
     PUBKEY.test(viewer);
   if (
     !event ||
-    ![9000, 9001].includes(event.kind) ||
+    ![9000, 9001, SOLO_MEMBER_ROLE_KIND].includes(event.kind) ||
     event.content !== "" ||
     !Number.isSafeInteger(event.created_at) ||
     event.created_at < 0 ||
     !Array.isArray(event.tags) ||
-    event.tags.length !== (event.kind === 9000 ? 3 : 2) ||
+    event.tags.length !== (soloRoleUpdate ? 4 : event.kind === 9000 ? 3 : 2) ||
     h?.length !== 2 ||
     h[0] !== "h" ||
     p?.length !== (transfer ? 3 : 2) ||
     p[0] !== "p" ||
     !PUBKEY.test(p[1] ?? "") ||
     p[1] === viewer ||
-    (event.kind === 9000 &&
+    (event.kind !== 9001 &&
       !transfer &&
       (last?.length !== 2 ||
         last[0] !== "role" ||
-        !isEditableMemberRole(last[1])))
+        !isEditableMemberRole(last[1]))) ||
+    (soloRoleUpdate &&
+      (expected?.length !== 2 ||
+        expected[0] !== "expected_role" ||
+        !(expected[1] === "bot" || isEditableMemberRole(expected[1]))))
   )
     throw new Error("Invalid member administration command");
   lifecycleChannelId(h[1] ?? "");
 }
 
-function isEditableMemberRole(role: unknown): role is EditableMemberRole {
+export function isEditableMemberRole(
+  role: unknown,
+): role is EditableMemberRole {
   return editableMemberRoles.some((value) => value === role);
 }

@@ -552,7 +552,7 @@ it.each(["ack", "lost", "read"])(
       authority: {
         roles: {},
         canManage: false,
-        canManageAgents: false,
+        canManageSolo: false,
         canRemove: false,
         canRemoveOwnedAgent: false,
         system: false,
@@ -594,7 +594,7 @@ it.each(["access", "invalid ID"])(
       authority: {
         roles: {},
         canManage: false,
-        canManageAgents: false,
+        canManageSolo: false,
         canRemove: false,
         canRemoveOwnedAgent: false,
         system: false,
@@ -622,7 +622,7 @@ it.each(["clear", "dispose"] as const)(
       authority: {
         roles: {},
         canManage: false,
-        canManageAgents: false,
+        canManageSolo: false,
         canRemove: false,
         canRemoveOwnedAgent: false,
         system: false,
@@ -811,7 +811,7 @@ it.each(["cache", "access"] as const)(
         authority: {
           roles: {},
           canManage: false,
-          canManageAgents: false,
+          canManageSolo: false,
           canRemove: false,
           canRemoveOwnedAgent: false,
           system: false,
@@ -827,7 +827,7 @@ it.each(["cache", "access"] as const)(
       expect(admin.snapshot(id).authority).toEqual({
         roles: {},
         canManage: false,
-        canManageAgents: false,
+        canManageSolo: false,
         canRemove: false,
         canRemoveOwnedAgent: false,
         system: false,
@@ -1192,25 +1192,42 @@ function soloAgent(actor = "owner", role = "bot", profiles = [agentProfile()]) {
   ]);
   return h;
 }
-it("lets the chat owner edit another owner's agent without granting identity-less authority", async () => {
-  const h = soloAgent("owner", "bot", [agentProfile(relayKey)]);
-  const intent = { ...change, expectedRole: "bot" } as const;
-  const state = memberAuthority(h.events(), id, viewer, author);
-  expect(() => authorizeMemberChange(state, viewer, intent)).toThrow();
-  await h.owner.capability.run(id, intent);
-  expect(h.publish).toHaveBeenCalledOnce();
-});
 it.each([
-  ["bot", "admin"],
-  ["admin", "member"],
-  ["admin", "guest"],
+  ["admin", "member", personProfile()],
+  ["admin", "guest", personProfile()],
+  ["member", "guest", personProfile()],
+  ["admin", "member", agentProfile(relayKey)],
+  ["bot", "guest", agentProfile(relayKey)],
+  ["guest", "member", agentProfile(relayKey)],
+  ["bot", "admin", agentProfile()],
 ] as const)(
-  "lets a Solo owner change an agent from %s to %s",
-  async (before, role) => {
-    const h = soloAgent("owner", before);
+  "lets a Solo owner change access from %s to %s when permitted",
+  async (before, role, profile) => {
+    const h = soloAgent("owner", before, [profile]);
     await h.owner.capability.run(id, { ...change, expectedRole: before, role });
-    expect(h.publish).toHaveBeenCalledOnce();
+    expect(h.publish.mock.calls[0]?.[0]).toMatchObject({
+      kind: 9050,
+      tags: [
+        ["h", id],
+        ["p", target],
+        ["role", role],
+        ["expected_role", before],
+      ],
+    });
     expect(h.owner.capability.snapshot(id).operation?.status).toBe("confirmed");
+  },
+);
+it.each([
+  ["member", "admin", agentProfile(relayKey)],
+  ["member", "admin", agentProfile(key, 200, false)],
+  ["guest", "member", agentProfile(key, 200, false)],
+  ["guest", "member", personProfile()],
+] as const)(
+  "refuses an unauthorized Solo promotion from %s to %s",
+  async (before, role, profile) => {
+    const h = soloAgent("owner", before, [profile]);
+    await h.owner.capability.run(id, { ...change, expectedRole: before, role });
+    expect(h.sign).not.toHaveBeenCalled();
   },
 );
 it.each(["admin", "member", "guest"])(
@@ -1253,6 +1270,27 @@ it("rechecks the Solo target profile after signing", async () => {
   expect(h.sign).toHaveBeenCalledOnce();
   expect(h.publish).not.toHaveBeenCalled();
 });
+it("discards a standard role write if the channel becomes Solo while signing", async () => {
+  const h = harness("owner", "admin");
+  h.sign.mockImplementationOnce(async (template) => {
+    h.setEvents([
+      h.record(39000, [
+        ["d", id],
+        ["t", "stream"],
+        ["t", SOLO_LABEL],
+      ]),
+      ...h.events().slice(1),
+    ]);
+    return finalizeEvent(structuredClone(template), key);
+  });
+  await h.owner.capability.run(id, {
+    ...change,
+    expectedRole: "admin",
+    role: "guest",
+  });
+  expect(h.sign).toHaveBeenCalledOnce();
+  expect(h.publish).not.toHaveBeenCalled();
+});
 it("transfers ownership in one event that steps the viewer down to admin", async () => {
   const h = transferHarness();
   await h.owner.capability.run(id, transfer);
@@ -1280,7 +1318,7 @@ it("never offers a transfer to a co-owner", () => {
   const state = {
     roles: { [viewer]: "owner" as const, [target]: "owner" as const },
     canManage: true,
-    canManageAgents: false,
+    canManageSolo: false,
     canRemove: true,
     canRemoveOwnedAgent: false,
     system: false,
@@ -1310,7 +1348,7 @@ it("authorizes a system-channel add only for a non-member other than the viewer 
   const state = {
     roles: { [viewer]: "owner" as const, [author]: "member" as const },
     canManage: true,
-    canManageAgents: false,
+    canManageSolo: false,
     canRemove: true,
     canRemoveOwnedAgent: false,
     system: true,

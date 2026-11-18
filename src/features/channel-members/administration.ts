@@ -10,7 +10,8 @@ import { lifecycleChannelId } from "../relay/channel-lifecycle-protocol";
 import {
   authorizeMemberChange,
   canRemoveMember,
-  canManageMember,
+  canSetMemberRole,
+  isEditableMemberRole,
   memberAdministrationTemplate,
   memberAuthority,
   memberChangeConfirmed,
@@ -35,7 +36,7 @@ const empty: MemberAdministrationState = Object.freeze({
   authority: Object.freeze({
     roles: Object.freeze({}),
     canManage: false,
-    canManageAgents: false,
+    canManageSolo: false,
     canRemove: false,
     canRemoveOwnedAgent: false,
     system: false,
@@ -244,22 +245,47 @@ export function createMemberAdministration({
                 !event || !!foldProfiles([event]).get(change.pubkey)?.isAgent;
               if (agent) throw new Error(transferRefusal);
             }
+            const soloRoleUpdate =
+              authority.canManageSolo && isEditableMemberRole(change.role);
+            let targetOwner = owner;
             if (
-              authority.canManageAgents &&
-              change.role !== "remove" &&
-              change.role !== "owner" &&
-              canManageMember(authority, viewer, change.pubkey, true)
+              soloRoleUpdate &&
+              !canSetMemberRole(
+                authority,
+                viewer,
+                change.pubkey,
+                change.role,
+              ) &&
+              canSetMemberRole(
+                authority,
+                viewer,
+                change.pubkey,
+                change.role,
+                viewer,
+              )
             ) {
-              // A fresh signed profile must confirm the Solo-only exception
-              // on both preflights; roster roles and display hints aren't proof.
+              // Promotions require fresh ownership proof on both preflights.
               const event = await profile();
-              agent =
-                !!event && !!foldProfiles([event]).get(change.pubkey)?.isAgent;
+              targetOwner = event && (await attestedOwner(event));
+              signal.throwIfAborted();
+              assertAccess(id);
             }
-            authorizeMemberChange(authority, viewer, change, owner, agent);
+            authorizeMemberChange(
+              authority,
+              viewer,
+              change,
+              targetOwner,
+              agent,
+            );
+            return soloRoleUpdate;
           };
-          await authorize();
-          const template = memberAdministrationTemplate(id, viewer, change);
+          const soloRoleUpdate = await authorize();
+          const template = memberAdministrationTemplate(
+            id,
+            viewer,
+            change,
+            soloRoleUpdate,
+          );
           validateMemberAdministrationTemplate(template, viewer);
           const signed = await writer.sign(structuredClone(template), signal);
           signal.throwIfAborted();
@@ -272,7 +298,10 @@ export function createMemberAdministration({
             getEventHash(signed) !== signed.id
           )
             throw new Error("Signer changed the member administration command");
-          await authorize();
+          if ((await authorize()) !== soloRoleUpdate)
+            throw new Error(
+              "Chat type changed. Refresh members and roles before trying again.",
+            );
           signal.throwIfAborted();
           if (active?.() === false)
             throw new DOMException("Member change cancelled", "AbortError");

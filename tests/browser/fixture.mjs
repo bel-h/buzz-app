@@ -302,7 +302,7 @@ export const test = base.extend({
       },
     );
     const ownerAgentKey =
-      lifecycleOwnerAgent || agentMessageDeletion
+      lifecycleOwnerAgent || agentMessageDeletion || memberRoleChanges
         ? generateSecretKey()
         : undefined;
     const ownerAgent = ownerAgentKey ? getPublicKey(ownerAgentKey) : undefined;
@@ -2180,7 +2180,7 @@ export const test = base.extend({
                 acceptPublication: (community, event) => {
                   expect(verifyEvent(event)).toBe(true);
                   expect(event.pubkey).toBe(viewer);
-                  if (memberRoleChanges && event.kind === 9000) {
+                  if (memberRoleChanges && event.kind === 9050) {
                     report.publications.push({ community, event });
                     return;
                   }
@@ -2696,6 +2696,7 @@ export const test = base.extend({
           return event;
         },
         signRelay: (template) => finalizeEvent(template, relayKey),
+        ownerAgent,
         membershipSnapshot(role) {
           expect(["owner", "admin", "member"]).toContain(role);
           return sign(13534, [["member", viewer, role]], "", relayKey);
