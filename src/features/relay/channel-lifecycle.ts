@@ -339,14 +339,15 @@ export function createChannelLifecycle({
         if (!trailing) {
           const started = epoch;
           const next: Promise<void> = refresh.then(() => {
-            if (trailing === next) trailing = undefined;
+            // A clear retired this read; its shared state is a newer one's.
+            if (trailing !== next || started !== epoch) return;
+            trailing = undefined;
             const strong = trailingStrong;
             trailingStrong = false;
-            if (started === epoch)
-              return capability.refreshVisibility(
-                caller,
-                strong ? { strong } : undefined,
-              );
+            return capability.refreshVisibility(
+              caller,
+              strong ? { strong } : undefined,
+            );
           });
           trailing = next;
         }
