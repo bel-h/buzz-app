@@ -309,9 +309,10 @@ timeline and the thread being read, without reading unopened threads' replies.
   A thread marked while its pane presents it, whether or not any row fits
   fully on screen, keeps its mark through that visit's catch-ups until the
   visit ends; a later visit's catch-up clears it, and an advance of its mark
-  or an explicit read still clears it at once. A modal menu's `aria-hidden`
-  only pauses reading and the same visit resumes; `[inert]` or `[hidden]`
-  ends the visit.
+  or an explicit read still clears it at once. Modal isolation (a menu's
+  `aria-hidden`, or a viewer's `inert` on the page's top-level elements) only
+  pauses reading and the same visit resumes; `[hidden]` anywhere, or `[inert]`
+  on the pane or its containers, ends the visit.
   On a whole channel, after a complete snapshot, it syncs as
   a version-2 group, and reading the channel clears it on every device; without
   a complete snapshot, or while a peer group is held back, it stays on this

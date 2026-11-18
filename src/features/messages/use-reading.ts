@@ -6,7 +6,19 @@ import { useMessageEditScope } from "./MessageEditScope";
 // Accessibility isolation, such as a modal menu, pauses reading; the same
 // visit resumes once it lifts. Actual concealment also ends the visit.
 const CONCEALED = '[inert], [hidden], [aria-hidden="true"]';
-const DEPARTED = "[inert], [hidden]";
+/**
+ * Whether a pane is concealed rather than isolated: `hidden` anywhere, or
+ * `inert` below the body's own children. A modal dialog inerts the body's
+ * other children, which only pauses reading.
+ */
+function departed(element: Element) {
+  for (let node: Element | null = element; node; node = node.parentElement) {
+    if (node.hasAttribute("hidden")) return true;
+    if (node.hasAttribute("inert") && node.parentElement !== document.body)
+      return true;
+  }
+  return false;
+}
 /** Shared document attention gate for reading and row visits. */
 export function readingDocumentActive() {
   return document.visibilityState === "visible" && document.hasFocus();
@@ -90,7 +102,7 @@ export function useReading({
         !rootId ||
         visited ||
         document.visibilityState !== "visible" ||
-        element.closest(DEPARTED)
+        departed(element)
       )
         return;
       try {
@@ -367,7 +379,7 @@ export function useReading({
     // A retained pane concealed by an ancestor, even with no transition or
     // focus change, is a departure; layout, focus and blur are not.
     let concealed = !!element.closest(CONCEALED);
-    let departed = !!element.closest(DEPARTED);
+    let gone = departed(element);
     const concealment = new MutationObserver((records) => {
       if (
         !records.some(
@@ -377,10 +389,10 @@ export function useReading({
       )
         return;
       const now = !!element.closest(CONCEALED);
-      const gone = !!element.closest(DEPARTED);
-      if (gone && !departed) depart();
-      if (!gone && departed) present();
-      departed = gone;
+      const leaving = departed(element);
+      if (leaving && !gone) depart();
+      if (!leaving && gone) present();
+      gone = leaving;
       if (now === concealed) return;
       concealed = now;
       if (!now) return schedule();

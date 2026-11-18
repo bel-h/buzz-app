@@ -51,7 +51,10 @@ function setup({
   const header = document.createElement("button");
   panel.append(header, element);
   panel.toggleAttribute("inert", concealed);
-  document.body.append(panel, composer, parent, outside);
+  // The app's root, a direct body child as in production.
+  const root = document.createElement("div");
+  root.append(panel);
+  document.body.append(root, composer, parent, outside);
   ({ element, composer, parent, outside, header })[focus].focus();
   vi.spyOn(element, "getClientRects").mockReturnValue([
     new DOMRect(0, 0, 500, 500),
@@ -164,6 +167,19 @@ function setup({
       else target.removeAttribute("aria-hidden");
       attributes([{ target }]);
     },
+    /** Window-wide modal isolation: inert and aria-hidden on the app root. */
+    modal: (open: boolean) => {
+      root.toggleAttribute("inert", open);
+      if (open) root.setAttribute("aria-hidden", "true");
+      else root.removeAttribute("aria-hidden");
+      attributes([{ target: root }]);
+    },
+    /** Hides an ancestor, as a retained pane's owner does. */
+    hide: (hidden: boolean, target: HTMLElement = panel) => {
+      target.toggleAttribute("hidden", hidden);
+      attributes([{ target }]);
+    },
+    root,
     panel,
     /** A completed dwell hands viewing to a fresh view-only lease after it. */
     dwelled: () => leases.at(-2),
@@ -822,6 +838,46 @@ it("accessibility isolation pauses the same visit; concealment during it ends th
   h.isolate(false);
   h.conceal(false);
   expect(h.reading.mock.calls.at(-1)?.[2]).not.toBe(first);
+});
+
+it("a modal's body-level isolation pauses the same visit; pane concealment during it ends the visit", async () => {
+  const h = setup({ rootId: "root" });
+  const first = h.reading.mock.calls[0]?.[2];
+  await vi.advanceTimersByTimeAsync(300);
+  // A media viewer inerts the app root: reading pauses, the visit stays.
+  h.modal(true);
+  const paused = h.leases.at(-1);
+  await vi.advanceTimersByTimeAsync(300);
+  expect(paused?.observe).not.toHaveBeenCalled();
+  expect(paused?.dispose).toHaveBeenCalled();
+  expect(h.session.unread.leave).not.toHaveBeenCalled();
+  // Closed: the same visit resumes and earns its next dwell.
+  h.modal(false);
+  expect(h.reading.mock.calls.at(-1)?.[2]).toBe(first);
+  expect(h.session.unread.present).toHaveBeenCalledOnce();
+  await vi.advanceTimersByTimeAsync(300);
+  expect(h.dwelled()?.observe).toHaveBeenCalledWith(["visible"]);
+  expect(h.session.unread.leave).not.toHaveBeenCalled();
+  // A nested pane made inert while the modal is open departs.
+  h.modal(true);
+  h.conceal(true);
+  expect(h.session.unread.leave).toHaveBeenCalledExactlyOnceWith(first);
+  h.conceal(false);
+  h.modal(false);
+  const second = h.reading.mock.calls.at(-1)?.[2];
+  expect(second).not.toBe(first);
+  // So does a nested pane hidden while the modal is open.
+  h.modal(true);
+  h.hide(true);
+  expect(h.session.unread.leave).toHaveBeenLastCalledWith(second);
+  h.hide(false);
+  h.modal(false);
+  const third = h.reading.mock.calls.at(-1)?.[2];
+  expect(third).not.toBe(second);
+  // `hidden` on the app root itself still departs.
+  h.hide(true, h.root);
+  expect(h.session.unread.leave).toHaveBeenLastCalledWith(third);
+  h.hide(false, h.root);
 });
 
 it("a shown thread is presented for its whole visit, before any row reads or focus", async () => {
