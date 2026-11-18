@@ -16,11 +16,8 @@ test.use({
   viewport: { width: 1100, height: 900 },
 });
 
-async function capture(page, info, name) {
-  const dialog = page.getByRole("dialog");
+async function capture(dialog, info, name) {
   await animationsSettled(dialog, { subtree: true });
-  const menu = page.getByRole("menu");
-  if (await menu.count()) await animationsSettled(menu, { subtree: true });
   await dialog.screenshot({ path: info.outputPath(name) });
 }
 
@@ -85,7 +82,9 @@ test("the Solo owner changes an existing agent's access from its menu", async ({
   await actions.click();
   const menu = page.getByRole("menu");
   await expect(menu).toBeVisible();
-  await capture(page, info, "agent-access-menu.png");
+  await animationsSettled(menu, { subtree: true });
+  const share = page.getByRole("dialog", { name: "Share access", exact: true });
+  await capture(share, info, "agent-access-menu.png");
   await expect(
     menu.getByRole("menuitemradio", { name: "Participating", exact: true }),
   ).toHaveAttribute("aria-checked", "true");
@@ -106,16 +105,14 @@ test("the Solo owner changes an existing agent's access from its menu", async ({
   });
   await expect(save).toBeFocused();
   expect(grants()).toHaveLength(0);
-  await capture(page, info, "agent-access-confirmation.png");
+  await capture(confirm, info, "agent-access-confirmation.png");
   await confirm.getByRole("button", { name: "Cancel", exact: true }).click();
   await expect(actions).toBeFocused();
   expect(grants()).toHaveLength(0);
   await actions.click();
   await page.getByRole("menuitemradio", { name: "Admin", exact: true }).click();
   await save.click();
-  await expect(
-    page.getByRole("dialog", { name: "Share access", exact: true }),
-  ).toBeVisible();
+  await expect(share).toBeVisible();
   await expect.poll(() => grants().length).toBe(1);
   expect(grants()[0].event.tags).toEqual([
     ["h", chat],
