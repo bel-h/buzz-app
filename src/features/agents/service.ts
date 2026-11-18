@@ -4198,7 +4198,12 @@ export class AgentsService extends Service implements Agents {
         );
     }
     const { type, name, picture, config } = input;
-    this.updateKind(identity, { name, type });
+    this.updateKind(identity, {
+      name,
+      type,
+      ...(type === (request.type ?? request.agentType) &&
+        request.settings && { settings: request.settings }),
+    });
     const { key } = identity;
     const retyped = type !== identity.type;
     this.approving.add(id);
