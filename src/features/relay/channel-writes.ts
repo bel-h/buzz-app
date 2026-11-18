@@ -520,10 +520,22 @@ export function createChannelWrites(
           )
         );
       });
-      if (previous && Date.now() / 1000 - previous.event.created_at >= 15 * 60)
-        throw new Error(
-          `This agent-add request expired. Open Outbox, remove the “Add agent ${key.slice(0, 12)}” item, then add the agent again. Check channel membership first if the request was unconfirmed.`,
-        );
+      if (
+        previous &&
+        Date.now() / 1000 - previous.event.created_at >= 15 * 60
+      ) {
+        if (previous.delivery !== "failed")
+          throw new Error(
+            "This agent-add request expired before the relay confirmed it. Check channel membership, then add the agent again if needed.",
+          );
+        // The relay refuses an expired event, so a new Add replaces it and
+        // repeats every admission check from a fresh roster.
+        await writer(true).dismiss(previous.event.id);
+        if (active?.() === false)
+          throw new DOMException("Channel addition cancelled", "AbortError");
+        if (added.length) await refresh(id, { members: added }, false);
+        return addAgents(id, keys, active);
+      }
       let owned: (() => boolean) | undefined;
       if (
         original.channelType === "solo" &&
