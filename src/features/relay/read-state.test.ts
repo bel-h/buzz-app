@@ -3035,6 +3035,35 @@ describe("expiring unread (version 2)", () => {
         clear: T + 717,
       });
     });
+    // Accepted limit of dropping the ninth version (option A): a mark made
+    // against the last kept version loses to the dropped later clear once a
+    // read returns the peer's latest record. Pinned so a change is deliberate.
+    it("accepts that a mark made after the drain loses to the dropped clear", async () => {
+      const { f, owner } = await overflowed();
+      // The earliest time a new stamp may sit 60 seconds above clear T+717.
+      f.setNow(T + 658);
+      await owner.upkeep();
+      expect(held(f)).toEqual({});
+      expect(f.journal()?.state.overrides.room).toMatchObject({
+        clear: T + 717,
+      });
+      expect((await owner.markLocalUnread("room", () => true)).sync).not.toBe(
+        "local",
+      );
+      expect(f.journal()?.state.overrides.room).toMatchObject({
+        set: T + 718,
+        clear: T + 717,
+      });
+      expect(active(owner)).toBe(true);
+      // The relay still holds the peer's ninth version as its latest record.
+      await owner.refresh();
+      expect(f.journal()?.state.overrides.room).toMatchObject({
+        clear: T + 719,
+      });
+      expect(active(owner)).toBe(false);
+      await owner.refresh();
+      expect(active(owner)).toBe(false);
+    });
   });
 
   describe("a clear refused by the clock", () => {
