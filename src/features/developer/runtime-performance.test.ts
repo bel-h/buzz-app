@@ -159,6 +159,26 @@ it("reports a delayed main-thread sample and the actual elapsed interval", async
   });
 });
 
+it("records an overdue visible sample when the deadline runs before the interval", async () => {
+  const now = performance.now.bind(performance);
+  let stalled = false;
+  vi.spyOn(performance, "now").mockImplementation(
+    () => now() + (stalled ? 400 : 0),
+  );
+  const pending = createRuntimePerformance().capture(1050, () => () => {});
+  await vi.advanceTimersByTimeAsync(1000);
+  stalled = true;
+  await vi.advanceTimersByTimeAsync(50);
+  const report = JSON.parse(JSON.stringify(await pending));
+  expect(report.elapsedMs).toBe(1450);
+  expect(report.mainThread.timerLag).toMatchObject({
+    count: 1,
+    totalMs: 350,
+    maxMs: 350,
+    samples: 11,
+  });
+});
+
 it.each([0, 999, 10001, 1.5, "1000", null, NaN])(
   "refuses invalid duration %s before subscribing",
   (duration) => {

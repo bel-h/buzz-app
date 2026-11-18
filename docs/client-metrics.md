@@ -8,8 +8,10 @@ existing full-agent approval. This uses the shipped agent tool route. Native MCP
 and Developer mode are not required. Older apps do not offer this tool.
 
 The only argument is optional `duration_ms`: an integer from 1000 to 10000,
-default 5000. A second concurrent capture fails. Cancellation or plugin unload
-stops the capture. No recorder runs between calls. A blocked or throttled page
+default 5000. A second concurrent capture fails. The capture stops when the
+plugin unloads or the host cancels the call or ends its owning turn or
+connection. External MCP supports connection cancellation. It does not cancel
+individual requests. No recorder runs between calls. A blocked or throttled page
 can delay completion. Use the reported `elapsedMs`, not the requested duration.
 
 | Report field | Meaning |
@@ -17,7 +19,7 @@ can delay completion. Use the reported `elapsedMs`, not the requested duration.
 | `version`, `sessionId`, `startedAt` | Schema version 1, a random ID shared by captures in this page lifetime, and the capture's UTC start. The ID changes on page reload. |
 | `host` | Desktop flag, production-bundle flag and native app version, or `null` when not available. This does not identify an OS process or source commit. |
 | `requestedMs`, `elapsedMs`, `visibility` | Requested and actual duration; visible and hidden milliseconds; final page visibility. |
-| `mainThread.timerLag` | Timer lateness of at least 50 ms, sampled every 100 ms while visible: count, total/max milliseconds and visible sample count. Hidden time and visibility transitions reset its baseline. This is delay, not CPU use. |
+| `mainThread.timerLag` | Timer lateness of at least 50 ms, sampled every 100 ms while visible, including an overdue sample at completion: count, total/max milliseconds and visible sample count. Hidden time and visibility transitions reset its baseline. This is delay, not CPU use. |
 | `mainThread.longTasks` | Unbuffered long-task entries delivered during capture, when supported. Includes hidden-page work. Unsupported engines, including WebKit, return `supported:false` and a reason, not a zero count. |
 | `work` | Existing `fold`, `verify.read` and `verify.restore` batch instrumentation: batch count, item count and total/max batch milliseconds. Includes all retained relay sessions and visibility states. Native signature work outside these timers is not included. |
 | `reads` | Completed finite reads across relay sessions: count, total/max request milliseconds, decoded UTF-16 code units, failed count and background count. Reads started before capture can finish inside it. |

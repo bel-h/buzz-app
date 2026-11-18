@@ -6,6 +6,7 @@ const add = (entry: Total, value: number) => {
   entry.totalMs += value;
   entry.maxMs = Math.max(entry.maxMs, value);
 };
+const lagThresholdMs = 50;
 const workStages = ["fold", "verify.read", "verify.restore"] as const;
 type WorkStage = (typeof workStages)[number];
 
@@ -88,11 +89,19 @@ export function createRuntimePerformance() {
           hidden = document.hidden;
           expected = at + 100;
         };
+        const sampleLag = (at: number) => {
+          if (hidden) return;
+          samples++;
+          const delay = at - expected;
+          if (delay >= lagThresholdMs) add(lag, delay);
+        };
         const finish = (failure?: { reason: unknown }) => {
           if (active !== current) return;
+          const end = performance.now();
+          // The deadline can run before an interval delayed by the same stall.
+          if (!failure && end - expected >= lagThresholdMs) sampleLag(end);
           active = undefined;
           for (const cleanup of cleanups.reverse()) cleanup();
-          const end = performance.now();
           if (!hidden) visibleMs += end - visibilityAt;
           if (failure) return reject(failure.reason);
           resolve({
@@ -107,7 +116,12 @@ export function createRuntimePerformance() {
               end: document.visibilityState,
             },
             mainThread: {
-              timerLag: { ...lag, intervalMs: 100, samples, thresholdMs: 50 },
+              timerLag: {
+                ...lag,
+                intervalMs: 100,
+                samples,
+                thresholdMs: lagThresholdMs,
+              },
               longTasks: {
                 supported,
                 ...(supported
@@ -140,11 +154,7 @@ export function createRuntimePerformance() {
           );
           const timer = setInterval(() => {
             const at = performance.now();
-            if (!hidden) {
-              samples++;
-              const delay = Math.max(0, at - expected);
-              if (delay >= 50) add(lag, delay);
-            }
+            sampleLag(at);
             expected = at + 100;
           }, 100);
           cleanups.push(() => clearInterval(timer));
