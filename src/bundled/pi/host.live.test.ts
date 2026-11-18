@@ -31,7 +31,7 @@ import { createInterface } from "node:readline";
 import { createModels } from "@earendil-works/pi-ai/models";
 import { fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import lockfile from "proper-lockfile";
-import { AuthFile, serve } from "./host.mjs";
+import { AuthFile, Compaction, serve } from "./host.mjs";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { defineExtension, defineTool, GenerationTask, Harness, hook } from "@earendil-works/pi-durable";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
@@ -307,6 +307,11 @@ const compacting = async (key, compactAt) => {
   return { compacted: (await kinds()).includes("pi.compaction"), calls: faux.state.callCount - from };
 };
 out.threshold = { at: await compacting("chan/threshold", 40_000), unset: await compacting("chan/unset") };
+// Every model has it, so a run resumed on any of them does; and none starts
+// its background compaction later than Pi's own.
+const policy = new Compaction(() => [{ provider: "p", id: "small", contextWindow: 128_000 }, { provider: "p", id: "large", contextWindow: 1_000_000 }]);
+policy.use(200_000);
+out.policy = policy.settings().compaction.modelOverrides;
 // Past what Pi keeps verbatim, so compacting summarizes the older turn.
 faux.setResponses([() => fauxAssistantMessage("Read it"), () => fauxAssistantMessage("Read it too"), () => fauxAssistantMessage("Summary of the chat")]);
 for (const request of ["S2", "S3"]) {
@@ -962,6 +967,10 @@ describe.skipIf(!DEPS)("the Pi host on Pi durable", () => {
     expect(out.threshold).toEqual({
       at: { compacted: true, calls: 3 },
       unset: { compacted: false, calls: 2 },
+    });
+    expect(out.policy).toEqual({
+      "p/small": { backgroundTokens: 32_768 },
+      "p/large": { backgroundTokens: 1_000_000 - 16_384 - 200_000 },
     });
     expect(out.renewed).toEqual({
       place: { seen: 0 },

@@ -568,28 +568,40 @@ const UNRUN = new Set([
 ]);
 /** Messages that arrive while Pi works join its run at the next boundary. */
 const SETTINGS = { steeringMode: "all" };
-/** An agent's compaction at `tokens`, for the models its turns ran on: a
- * compaction starts in the background there, or at Pi's own blocking
- * threshold if that is lower. */
+/** An agent's compaction at `tokens`, for every model `models` lists, so a
+ * run resumed on any of them has it: a compaction starts in the background
+ * there, or as early as Pi's own would. */
 export class Compaction {
   tokens;
-  overrides = {};
-  /** For a turn on `found`, `model`, compacting at `tokens` or Pi's default. */
-  use({ found, model }, tokens) {
-    if (tokens !== this.tokens) this.overrides = {};
+  overrides;
+  constructor(models) {
+    this.models = models;
+  }
+  /** Compacts at `tokens`, or Pi's default when unset. */
+  use(tokens) {
+    if (tokens === this.tokens) return;
     this.tokens = tokens;
-    if (!tokens || !(found.contextWindow > 0)) return;
-    const blocking =
-      found.contextWindow - DEFAULT_COMPACTION_POLICY.reserveTokens;
-    this.overrides[`${model.provider}/${model.modelId}`] = {
-      backgroundTokens: Math.max(0, blocking - tokens),
-    };
+    this.overrides = undefined;
   }
   /** Pi's settings, read at each use. */
   settings() {
-    return this.tokens
-      ? { ...SETTINGS, compaction: { modelOverrides: this.overrides } }
-      : SETTINGS;
+    const { tokens } = this;
+    if (!tokens) return SETTINGS;
+    const { reserveTokens, backgroundTokens } = DEFAULT_COMPACTION_POLICY;
+    this.overrides ??= Object.fromEntries(
+      this.models()
+        .filter(({ contextWindow }) => contextWindow > 0)
+        .map(({ provider, id, contextWindow }) => [
+          `${provider}/${id}`,
+          {
+            backgroundTokens: Math.max(
+              backgroundTokens,
+              contextWindow - reserveTokens - tokens,
+            ),
+          },
+        ]),
+    );
+    return { ...SETTINGS, compaction: { modelOverrides: this.overrides } };
   }
 }
 /** Pi's own default thinking level, for a model that thinks. */
@@ -1289,7 +1301,15 @@ export function serve({
       install(createToolSearchExtension());
       for (const extension of packages.extensions) install(extension);
       const storage = await openNodeSqliteStorage(path);
-      const compaction = new Compaction();
+      const compaction = new Compaction(() =>
+        models.getProviders().flatMap((provider) =>
+          models.getModels(provider.id).map((model) => ({
+            provider: provider.id,
+            id: model.id,
+            contextWindow: model.contextWindow,
+          })),
+        ),
+      );
       harness = await Harness.open(
         storage,
         {
@@ -2005,7 +2025,6 @@ export function serve({
     opened.cores.set(conversation.id, turn.core?.text);
     const steers = busy && turn.steer;
     const chosen = await choose(turn);
-    opened.compaction.use(chosen, turn.compactAt);
     const change = steers
       ? {
           ...(turn.pick?.model ? { model: chosen.model } : {}),
@@ -2191,9 +2210,11 @@ export function serve({
         : { ok: true, message: `Connected to ${model.modelId}` };
     },
     /** Opens the agent's storage, once, with its Buzz tools as they are now. */
-    async open({ agent, tools, hint, credential }) {
+    async open({ agent, tools, hint, credential, compactAt }) {
       if (credential) credentials.set(agent, credential);
       const opened = await opening(agent);
+      // Before anything resumes a run left unfinished.
+      opened.compaction.use(compactAt);
       const listed = JSON.stringify([tools, hint]);
       if (opened.tools !== listed) {
         opened.install(buzz(opened, tools, hint));
@@ -2324,6 +2345,8 @@ export function serve({
         throw error;
       }
       if (gatewayTurn) opened.recorded.keys.add(key);
+      // Before this turn waits on a run it resumes.
+      opened.compaction.use(turn.compactAt);
       const prior = opened.queues.get(key);
       const delivered = (async () => {
         await prior?.catch(() => undefined);
@@ -2518,6 +2541,7 @@ export function serve({
      * requests, and no Activity. */
     async once({ agent, gatewayTurn, ...turn }) {
       const opened = await agentOf(agent);
+      opened.compaction.use(turn.compactAt);
       const conversation = await opened.harness.createConversation(
         { ownership: { kind: "ownerless" } },
         context,
