@@ -654,6 +654,35 @@ export function EditableInput({
     const tokenViews = () => refresh((revision) => revision + 1);
     const { markdown_table: table, paragraph } = composerSchema.nodes;
     const endsWithTable = (doc: EditorNode) => doc.lastChild?.type === table;
+    const preserveTableSources = (tr: Transaction, overBudget = false) => {
+      const roots = new Set<number>();
+      for (const { from } of projectComposerDocument(tr.doc).tables) {
+        const position = tr.doc.resolve(from);
+        if (position.depth) roots.add(position.before(1));
+        else if (overBudget) roots.add(from);
+      }
+      // Source fallback keeps the enclosing list/quote prefixes and matches
+      // the editor's representation after a save and reload.
+      for (const position of [...roots].reverse()) {
+        const block = tr.doc.nodeAt(position);
+        if (!block) continue;
+        const source = documentEditorMarkdown(
+          projectComposerDocument(composerSchema.nodes.doc.create(null, block))
+            .draft,
+        );
+        const end = position + block.nodeSize;
+        const { head } = tr.selection;
+        tr.replaceWith(
+          position,
+          end,
+          paragraph.create(null, composerSchema.text(source)),
+        );
+        if (head >= position && head <= end)
+          tr.setSelection(
+            TextSelection.create(tr.doc, position + 1 + source.length),
+          );
+      }
+    };
     const tableTextSelection = () => {
       if (!tableHosts.current.size) return;
       const selection = editor.dom.ownerDocument.getSelection();
@@ -1244,35 +1273,8 @@ export function EditableInput({
         current.current.onPasteTooLong?.();
         return null;
       }
-      if (projected.tables.length) {
-        const overBudget = !fitsDocumentRenderBudget(markdown);
-        const roots = new Set<number>();
-        for (const { from } of projected.tables) {
-          const position = tr.doc.resolve(from);
-          if (position.depth) roots.add(position.before(1));
-          else if (overBudget) roots.add(from);
-        }
-        // Source fallback keeps the enclosing list/quote prefixes and matches
-        // the editor's representation after a save and reload.
-        for (const position of [...roots].reverse()) {
-          const block = tr.doc.nodeAt(position);
-          if (!block) continue;
-          const source = documentEditorMarkdown(
-            projectComposerDocument(nodes.doc.create(null, block)).draft,
-          );
-          const end = position + block.nodeSize;
-          const { head } = tr.selection;
-          tr.replaceWith(
-            position,
-            end,
-            nodes.paragraph.create(null, composerSchema.text(source)),
-          );
-          if (head >= position && head <= end)
-            tr.setSelection(
-              TextSelection.create(tr.doc, position + 1 + source.length),
-            );
-        }
-      }
+      if (projected.tables.length && !fitsDocumentRenderBudget(markdown))
+        preserveTableSources(tr, true);
       editor.dispatch(tr.scrollIntoView());
       editor.focus();
       return { from, to: editor.state.selection.to };
@@ -1648,7 +1650,13 @@ export function EditableInput({
       return true;
     };
     const toggleFormat = (format: ComposerFormat) => {
-      if (!editable() || composing.current || editor.composing) return;
+      if (
+        !editable() ||
+        composing.current ||
+        editor.composing ||
+        tableTextSelection()
+      )
+        return;
       if (current.current.markdownMode === "document" && format === "spoiler")
         return;
       flushTokens();
@@ -1750,7 +1758,13 @@ export function EditableInput({
       editor.focus();
     };
     const editLink = (): ComposerLinkEdit | null => {
-      if (!editable() || composing.current || editor.composing) return null;
+      if (
+        !editable() ||
+        composing.current ||
+        editor.composing ||
+        tableTextSelection()
+      )
+        return null;
       const doc = editor.state.doc,
         source = projection();
       const context = composerMarkdownContext(doc, source);
@@ -1973,6 +1987,30 @@ export function EditableInput({
       flushTokens();
       (forward ? redo : undo)(editor.state, editor.dispatch);
       editor.focus();
+    };
+    const primaryModifier = (event: globalThis.KeyboardEvent) =>
+      isApplePlatform(navigator.platform)
+        ? event.metaKey && !event.ctrlKey
+        : event.ctrlKey && !event.metaKey;
+    const historyShortcut = (event: globalThis.KeyboardEvent, key: string) => {
+      if (
+        !primaryModifier(event) ||
+        event.altKey ||
+        (key !== "z" && key !== "y")
+      )
+        return false;
+      historyCommand(event.shiftKey || key === "y");
+      return true;
+    };
+    const handleTableKey = (event: globalThis.KeyboardEvent, key: string) => {
+      if (
+        key !== "backspace" &&
+        key !== "delete" &&
+        !historyShortcut(event, key)
+      )
+        return false;
+      event.preventDefault();
+      return true;
     };
     /** Adopts the DOM selection as the editor's. A range spanning the whole
      * document becomes AllSelection, so deleting a DOM select-all also clears
@@ -2220,6 +2258,8 @@ export function EditableInput({
           writingsuggestions: "false",
         }),
         dispatchTransaction(tr: Transaction) {
+          if (tr.docChanged && current.current.markdownMode === "document")
+            preserveTableSources(tr);
           if (tr.docChanged && separateHistory) {
             closeHistory(tr);
             separateHistory = false;
@@ -2280,9 +2320,16 @@ export function EditableInput({
             return {
               dom,
               ignoreMutation: (mutation) => mutation.type !== "selection",
-              stopEvent: (event) =>
-                event.type === "keydown" &&
-                event.target instanceof HTMLTableElement,
+              stopEvent(event) {
+                if (
+                  !(event instanceof KeyboardEvent) ||
+                  event.type !== "keydown" ||
+                  !(event.target instanceof HTMLTableElement)
+                )
+                  return false;
+                handleTableKey(event, keyboardKey(event).toLowerCase());
+                return true;
+              },
               destroy() {
                 tableHosts.current.delete(dom);
                 tokenViews();
@@ -2398,17 +2445,14 @@ export function EditableInput({
           return true;
         },
         handleKeyDown(_view, event) {
-          if (tableTextSelection())
-            return event.key === "Backspace" || event.key === "Delete";
           if (composing.current || event.isComposing || event.keyCode === 229)
             return false;
-          syncNativeSelection();
-          const apple = isApplePlatform(navigator.platform);
-          const primary = apple
-            ? event.metaKey && !event.ctrlKey
-            : event.ctrlKey && !event.metaKey;
           const named = keyboardKey(event);
           const key = named.toLowerCase();
+          if (tableTextSelection()) return handleTableKey(event, key);
+          syncNativeSelection();
+          const apple = isApplePlatform(navigator.platform);
+          const primary = primaryModifier(event);
           plainPaste =
             primary &&
             event.shiftKey &&
@@ -2445,10 +2489,7 @@ export function EditableInput({
               return true;
             }
           }
-          if (primary && !event.altKey && (key === "z" || key === "y")) {
-            historyCommand(event.shiftKey || key === "y");
-            return true;
-          }
+          if (historyShortcut(event, key)) return true;
           if (named === "ArrowLeft" || named === "ArrowRight") {
             if (
               !event.altKey &&
@@ -2567,6 +2608,11 @@ export function EditableInput({
           },
           beforeinput(_view, event) {
             if (tableTextSelection()) {
+              if (
+                event.inputType === "historyUndo" ||
+                event.inputType === "historyRedo"
+              )
+                historyCommand(event.inputType === "historyRedo");
               event.preventDefault();
               return true;
             }

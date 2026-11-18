@@ -2743,6 +2743,23 @@ async function tableClipboard(rich, type, payload = {}) {
 
 const smallTable = "| Cell | Value |\n| --- | --- |\n| cellword | 2 |";
 
+async function selectCellText(page, cell) {
+  const points = await cell.evaluate((element) => {
+    const range = document.createRange();
+    range.setStart(element.firstChild, 0);
+    range.setEnd(element.firstChild, 4);
+    const { left, right, y, height } = range.getBoundingClientRect();
+    return { left: left + 0.5, right: right - 0.5, y: y + height / 2 };
+  });
+  await page.mouse.move(points.left, points.y);
+  await page.mouse.down();
+  await page.mouse.move(points.right, points.y, { steps: 5 });
+  await page.mouse.up();
+  await expect
+    .poll(() => page.evaluate(() => getSelection()?.toString()))
+    .toBe("cell");
+}
+
 test("document table selection keeps clipboard and deletion scoped", async ({
   page,
   app,
@@ -2762,20 +2779,7 @@ test("document table selection keeps clipboard and deletion scoped", async ({
       field.focus();
       field.setSelectionRange(0, type === "cut" ? "Before".length : 0);
     }, type);
-    const points = await cell.evaluate((element) => {
-      const range = document.createRange();
-      range.setStart(element.firstChild, 0);
-      range.setEnd(element.firstChild, 4);
-      const { left, right, y, height } = range.getBoundingClientRect();
-      return { left: left + 0.5, right: right - 0.5, y: y + height / 2 };
-    });
-    await page.mouse.move(points.left, points.y);
-    await page.mouse.down();
-    await page.mouse.move(points.right, points.y, { steps: 5 });
-    await page.mouse.up();
-    await expect
-      .poll(() => page.evaluate(() => getSelection()?.toString()))
-      .toBe("cell");
+    await selectCellText(page, cell);
     const { text } = await tableClipboard(rich, type);
     expect.soft(text).toBe("cell");
   }
@@ -2797,6 +2801,111 @@ test("document table selection keeps clipboard and deletion scoped", async ({
   await reader.getByRole("button", { name: "Edit Guide" }).click();
   await markdown.click();
   await expect(source).toHaveValue("Before\n\nAfter");
+});
+
+test("document table text keeps toolbar, Backspace and history scoped", async ({
+  page,
+  app,
+}) => {
+  const { reader, rich, source, markdown, formatted } = await openTableEditor(
+    page,
+    app,
+  );
+  const original = `Before\n\n${smallTable}\n\nAfter`;
+  await markdown.click();
+  await source.fill(original);
+  await formatted.click();
+  const grid = rich.getByRole("table");
+  const selectGridText = async () => {
+    await grid.evaluate((table) => {
+      table.focus();
+      const text = table.querySelector("tbody td")?.firstChild;
+      if (!text) throw new Error("Missing cell text");
+      document.getSelection()?.setBaseAndExtent(text, 0, text, 4);
+    });
+    await expect(grid).toBeFocused();
+    await expect
+      .poll(() => page.evaluate(() => getSelection()?.toString()))
+      .toBe("cell");
+  };
+  for (const name of ["Bold", "Quote", "Link"]) {
+    await rich.evaluate((field) => {
+      field.focus();
+      field.setSelectionRange(0, "Before".length);
+    });
+    await selectGridText();
+    await reader.getByRole("button", { name, exact: true }).click();
+    const dialog = page.getByRole("dialog");
+    await expect.soft(dialog).toHaveCount(0, { timeout: 1000 });
+    if (await dialog.isVisible()) await page.keyboard.press("Escape");
+  }
+  await markdown.click();
+  await expect.soft(source).toHaveValue(original, { timeout: 1000 });
+  await source.fill(original);
+  await formatted.click();
+  await selectGridText();
+  await page.evaluate(() => {
+    document.addEventListener(
+      "keydown",
+      (event) => {
+        document.documentElement.dataset.tableBackspace = String(
+          event.defaultPrevented,
+        );
+      },
+      { once: true },
+    );
+  });
+  await page.keyboard.press("Backspace");
+  await expect
+    .soft(page.locator("html"))
+    .toHaveAttribute("data-table-backspace", "true");
+  await expect(reader).toBeVisible();
+
+  await rich.evaluate((field) => {
+    field.focus();
+    field.setSelectionRange(field.value.length, field.value.length);
+  });
+  await rich.pressSequentially("Z");
+  await expect(rich).toContainText("AfterZ");
+  await selectGridText();
+  await page.keyboard.press("ControlOrMeta+z");
+  await expect(rich).toContainText("After");
+  await expect(rich).not.toContainText("AfterZ");
+  await markdown.click();
+  await expect(source).toHaveValue(original);
+});
+
+test("toolbar wrapping keeps table Markdown source through reopen", async ({
+  page,
+  app,
+}) => {
+  const { reader, rich, source, markdown, formatted } = await openTableEditor(
+    page,
+    app,
+  );
+  for (const [name, marker] of [
+    ["Quote", "> Before"],
+    ["Bullet list", "- Before"],
+    ["Ordered list", "1. Before"],
+  ]) {
+    await markdown.click();
+    await source.fill(`Before\n\n${smallTable}\n\nAfter`);
+    await formatted.click();
+    await rich.press("ControlOrMeta+a");
+    await reader.getByRole("button", { name, exact: true }).click();
+    await expect
+      .soft(rich.getByRole("table"))
+      .toHaveCount(0, { timeout: 1000 });
+    await reader.getByRole("button", { name: "Read Guide" }).click();
+    await reader.getByRole("button", { name: "Edit Guide" }).click();
+    await expect(rich.getByRole("table")).toHaveCount(0);
+    await markdown.click();
+    const saved = await source.inputValue();
+    expect(saved).toContain(marker);
+    expect(saved).toContain("| cellword | 2 |");
+    expect(saved).toContain("After");
+    await formatted.click();
+  }
 });
 
 test("nested document table paste stays source through save and reopen", async ({

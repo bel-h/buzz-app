@@ -225,9 +225,9 @@ lists. Normal plain-text paste reads Markdown; paste-as-plain-text keeps the
 existing literal-text behavior.
 Supported top-level GFM tables appear as grids in rich mode and retain their
 Markdown through surrounding edits. Edit their cells in source mode. Copy and
-Cut on selected grid text both copy the selection. Tables pasted into a list
-or quote keep their enclosing Markdown as source. Tables stay visible as source
-when their combined cell count exceeds the reader's display limit.
+Cut on selected grid text both copy the selection. Tables pasted or wrapped
+into a list or quote keep their enclosing Markdown as source. Tables also stay
+visible as source when their combined cell count exceeds the reader's display limit.
 
 ```js
 const [value, onChange] = ctx.react.useState("A **document**.");
