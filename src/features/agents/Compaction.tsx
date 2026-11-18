@@ -1,4 +1,4 @@
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { Input } from "../../shared/design-system/ui/Input";
 import { InputGroup } from "../../shared/design-system/ui/InputGroup";
 import { PreferenceRow } from "../../shared/design-system/ui/PreferenceRow";
@@ -18,12 +18,14 @@ const parse = (text: string) => {
   return compactAt(tokens) ? tokens : undefined;
 };
 
+const INVALID = `Enter a whole number of at least ${MIN_COMPACT_AT / 1000}K, or leave it blank for the model default.`;
+
 /** When the agent's session compacts its context: a size in thousands of
  * tokens, or blank for the model's own default. Only valid sizes reach
- * `onChange`; anything else shows an error and reverts on blur. */
+ * `onChange`; anything else keeps its error and stops its form submitting. */
 export function CompactionField({
   value,
-  description = "Compacts at this size, or earlier if the model's context window is smaller.",
+  description = "Compacts at this size, or sooner if the harness would on its own.",
   disabled = false,
   onChange,
 }: {
@@ -36,6 +38,8 @@ export function CompactionField({
   const [text, setText] = useState(shown(value));
   useEffect(() => setText(shown(value)), [value]);
   const valid = parse(text) !== undefined;
+  const input = useRef<HTMLInputElement>(null);
+  useEffect(() => input.current?.setCustomValidity(valid ? "" : INVALID));
   return (
     <>
       <PreferenceRow
@@ -47,13 +51,14 @@ export function CompactionField({
               surface="panel"
               trailing={
                 <span id={unit}>
-                  {text.trim() && <span aria-hidden="true">K</span>}
+                  {text.trim() && <span aria-hidden="true">K tokens</span>}
                   <span className="sr-only">thousand tokens</span>
                 </span>
               }
             >
               <Input
                 {...label}
+                ref={input}
                 aria-describedby={`${label["aria-describedby"] ?? ""} ${unit}`.trim()}
                 aria-invalid={!valid || undefined}
                 inputMode="numeric"
@@ -65,7 +70,7 @@ export function CompactionField({
                   const tokens = parse(event.target.value);
                   if (tokens !== undefined) onChange(tokens);
                 }}
-                onBlur={() => setText(shown(value))}
+                onBlur={() => valid && setText(shown(value))}
               />
             </InputGroup>
           </div>
@@ -73,8 +78,7 @@ export function CompactionField({
       />
       {!valid && (
         <p role="alert" className="buzz-field-error">
-          Enter a whole number of at least {MIN_COMPACT_AT / 1000}K, or leave it
-          blank for the model default.
+          {INVALID}
         </p>
       )}
     </>

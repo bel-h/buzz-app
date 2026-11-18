@@ -3,11 +3,16 @@
 export const MIN_COMPACT_AT = 100_000;
 
 /** `value` as a token count an agent compacts at, or undefined for its
- * harness's own default. Valid sizes are whole thousands from the minimum. */
+ * harness's own default. Valid sizes are whole thousands from the minimum, and safe integers so
+ * every harness can read them. */
 export const compactAt = (value: unknown) => {
   const tokens =
     typeof value === "string" && /^\d+$/.test(value) ? Number(value) : NaN;
-  return tokens >= MIN_COMPACT_AT && tokens % 1000 === 0 ? tokens : undefined;
+  return Number.isSafeInteger(tokens) &&
+    tokens >= MIN_COMPACT_AT &&
+    tokens % 1000 === 0
+    ? tokens
+    : undefined;
 };
 
 /** `config` with `compactAt` set to `value`, or without it for the

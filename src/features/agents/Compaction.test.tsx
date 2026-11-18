@@ -12,7 +12,15 @@ afterEach(cleanup);
 it("accepts whole thousands from 100K and nothing else", () => {
   expect(compactAt("100000")).toBe(100000);
   expect(compactAt("150000")).toBe(150000);
-  for (const value of ["99000", "150500", "1e5", "", undefined, 150000])
+  for (const value of [
+    "99000",
+    "150500",
+    "1e5",
+    "10000000000000000000",
+    "",
+    undefined,
+    150000,
+  ])
     expect(compactAt(value)).toBeUndefined();
 });
 
@@ -36,7 +44,7 @@ it("saves only valid sizes and shows the model default when blank", async () => 
   const field = screen.getByRole("textbox", { name: "Auto-compact at" });
   expect(field).toHaveValue("200");
   expect(field).toHaveAccessibleDescription(
-    "Compacts at this size, or earlier if the model's context window is smaller. thousand tokens",
+    "Compacts at this size, or sooner if the harness would on its own. thousand tokens",
   );
 
   await user.clear(field);
@@ -45,11 +53,44 @@ it("saves only valid sizes and shows the model default when blank", async () => 
 
   await user.type(field, "50");
   expect(screen.getByRole("alert")).toHaveTextContent("at least 100K");
+  // Its error stays, and stops a form saving the blank staged before it.
   await user.tab();
-  expect(field).toHaveValue("");
-  expect(screen.queryByRole("alert")).toBeNull();
+  expect(field).toHaveValue("50");
+  expect(field).toBeInvalid();
+  expect(screen.getByRole("alert")).toBeInTheDocument();
 
+  await user.clear(field);
   await user.type(field, "150");
   expect(saved.at(-1)).toBe("150000");
   expect(screen.queryByRole("alert")).toBeNull();
+});
+
+it("keeps a form from saving while the size is invalid", async () => {
+  const user = userEvent.setup();
+  const submitted: string[] = [];
+  function Form() {
+    const [value, setValue] = useState<string | undefined>("200000");
+    return (
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          submitted.push(value ?? "");
+        }}
+      >
+        <CompactionField value={value} onChange={setValue} />
+        <button type="submit">Save</button>
+      </form>
+    );
+  }
+  render(<Form />);
+  const field = screen.getByRole("textbox", { name: "Auto-compact at" });
+  await user.clear(field);
+  await user.type(field, "50");
+  await user.click(screen.getByRole("button", { name: "Save" }));
+  expect(submitted).toEqual([]);
+
+  await user.clear(field);
+  await user.type(field, "300");
+  await user.click(screen.getByRole("button", { name: "Save" }));
+  expect(submitted).toEqual(["300000"]);
 });
