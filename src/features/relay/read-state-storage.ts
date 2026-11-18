@@ -74,6 +74,12 @@ export type UnreadJournal = Readonly<{
   /** A refused channel clear's warning, kept across reloads. The clear
    * itself is not retried; the user reads again. */
   blockedClear?: string;
+  /** The channels whose clears it refused: it clears once each has had a
+   * successful clear or its group is no longer active. */
+  blockedKeys?: readonly string[];
+  /** A group was skipped because its key's held list was full: unread
+   * actions stay closed until a complete refresh recovers it. */
+  heldOverflow?: true;
 }>;
 export const HELD_GROUPS_PER_KEY = 8;
 export const newUnreadJournal = (): UnreadJournal => ({
@@ -116,7 +122,14 @@ function readUnread(raw: unknown, slots: readonly string[]): UnreadJournal {
     !record(raw.held) ||
     Object.keys(raw.held).length > READ_STATE_KEYS / 3 ||
     (raw.blockedClear !== undefined &&
-      (typeof raw.blockedClear !== "string" || raw.blockedClear.length > 200))
+      (typeof raw.blockedClear !== "string" ||
+        raw.blockedClear.length > 200)) ||
+    (raw.blockedKeys !== undefined &&
+      (raw.blockedClear === undefined ||
+        !Array.isArray(raw.blockedKeys) ||
+        raw.blockedKeys.length > READ_STATE_KEYS / 3 ||
+        !raw.blockedKeys.every(channelContext))) ||
+    (raw.heldOverflow !== undefined && raw.heldOverflow !== true)
   )
     throw new Error("Invalid saved unread state");
   const held: Record<string, readonly HeldGroup[]> = {};
@@ -143,6 +156,10 @@ function readUnread(raw: unknown, slots: readonly string[]): UnreadJournal {
     ...(raw.blockedClear === undefined
       ? {}
       : { blockedClear: raw.blockedClear as string }),
+    ...(raw.blockedKeys === undefined
+      ? {}
+      : { blockedKeys: Object.freeze([...(raw.blockedKeys as string[])]) }),
+    ...(raw.heldOverflow && { heldOverflow: true as const }),
   });
 }
 /** Storage is untrusted. Corrupt intent is an error, never an empty journal to overwrite. */

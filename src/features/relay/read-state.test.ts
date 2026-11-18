@@ -2972,6 +2972,126 @@ describe("expiring unread (version 2)", () => {
     });
     expect(active(owner)).toBe(true);
   });
+
+  describe("a held list that is full", () => {
+    async function overflowed() {
+      const f = fixture(T);
+      const owner = await started(f);
+      const version = (n: number) =>
+        peerUnreadMarker(f, "room", 0, {
+          createdAt: T + n,
+          set: T + 700 + 2 * n,
+          clear: T + 701 + 2 * n,
+          slot: "c".repeat(32),
+          clientId: "far",
+        });
+      for (let n = 1; n <= 8; n++) {
+        owner.accept([await version(n)]);
+        await owner.refresh();
+      }
+      // The ninth distinct version arrives with an unrelated peer's group;
+      // the relay holds both as their peers' latest records.
+      const ninth = await version(9);
+      const other = await peerUnreadMarker(f, "other", 0, {
+        createdAt: T - 5,
+        set: T - 5,
+      });
+      f.addRemote(ninth);
+      f.addRemote(other);
+      owner.accept([ninth, other]);
+      await owner.refresh();
+      return { f, owner };
+    }
+    it("skips only the overflowing group, so an unrelated peer's group still merges", async () => {
+      const { f, owner } = await overflowed();
+      expect(f.journal()?.state.overrides.other).toMatchObject({ set: T - 5 });
+      expect(held(f).room).toHaveLength(8);
+      expect(f.journal()?.unread?.heldOverflow).toBe(true);
+      // Unread actions stay closed until the skipped group is recovered.
+      await owner.markLocalUnread("third", () => true);
+      expect(f.journal()?.state.overrides.third).toBeUndefined();
+    });
+    it("keeps the guard through a failed, bounded or resumed read, and a complete refresh after draining recovers the peer's latest group", async () => {
+      const { f, owner } = await overflowed();
+      f.reader.read.mockRejectedValueOnce(new Error("offline"));
+      await owner.refresh();
+      expect(f.journal()?.unread?.heldOverflow).toBe(true);
+      const bounded = f.make();
+      await bounded.ready;
+      await bounded.refresh();
+      expect(f.journal()?.unread?.heldOverflow).toBe(true);
+      owner.stale();
+      await owner.resume();
+      expect(f.journal()?.unread?.heldOverflow).toBe(true);
+      // The clock reaches every held group: the drain itself rereads.
+      f.setNow(T + 100);
+      await owner.upkeep();
+      await owner.refresh();
+      expect(held(f)).toEqual({});
+      expect(f.journal()?.unread?.heldOverflow).toBeUndefined();
+      expect(f.journal()?.state.overrides.room).toMatchObject({
+        clear: T + 719,
+      });
+    });
+  });
+
+  describe("a clear refused by the clock", () => {
+    const clockNotice = {
+      status: "error",
+      error: expect.stringContaining("ahead of this clock"),
+    };
+    async function refused() {
+      const f = fixture(T);
+      const owner = await started(f);
+      owner.accept([
+        await peerUnreadMarker(f, "room", 0, { createdAt: T, set: T + 300 }),
+        await peerUnreadMarker(f, "other", 0, {
+          createdAt: T,
+          set: T - 5,
+          slot: "c".repeat(32),
+          clientId: "other-peer",
+        }),
+      ]);
+      await owner.refresh();
+      await owner.read("room", 0, () => true, true);
+      expect(owner.snapshot()).toMatchObject(clockNotice);
+      return { f, owner };
+    }
+    it("keeps its notice through the next flush", async () => {
+      const { owner } = await refused();
+      await owner.flush();
+      expect(active(owner)).toBe(true);
+      expect(owner.snapshot()).toMatchObject(clockNotice);
+    });
+    it("keeps its notice when another channel's clear succeeds", async () => {
+      const { f, owner } = await refused();
+      await owner.read("other", 0, () => true, true);
+      expect(f.journal()?.state.overrides.other?.clear).toBeGreaterThan(0);
+      await owner.flush();
+      expect(owner.snapshot()).toMatchObject(clockNotice);
+    });
+    it("clears its notice once the same channel's clear succeeds", async () => {
+      const { f, owner } = await refused();
+      f.setNow(T + 301);
+      await owner.read("room", 0, () => true, true);
+      expect(f.journal()?.unread?.blockedClear).toBeUndefined();
+      expect(owner.snapshot().error).toBeUndefined();
+    });
+    it("clears its notice once the peer's group is no longer active", async () => {
+      const { f, owner } = await refused();
+      owner.accept([
+        await peerUnreadMarker(f, "room", 0, {
+          createdAt: T + 1,
+          set: T + 300,
+          clear: T + 310,
+        }),
+      ]);
+      await owner.refresh();
+      await owner.flush();
+      expect(f.journal()?.unread?.blockedClear).toBeUndefined();
+      expect(owner.snapshot().error).toBeUndefined();
+    });
+  });
 });
 
 describe("saved expiring unread journal", () => {
