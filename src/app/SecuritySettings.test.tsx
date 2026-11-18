@@ -367,8 +367,8 @@ const stopped = ["credential_sign_window_stop", expect.anything()] as const;
 
 it("lists a tool's remembered approvals and stops one", async () => {
   const leaves = { kind: 9022, until: soon(240) };
-  const bans = { kind: 9040, until: soon(120) };
-  let listed = [{ ...tool, windows: [leaves, bans] }, other];
+  const edits = { kind: 9002, until: soon(120) };
+  let listed = [{ ...tool, windows: [leaves, edits] }, other];
   vi.mocked(invoke).mockImplementation(async (command, args) => {
     if (command === "credential_pairings_list") return listed;
     if (command === "credential_sign_window_stop") {
@@ -387,7 +387,7 @@ it("lists a tool's remembered approvals and stops one", async () => {
     await screen.findByText(`Can leave channels until ${at(leaves.until)}`),
   ).toBeInTheDocument();
   expect(
-    screen.getByText(`Can ban people from channels until ${at(bans.until)}`),
+    screen.getByText(`Can edit channels until ${at(edits.until)}`),
   ).toBeInTheDocument();
   // Only the tool that holds approvals shows any.
   expect(screen.getAllByRole("button", { name: "Stop" })).toHaveLength(2);
@@ -402,7 +402,7 @@ it("lists a tool's remembered approvals and stops one", async () => {
   await waitFor(() =>
     expect(screen.queryByText(/Can leave channels/)).toBeNull(),
   );
-  expect(screen.getByText(/Can ban people from channels/)).toBeInTheDocument();
+  expect(screen.getByText(/Can edit channels/)).toBeInTheDocument();
   // The Stop that had focus is gone; focus stays in the tool's row.
   await waitFor(() =>
     expect(screen.getAllByRole("button", { name: "Revoke" })[0]).toHaveFocus(),

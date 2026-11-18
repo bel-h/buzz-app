@@ -179,9 +179,11 @@ function SigningDialog({
           <Button ref={deny} onClick={() => onAnswer("deny")}>
             Deny
           </Button>
-          <Button onClick={() => onAnswer("window")}>
-            Allow {plural} for {duration(request.windowSeconds)}
-          </Button>
+          {request.windowSeconds > 0 && (
+            <Button onClick={() => onAnswer("window")}>
+              Allow {plural} for {duration(request.windowSeconds)}
+            </Button>
+          )}
           <Button variant="prominent" onClick={() => onAnswer("once")}>
             Allow once
           </Button>

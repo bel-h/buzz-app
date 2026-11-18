@@ -4,7 +4,7 @@
 use super::keychain::{Keychain, Lease, LEASED};
 use super::{digest, unix_now, Failure};
 use serde::{Deserialize, Serialize};
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 use tokio::sync::oneshot;
@@ -133,6 +133,12 @@ struct State {
     sign_asked: VecDeque<Instant>,
     /// Kinds a pairing may have signed without asking, until they lapse.
     windows: Vec<approval::Window>,
+    /// Bumped by every page load: an answer heard before it begins no window.
+    sign_epoch: u64,
+    /// When each pairing was last asked, for its own share of the asks.
+    sign_asked_by: HashMap<String, VecDeque<Instant>>,
+    /// Until when a pairing that was declined, or not answered, may not ask.
+    sign_cooldowns: HashMap<String, Instant>,
     /// The NIP-FI retirements already revoked for (see [`Pairings::follow`]).
     retirements: u64,
     /// Sign-outs and changes of account recorded but not yet over; see
@@ -180,6 +186,7 @@ impl Pairings {
     /// mid-save holds the write lock and, on seeing its community gone,
     /// removes its record before releasing it.
     pub(crate) async fn set_communities(&self, communities: Vec<String>) {
+        let ended;
         {
             let mut saved = self
                 .communities
@@ -199,7 +206,15 @@ impl Pairings {
             {
                 state.signing = None;
             }
+            let before = state.windows.len();
+            state
+                .windows
+                .retain(|window| is_saved(&communities, &window.relay));
+            ended = state.windows.len() != before;
             *saved = Some(communities);
+        }
+        if ended {
+            (self.notify)(Notice::Changed);
         }
         drop(self.write.lock().await);
     }
@@ -623,14 +638,21 @@ impl Pairings {
         };
     }
     /// A new page has mounted no prompt yet, and never heard a request still
-    /// waiting: dropping its sender declines it, as the old page's unmount
-    /// would have.
+    /// waiting: dropping its sender closes it, as the old page's unmount
+    /// would have. Every window ends, since none is shown until it mounts.
     pub(crate) fn page_load(&self) {
         let mut state = self.state();
         state.prompts = 0;
         state.pending = None;
         state.sign_prompts = 0;
         state.signing = None;
+        state.sign_epoch += 1;
+        let ended = !state.windows.is_empty();
+        state.windows.clear();
+        drop(state);
+        if ended {
+            (self.notify)(Notice::Changed);
+        }
     }
 
     pub(crate) async fn list(&self) -> Result<Vec<Listed>, String> {

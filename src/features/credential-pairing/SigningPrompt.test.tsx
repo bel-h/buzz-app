@@ -153,10 +153,10 @@ it("denies on Escape and on Close", async () => {
 
 it("names the window after the kind, and its length from the request", async () => {
   render(<SigningPrompt relay={relay} />);
-  await ask({ ...request, windowSeconds: 600, kind: 9008 });
+  await ask({ ...request, windowSeconds: 600, kind: 9002 });
   expect(
     await screen.findByRole("button", {
-      name: "Allow channel deletions for 10 min",
+      name: "Allow channel edits for 10 min",
     }),
   ).toBeInTheDocument();
   await ask({ ...request, id: "s2", windowSeconds: 45 });
@@ -165,18 +165,30 @@ it("names the window after the kind, and its length from the request", async () 
   ).toBeInTheDocument();
 });
 
-it("says a reaction removal is one", async () => {
+it("offers only Allow once for a kind native code allows only once", async () => {
+  render(<SigningPrompt relay={relay} />);
+  await ask({ ...request, kind: 9008, windowSeconds: 0 });
+  await screen.findByRole("alertdialog");
+  expect(
+    screen
+      .getAllByRole("button")
+      .map((button) => button.getAttribute("aria-label") ?? button.textContent),
+  ).toEqual(["Close", "Deny", "Allow once"]);
+});
+
+it("does not take a deletion's claimed kind as what it deletes", async () => {
   render(<SigningPrompt relay={relay} />);
   await ask({
     ...request,
     kind: 5,
+    windowSeconds: 0,
     tags: [
       ["e", "m1"],
       ["k", "7"],
     ],
   });
   expect(await screen.findByRole("alertdialog")).toHaveTextContent(
-    "buzz-cli wants to remove a reaction",
+    "buzz-cli wants to delete something you or your agents posted",
   );
 });
 

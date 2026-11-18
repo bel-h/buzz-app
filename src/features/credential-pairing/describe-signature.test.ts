@@ -19,20 +19,23 @@ it("names a channel it knows, and a short id for one it does not", () => {
   expect(describeSignature(9022, [], lookup).action).toBe("leave a channel");
 });
 
-it("tells a reaction from a message in a deletion", () => {
+it("never takes a deletion's claimed kind as what it deletes", () => {
   expect(
     describeSignature(5, [
       ["e", "x"],
       ["k", "7"],
     ]).action,
-  ).toBe("remove a reaction");
+  ).toBe("delete something you or your agents posted");
+  expect(describeSignature(5, [["a", "30620:key:flow"]]).action).toBe(
+    "delete something you or your agents posted",
+  );
   expect(
     describeSignature(5, [
       ["e", "x"],
-      ["k", "9"],
+      ["e", "y"],
+      ["a", "30620:key:flow"],
     ]).action,
-  ).toBe("delete a message");
-  expect(describeSignature(5, [["e", "x"]]).action).toBe("delete a message");
+  ).toBe("delete 3 things you or your agents posted");
 });
 
 it("names the person a moderation or membership change is about", () => {
@@ -47,13 +50,11 @@ it("names the person a moderation or membership change is about", () => {
     "remove Alex from #general",
   );
   expect(describeSignature(9040, tags, lookup).action).toBe(
-    "ban Alex from #general",
+    "ban Alex from the community permanently",
   );
-  expect(describeSignature(9042, tags, lookup).action).toBe(
-    "time out Alex in #general",
-  );
+  expect(describeSignature(9041, tags, lookup).action).toBe("unban Alex");
   expect(describeSignature(9043, tags, lookup).action).toBe(
-    "end the timeout for Alex in #general",
+    "end the timeout for Alex",
   );
   expect(describeSignature(41011, [["p", pubkey]], lookup).action).toBe(
     "add Alex to a DM",
@@ -124,9 +125,156 @@ it("says what an edit changes", () => {
   expect(edit(["name", "new"])).toBe("rename #general");
   expect(edit(["about", "x"])).toBe("change the description of #general");
   expect(edit(["name", "new"], ["about", "x"])).toBe(
-    "change the name and description of #general",
+    "edit #general: rename it and change its description",
   );
   expect(edit()).toBe("edit #general");
+});
+
+it("names every edit the relay makes, not just the first", () => {
+  const edit = (...tags: string[][]) =>
+    describeSignature(9002, [["h", channel], ...tags], lookup).action;
+  expect(edit(["visibility", "private"])).toBe("make #general private");
+  expect(edit(["join_role", "guest"])).toBe(
+    "make people who join #general guests who can't post",
+  );
+  expect(edit(["unlisted", "true"])).toBe(
+    "hide #general from the channel list",
+  );
+  expect(edit(["ttl", "60"])).toBe("make messages in #general disappear");
+  expect(edit(["t", "ops"])).toBe("change the labels of #general");
+  expect(edit(["archived", "true"], ["visibility", "private"])).toBe(
+    "edit #general: archive it and make it private",
+  );
+  expect(
+    edit(["name", "x"], ["visibility", "open"], ["auto_join", "true"]),
+  ).toBe(
+    "edit #general: rename it, make it open to everyone and turn auto-join on for it",
+  );
+});
+
+it("names the role a member addition grants", () => {
+  const h = ["h", channel];
+  const add = (...tags: string[][]) =>
+    describeSignature(9000, [h, ...tags], lookup).action;
+  expect(add(["p", pubkey], ["role", "owner"])).toBe(
+    "add Alex to #general as an owner",
+  );
+  expect(add(["p", pubkey, "admin"])).toBe("add Alex to #general as an admin");
+  // A role on the person outranks the fallback, as the relay reads it.
+  expect(add(["p", pubkey, "admin"], ["role", "member"])).toBe(
+    "add Alex to #general as an admin",
+  );
+  expect(add(["p", pubkey, "guest"], ["p", "cd".repeat(32), "owner"])).toMatch(
+    / with different roles$/,
+  );
+  expect(add(["p", pubkey])).toBe("add Alex to #general");
+});
+
+it("says how long a ban or timeout lasts", () => {
+  const p = ["p", pubkey];
+  const at = 1_800_000_000;
+  const when = new Date(at * 1000).toLocaleString(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  });
+  expect(
+    describeSignature(9040, [p, ["expiration", `${at}`]], lookup).action,
+  ).toBe(`ban Alex from the community until ${when}`);
+  expect(
+    describeSignature(9042, [p, ["expiration", `${at}`]], lookup).action,
+  ).toBe(`time out Alex until ${when}`);
+  expect(
+    describeSignature(9042, [p, ["expiration", "soon"]], lookup).action,
+  ).toBe("time out Alex with other settings");
+});
+
+it("says when a deletion, creation or DM addition does more", () => {
+  const h = ["h", channel];
+  expect(
+    describeSignature(9005, [h, ["e", "x"], ["reason_code", "spam"]], lookup)
+      .action,
+  ).toBe("delete a message as a moderator in #general");
+  expect(
+    describeSignature(9007, [
+      ["name", "ops"],
+      ["visibility", "private"],
+      ["channel_type", "forum"],
+    ]).action,
+  ).toBe("create the private forum “ops”");
+  expect(
+    describeSignature(
+      9007,
+      [
+        ["name", "ops"],
+        ["p", pubkey],
+        ["unlisted", "true"],
+        ["ttl", "60"],
+      ],
+      lookup,
+    ).action,
+  ).toBe(
+    "create the channel “ops”, with Alex, hidden from the channel list, where messages disappear",
+  );
+  expect(describeSignature(9007, [["channel_type", "system"]]).action).toBe(
+    "create a private system channel",
+  );
+  expect(
+    describeSignature(
+      41011,
+      [
+        ["p", pubkey],
+        ["history", "include"],
+      ],
+      lookup,
+    ).action,
+  ).toBe("add Alex to a DM and show them its history");
+  expect(
+    describeSignature(9044, [
+      ["report", "x"],
+      ["status", "resolved"],
+      ["action", "ban"],
+    ]).action,
+  ).toBe("resolve a report and ban the person");
+});
+
+it("marks a named tag that repeats with another value", () => {
+  const h = ["h", channel];
+  expect(
+    describeSignature(
+      9002,
+      [h, ["visibility", "private"], ["visibility", "open"]],
+      lookup,
+    ).action,
+  ).toBe("make #general private with other settings");
+  expect(
+    describeSignature(9007, [
+      ["name", "ops"],
+      ["visibility"],
+      ["visibility", "private"],
+    ]).action,
+  ).toBe("create the channel “ops” with other settings");
+  expect(describeSignature(9022, [["h", "junk"], h], lookup).action).toBe(
+    "leave channel junk with other settings",
+  );
+  expect(
+    describeSignature(
+      9002,
+      [h, ["archived", "true"], ["archived", "true"]],
+      lookup,
+    ).action,
+  ).toBe("archive #general");
+});
+
+it("marks a tag it does not put into words", () => {
+  const h = ["h", channel];
+  expect(describeSignature(9022, [h, ["x", "y"]], lookup).action).toBe(
+    "leave #general with other settings",
+  );
+  expect(describeSignature(9022, [h, ["client", "cli"]], lookup).action).toBe(
+    "leave #general",
+  );
+  // A kind that replaces the whole of something names it as a whole.
+  expect(describeSignature(0, [["x", "y"]]).action).toBe("change your profile");
 });
 
 it("describes every kind that can be asked, with a noun and a general ability", () => {
