@@ -191,7 +191,6 @@ type Entry = {
   policies: Map<
     string,
     {
-      topLevel: boolean;
       steerable?(model?: string, effort?: string): boolean;
       handed: Promise<unknown>;
       settled: Promise<unknown>;
@@ -1214,10 +1213,8 @@ export class ClaudeRuntime {
     }
     const prior = entry.policies.get(key);
     const same =
-      key === COMMUNITY_SESSION
-        ? entry.config.scope === "community" &&
-          prior?.steerable?.(model, effort) === true
-        : prior?.topLevel === topLevel;
+      (key !== COMMUNITY_SESSION || entry.config.scope === "community") &&
+      prior?.steerable?.(model, effort) === true;
     const wait =
       key === COMMUNITY_SESSION || entry.policies.has(COMMUNITY_SESSION)
         ? Promise.all(
@@ -1279,9 +1276,6 @@ export class ClaudeRuntime {
                 : text,
           };
         };
-        // A turn keeps the posting policy it was admitted with: a request under
-        // the other policy waits for the conversation's turns to settle rather
-        // than steering into them and changing their tools' context.
         await wait;
         if (interrupted) {
           delivered = Promise.resolve({ ok: true });
@@ -1401,7 +1395,6 @@ export class ClaudeRuntime {
       foregroundDone = true;
     });
     const policy = {
-      topLevel,
       steerable: (nextModel?: string, nextEffort?: string) =>
         !interrupted &&
         !foregroundDone &&
