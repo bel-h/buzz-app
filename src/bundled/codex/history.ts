@@ -1,5 +1,6 @@
 import { readAuthorNames } from "../../features/agent-harness/author-names";
 import {
+  editedTags,
   quoted,
   tagsField,
   withNames,
@@ -85,7 +86,7 @@ export async function conversationHistory(
       }),
     );
   }
-  const raw = new Map(earlier.map((item) => [item.id, item]));
+  const raw = new Map([...earlier, ...changes].map((item) => [item.id, item]));
   const messages = foldMessages(channelId, "", [...earlier, ...changes], {
     includeReplies: true,
     signingAuthority,
@@ -108,7 +109,17 @@ export async function conversationHistory(
           pubkey: message.authorId,
           created_at: message.createdAt,
           content: (message.sourceContent ?? message.content).slice(0, 4000),
-          ...tagsField(raw.get(message.id)?.tags ?? []),
+          ...tagsField(
+            editedTags(
+              raw.get(message.id)?.tags ?? [],
+              raw.get(message.attachmentSourceId ?? message.id)?.tags ?? [],
+              (message.emoji ?? []).map(({ shortcode, url }) => [
+                "emoji",
+                shortcode,
+                url,
+              ]),
+            ),
+          ),
         },
         profiles?.authorNames?.(message.authorId),
       ),

@@ -41,10 +41,29 @@ export function withNames<T extends { id: string; pubkey: string }>(
 export const readableTags = (tags: readonly (readonly string[])[]) =>
   tags.filter(([name]) => name !== "h" && name !== "auth");
 
-/** A context record's `tags`, when it has any to read. */
+/** A message's tags with the files and custom emoji an edit may have
+ * replaced, as its timeline shows them. */
+export const editedTags = (
+  tags: readonly (readonly string[])[],
+  files: readonly (readonly string[])[],
+  emoji: readonly (readonly string[])[],
+) => [
+  ...tags.filter(([name]) => name !== "imeta" && name !== "emoji"),
+  ...files.filter(([name]) => name === "imeta"),
+  ...emoji.filter(([name]) => name === "emoji"),
+];
+
+/** A context record's `tags`, when it has any to read: those that fit in the
+ * 4000 characters its content may have. */
 export const tagsField = (tags: readonly (readonly string[])[]) => {
-  const readable = readableTags(tags);
-  return readable.length ? { tags: readable } : {};
+  const fit: (readonly string[])[] = [];
+  let room = 4000;
+  for (const tag of readableTags(tags)) {
+    room -= JSON.stringify(tag).length;
+    if (room < 0) break;
+    fit.push(tag);
+  }
+  return fit.length ? { tags: fit } : {};
 };
 
 /** The event a turn is for, then what it asks of the agent. */

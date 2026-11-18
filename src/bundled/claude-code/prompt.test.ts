@@ -581,3 +581,24 @@ it("keeps each context message's tags but its channel and signatures", () => {
   );
   expect(prompt).not.toContain(signature);
 });
+
+it("bounds each context message's tags as it does its content", () => {
+  const prompt = turnPrompt({
+    agent,
+    event: event("3", "now"),
+    channel: { id: "chan" },
+    scope: "channel",
+    topLevel: true,
+    context: [
+      event("2", "earlier", {
+        tags: [
+          ["p", bob],
+          ["t", "x".repeat(5000)],
+          ["t", "release"],
+        ],
+      }),
+    ],
+    total: 2,
+  });
+  expect(prompt).toContain(`"content":"earlier","tags":[["p","${bob}"]]}`);
+});

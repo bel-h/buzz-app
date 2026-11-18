@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { keypair, message } from "../../features/relay/testing";
+import { keypair, message, signed } from "../../features/relay/testing";
 import { conversationHistory } from "./history";
 
 it("keeps each context message's tags but its channel and signatures", async () => {
@@ -22,4 +22,32 @@ it("keeps each context message's tags but its channel and signatures", async () 
     `"content":"Earlier","tags":${JSON.stringify(tags)}`,
   );
   expect(history).not.toContain("8".repeat(128));
+});
+
+it("shows an edited message's files as its edit leaves them", async () => {
+  const alice = keypair();
+  const earlier = message(alice, "c", "Earlier", 10, [
+    ["imeta", "url https://relay.test/media/old.png"],
+  ]);
+  const edit = signed(alice, {
+    kind: 40003,
+    content: "Edited",
+    created_at: 15,
+    tags: [
+      ["h", "c"],
+      ["e", earlier.id],
+      ["imeta", "url https://relay.test/media/new.png"],
+    ],
+  });
+  const history = await conversationHistory(
+    message(alice, "c", "Now", 20),
+    { channelId: "c", name: "c" },
+    async (filters) =>
+      filters[0]?.kinds?.includes(40003) ? [edit] : [earlier],
+  );
+  expect(history).toContain(
+    `"content":"Edited","tags":${JSON.stringify([
+      ["imeta", "url https://relay.test/media/new.png"],
+    ])}`,
+  );
 });

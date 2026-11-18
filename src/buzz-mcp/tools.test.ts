@@ -985,6 +985,54 @@ it("shows a message's other tags in a read, but not its signatures", async () =>
   expect(line).not.toContain(auth[3]);
 });
 
+it("reads an edited message with the files and emoji its edits leave", async () => {
+  const id = "4".repeat(64);
+  const { client } = fake([
+    ...community,
+    event({
+      id,
+      content: "files :party:",
+      tags: [
+        ["h", "chan"],
+        ["imeta", "url https://relay.test/media/old.png"],
+        ["emoji", "party", "https://relay.test/party.png"],
+      ],
+    }),
+    event({
+      id: "5".repeat(64),
+      kind: 40003,
+      created_at: 110,
+      content: "files, edited",
+      tags: [
+        ["h", "chan"],
+        ["e", id],
+        ["imeta", "url https://relay.test/media/new.png"],
+      ],
+    }),
+    // Newer, but with no files of its own, so it leaves the last edit's.
+    event({
+      id: "6".repeat(64),
+      kind: 40003,
+      created_at: 120,
+      content: "files, edited again :wave:",
+      tags: [
+        ["h", "chan"],
+        ["e", id],
+        ["emoji", "wave", "https://relay.test/wave.png"],
+      ],
+    }),
+  ]);
+  const line = (await read(client, { channel: "chan" }))
+    .split("\n")
+    .find((line) => line.startsWith(id));
+  expect(line).toContain(
+    `tags ${JSON.stringify([
+      ["imeta", "url https://relay.test/media/new.png"],
+      ["emoji", "wave", "https://relay.test/wave.png"],
+    ])} at `,
+  );
+});
+
 const reply = (id: string, created_at: number) =>
   event({
     id,

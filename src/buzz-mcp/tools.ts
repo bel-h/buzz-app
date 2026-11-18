@@ -40,7 +40,10 @@ import {
 import { imageType } from "../features/relay/attachment-limits";
 import { LIVE_CANVAS_BYTES } from "../features/channel-templates/model";
 import { threadReference } from "../features/relay/thread-reference";
-import { readableTags } from "../features/agent-harness/turn-records";
+import {
+  editedTags,
+  readableTags,
+} from "../features/agent-harness/turn-records";
 import { parseBuzzLink } from "../features/navigation/buzz-links";
 import { soloChannelMetadata } from "../features/relay/discovery";
 import { channelLabelTags } from "../features/relay/channel-labels";
@@ -2567,28 +2570,41 @@ function rootOf(event: BuzzEvent) {
   return ((root && reply ? root : reply)?.[1] ?? event.id) as string;
 }
 
-/** Messages oldest first, each showing its author's latest edit. */
+/** Messages oldest first, each showing its author's latest edit, with the
+ * files and custom emoji its edits leave, as `foldMessages` does. */
 function edited(events: readonly BuzzEvent[]) {
   const messages = events.filter((event) => event.kind !== 40003);
   const byId = new Map(messages.map((event) => [event.id, event]));
+  const has = (event: BuzzEvent, name: string) =>
+    event.tags.some(([key]) => key === name);
+  const newer = (event: BuzzEvent, last?: BuzzEvent) =>
+    !last || last.created_at < event.created_at;
   const edits = new Map<string, BuzzEvent>();
+  // An edit without files leaves the last ones.
+  const files = new Map<string, BuzzEvent>();
   for (const event of events)
     if (event.kind === 40003) {
       const target = tag(event, "e");
-      const message = target ? byId.get(target) : undefined;
-      const last = target && edits.get(target);
       // Authorship first, so someone else's newer edit hides none.
-      if (
-        target &&
-        message?.pubkey === event.pubkey &&
-        (!last || last.created_at < event.created_at)
-      )
-        edits.set(target, event);
+      if (!target || byId.get(target)?.pubkey !== event.pubkey) continue;
+      if (newer(event, edits.get(target))) edits.set(target, event);
+      if (has(event, "imeta") && newer(event, files.get(target)))
+        files.set(target, event);
     }
   return messages
     .map((event) => {
       const edit = edits.get(event.id);
-      return edit ? { ...event, content: edit.content } : event;
+      return edit
+        ? {
+            ...event,
+            content: edit.content,
+            tags: editedTags(
+              event.tags,
+              (files.get(event.id) ?? event).tags,
+              (has(edit, "emoji") ? edit : event).tags,
+            ),
+          }
+        : event;
     })
     .sort((a, b) => a.created_at - b.created_at);
 }
