@@ -71,6 +71,16 @@ export function appClient(
   const { settings, soloWorkspaces } = agent;
   const client: BuzzClient = {
     ...(options.callSignal ? { signal: options.callSignal } : {}),
+    ...(agent.settle
+      ? {
+          settle: () =>
+            agent.settle?.(
+              options.callSignal ??
+                options.signal ??
+                new AbortController().signal,
+            ) ?? Promise.resolve(),
+        }
+      : {}),
     ...(agent.protection
       ? {
           protect: async (

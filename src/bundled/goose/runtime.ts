@@ -1125,7 +1125,7 @@ export class GooseRuntime {
         entry.lifetime.signal,
         workSignal ?? AbortSignal.abort(new Error("The turn has ended")),
       ]);
-      const client =
+      const client = () =>
         handle &&
         appClient(handle, {
           signal,
