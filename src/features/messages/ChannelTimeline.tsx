@@ -1562,14 +1562,15 @@ function Timeline({
     element.ownerDocument.addEventListener("pointercancel", done);
     return () => release(true);
   }, [rows, prepend, containedOwners, newMessageBoundaryId]);
-  // An opening paints once it is positioned. Until then Virtua shows an empty
-  // or estimated range at the top, and each correction toward the reader's
-  // place would show as the history jumping. Reader input, or a placement that
-  // takes too long, presents it as it is.
+  // An opening without saved geometry paints once it is positioned. Until then
+  // Virtua shows an empty or estimated range at the top, and each correction
+  // toward the reader's place would show as the history jumping. Reader input,
+  // or a placement that takes too long, presents it as it is.
   const positioning = useRef<{
     frame: number;
     timer: ReturnType<typeof setTimeout>;
   }>(undefined);
+  const positioningArmed = useRef(false);
   const presentPositioned = useCallback(() => {
     const pending = positioning.current;
     if (!pending) return;
@@ -1585,14 +1586,26 @@ function Timeline({
     cancelAnimationFrame(pending.frame);
     pending.frame = requestAnimationFrame(presentPositioned);
   }, [presentPositioned]);
-  useLayoutEffect(() => {
+  // Hide when the first rows land, whether they were stored or read from the
+  // relay. Saved geometry lays them out in place, so they need no hiding.
+  const armPositioning = useCallback(() => {
+    if (positioningArmed.current) return;
+    positioningArmed.current = true;
+    if (initialCache.current) return;
     scroller.current?.setAttribute("data-positioning", "");
     positioning.current = {
       frame: 0,
       timer: setTimeout(presentPositioned, POSITIONING_LIMIT_MS),
     };
-    return presentPositioned;
   }, [presentPositioned]);
+  useLayoutEffect(
+    () => () => {
+      // A StrictMode remount arms again with its first rows.
+      positioningArmed.current = false;
+      presentPositioned();
+    },
+    [presentPositioned],
+  );
   useLayoutEffect(() => {
     const element = scroller.current;
     if (!element) return;
@@ -1722,6 +1735,7 @@ function Timeline({
     }
     // History without rows has no place to take.
     if (!rows.length) presentPositioned();
+    else armPositioning();
     if (
       (targetId && targetSignal && revealedSignal !== targetSignal) ||
       !size.width ||
@@ -1922,6 +1936,7 @@ function Timeline({
     newMessageBoundaryId,
     presentPositioned,
     presentAfterFrame,
+    armPositioning,
   ]);
   // After positioning reads it: a load that ends without rows lands no page.
   useLayoutEffect(() => {

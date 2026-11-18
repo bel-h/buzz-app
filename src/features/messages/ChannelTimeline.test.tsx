@@ -598,6 +598,28 @@ it("paints an opening's history only once it is positioned, and only hides it on
   expect(set).not.toHaveBeenCalled();
   h.unmount();
 });
+it("hides a first visit's history when its rows arrive from the relay", () => {
+  const h = setup({ initialRows: [] });
+  const set = vi.mocked(h.element.setAttribute);
+  const remove = vi.mocked(h.element.removeAttribute);
+  expect(set).not.toHaveBeenCalled();
+  h.setRows([timelineMessage("first"), timelineMessage("last")], false);
+  expect(set).toHaveBeenCalledWith("data-positioning", "");
+  expect(remove).not.toHaveBeenCalled();
+  h.flush();
+  h.flush();
+  expect(remove).toHaveBeenCalledWith("data-positioning");
+  h.unmount();
+});
+it("paints a revisit with saved geometry in place, without hiding it", () => {
+  const h = setup();
+  h.navigate("other");
+  const set = vi.mocked(h.element.setAttribute);
+  set.mockClear();
+  h.navigate("channel");
+  expect(set).not.toHaveBeenCalled();
+  h.unmount();
+});
 it("presents a positioning history when focus enters it", () => {
   // An unmeasured viewport cannot be positioned yet.
   const h = setup({ clientHeight: 0 });
