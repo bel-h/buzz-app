@@ -44,6 +44,7 @@ import {
   type StandaloneTurn,
   type TurnResult,
 } from "../../features/agents/service";
+import { compactAt } from "../../features/agents/compact-at";
 import { workflowOf } from "../../features/agents/owner-attestation";
 import {
   ownerReads,
@@ -105,6 +106,9 @@ export type Config = Readonly<{
   workspace: string;
   /** Whether each thread is its own session, or the whole channel is one. */
   scope: Scope;
+  /** The context size, in tokens, its sessions compact at, when below
+   * goose's own; unset is goose's default. This device's only. */
+  compactAt?: string;
 }>;
 export const DEFAULT_CONFIG: Config = Object.freeze({
   model: "",
@@ -1111,6 +1115,7 @@ export class GooseRuntime {
         (handler) => this.serve(handler),
         undefined,
         () => entry.handle,
+        () => compactAt(entry.config.compactAt),
       ),
       contexts: new Map(),
       policies: new Map(),
@@ -1192,6 +1197,7 @@ export class GooseRuntime {
         (handler) => this.serve(handler),
         protection,
         () => entry.handle,
+        () => compactAt(entry.config.compactAt),
       );
       const worker = entry.worker;
       const { stopping } = entry;
@@ -1226,6 +1232,7 @@ export class GooseRuntime {
           entry.config.provider.trim() ? 0 : this.defaultsRevision,
           entry.config.workspace,
           entry.config.scope,
+          entry.config.compactAt,
           addedKey(this.added()),
         ]),
       launch: async () => {
