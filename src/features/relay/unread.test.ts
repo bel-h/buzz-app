@@ -7740,3 +7740,123 @@ it("Undo of a channel read keeps a thread reminder's cover across a reload befor
   await r.session.unread.markChannelRead("room");
   await vi.waitFor(() => expect(r.journal()?.localUnread[key]).toBeUndefined());
 });
+
+it("a message marked unread while shown stays unread until a later visit", async () => {
+  const h = setup();
+  h.grant("room");
+  const root = message(h.alice, "room", "root", 11);
+  const reply = message(h.alice, "room", "reply", 12, [
+    ["e", root.id, "", "reply"],
+  ]);
+  const other = message(h.alice, "room", "other", 13);
+  h.emit([root, reply, other]);
+  const key = `msg:${reply.id}`;
+  let lease = h.session.unread.reading("room", root.id);
+  lease.view([root.id, reply.id], () => true);
+  await lease.catchUp(reply.id, root.id);
+  await h.session.unread.markUnreadLocal({
+    kind: "message",
+    channelId: "room",
+    messageId: reply.id,
+  });
+  // The reader renews its lease after the mark and keeps showing the reply.
+  lease.dispose();
+  lease = h.session.unread.reading("room", root.id);
+  lease.view([root.id, reply.id], () => true);
+  await lease.observe([reply.id]);
+  await lease.catchUp(reply.id, root.id);
+  expect(h.journal()?.localUnread[key]).toBeDefined();
+  lease.dispose();
+  // Another conversation, then a new visit.
+  const away = h.session.unread.reading("room");
+  away.view([other.id], () => true);
+  away.dispose();
+  lease = h.session.unread.reading("room", root.id);
+  lease.view([root.id, reply.id], () => true);
+  await lease.observe([reply.id]);
+  lease.dispose();
+  expect(h.journal()?.localUnread[key]).toBeUndefined();
+});
+
+async function unresolvedReply() {
+  const h = setup();
+  h.grant("room");
+  const root = message(h.alice, "room", "root", 11);
+  const reply = message(h.alice, "room", "reply", 12, [
+    ["e", root.id, "", "reply"],
+  ]);
+  const top = message(h.alice, "room", "top", 20);
+  h.emit([channelMetadata(h, "stream"), root, reply, top]);
+  let lease = h.session.unread.reading("room");
+  await lease.catchUp(top.id);
+  lease.dispose();
+  const later = message(h.alice, "room", "later reply", 25, [
+    ["e", root.id, "", "reply"],
+  ]);
+  h.emit([later]);
+  lease = h.session.unread.reading("room", root.id);
+  await lease.catchUp(later.id, root.id);
+  lease.dispose();
+  const saved = h.journal();
+  if (!saved) throw new Error("Missing journal");
+  expect(saved.state.frontiers).toMatchObject({
+    room: 20,
+    [`thread:${root.id}`]: 25,
+  });
+  h.dispose();
+  const r = setup({}, true, () => saved);
+  r.grant("room");
+  r.emit([channelMetadata(r, "stream"), reply]);
+  const key = `msg:${reply.id}`;
+  await r.session.unread.markUnreadLocal({
+    kind: "message",
+    channelId: "room",
+    messageId: reply.id,
+  });
+  expect(r.journal()?.localCovers?.[key]?.[3]).toBe("?");
+  r.emit([root]);
+  return { r, root, reply, key };
+}
+
+it("a resolved root's thread mark is the baseline, and the next channel advance clears it", async () => {
+  const { r, root, key } = await unresolvedReply();
+  await vi.waitFor(() =>
+    expect(r.journal()?.localCovers?.[key]?.slice(1)).toEqual([
+      25,
+      "room",
+      root.id,
+    ]),
+  );
+  expect(r.journal()?.localUnread[key]).toBeDefined();
+  clock(40);
+  const next = message(r.alice, "room", "next", 30);
+  r.emit([next]);
+  const lease = r.session.unread.reading("room");
+  await lease.catchUp(next.id);
+  lease.dispose();
+  await vi.waitFor(() => expect(r.journal()?.localUnread[key]).toBeUndefined());
+});
+
+it("a resolved root survives a reload, so a peer's thread advance clears it", async () => {
+  const { r, root, key } = await unresolvedReply();
+  await vi.waitFor(() =>
+    expect(r.journal()?.localCovers?.[key]?.[3]).toBe(root.id),
+  );
+  const saved = r.journal();
+  if (!saved) throw new Error("Missing journal");
+  r.dispose();
+  const advanced: ReadJournal = {
+    ...saved,
+    state: {
+      ...saved.state,
+      frontiers: { ...saved.state.frontiers, [`thread:${root.id}`]: 35 },
+    },
+  };
+  const again = setup({}, true, () => advanced);
+  again.grant("room");
+  again.grant("other");
+  await again.session.unread.markChannelRead("other");
+  await vi.waitFor(() =>
+    expect(again.journal()?.localUnread[key]).toBeUndefined(),
+  );
+});

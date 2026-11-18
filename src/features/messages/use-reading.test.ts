@@ -634,7 +634,8 @@ it("bottom dwell catches up through the newest row, including a tall clipped row
 });
 it("a broadcast reply as the bottom row earns dwell but catches up through the top-level post", async () => {
   const h = setup({ latestMessageId: "broadcast", catchUpMessageId: "top" });
-  h.setRows([row("top", 0, 100), row("broadcast", 100, 200)]);
+  // The cut-off row is scrolled out of view; only the bottom row is shown.
+  h.setRows([row("top", -300, -200), row("broadcast", 300, 400)]);
   h.mutation();
   vi.advanceTimersToNextFrame();
   await vi.advanceTimersByTimeAsync(300);
@@ -642,6 +643,14 @@ it("a broadcast reply as the bottom row earns dwell but catches up through the t
     "top",
     undefined,
   );
+});
+it("without the broadcast bottom row fully shown, there is no catch-up through the top-level post", async () => {
+  const h = setup({ latestMessageId: "broadcast", catchUpMessageId: "top" });
+  h.setRows([row("top", 0, 100), row("broadcast", 450, 600)]);
+  h.mutation();
+  vi.advanceTimersToNextFrame();
+  await vi.advanceTimersByTimeAsync(1000);
+  for (const lease of h.leases) expect(lease.catchUp).not.toHaveBeenCalled();
 });
 it("a new latest message keeps observation and catches up after its row is measured", async () => {
   const h = setup({ latestMessageId: "bottom" });

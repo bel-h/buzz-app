@@ -1693,6 +1693,24 @@ export function createReadState({
     localUnreadKeys: () => Object.keys(journal?.localUnread ?? {}),
     /** A mark's saved covering context, while it is still the saved mark. */
     localCover: (key: string) => journal && coverOf(journal, key),
+    /** Saves the thread a mark's unresolved root resolved to, with its
+     * baseline then, while that mark and its unresolved cover are still saved. */
+    resolveLocalCover: (key: string, cover: LocalCover) =>
+      queue(async () => {
+        await ready;
+        const fits = (current: ReadJournal) =>
+          current.localUnread[key] === cover[0] &&
+          current.localCovers?.[key]?.[3] === UNRESOLVED_ROOT;
+        if (!journal || !fits(journal)) return;
+        await save((current) =>
+          fits(current)
+            ? {
+                ...current,
+                localCovers: { ...current.localCovers, [key]: cover },
+              }
+            : current,
+        );
+      }),
     /** A key's saved synced mark-unread stamp: a newer one fences reading. */
     unreadSet: (key: string) => journal?.state.overrides[key]?.set ?? 0,
     revision: () => journal?.revision ?? 0,

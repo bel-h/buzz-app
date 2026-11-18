@@ -410,6 +410,11 @@ export function createUnread({
       visible: (messageId: string, measured: boolean) => boolean;
     }
   >();
+  /** Messages marked unread while shown: being shown ends their reminder only
+   * on a later visit, after every reader has stopped showing them. */
+  const markedWhileShown = new Set<string>();
+  const inView = (id: string) =>
+    [...views.values()].some((view) => view.ids.has(id));
   // Per-visit message overlay; only the sidebar hint is persisted in read state.
   const forcedMessages = new Map<string, Set<string>>();
   // A force mark can be queued behind a read's save before its overlay is committed.
@@ -1763,7 +1768,7 @@ export function createUnread({
   /** Revision and baseline of a mark whose unresolved root has loaded. */
   const resolvedBases = new Map<
     string,
-    readonly [number | undefined, number]
+    readonly [number | undefined, number, string]
   >();
   const clearing = new Set<string>();
   function localCover(key: string, state: ReadState) {
@@ -1783,8 +1788,36 @@ export function createUnread({
       ) ?? -1
     );
   }
+  /** A reply marked before its root loaded takes its thread, and that
+   * thread's mark as its baseline, once its ancestry is known: saved, so a
+   * later advance clears it, even after a reload. */
+  function resolveCovers() {
+    if (closed) return;
+    for (const key of reads.localUnreadKeys()) {
+      const saved = reads.localCover(key);
+      const revision = reads.localUnread(key);
+      if (
+        saved?.[3] !== UNRESOLVED_ROOT ||
+        revision === undefined ||
+        resolvedBases.get(key)?.[0] === revision
+      )
+        continue;
+      indexEvidence();
+      const root = byId.get(key.slice(4))?.rootId;
+      if (!root) continue;
+      const base = Math.max(
+        saved[1],
+        effectiveFrontier(reads.state(), key, saved[2], root) ?? -1,
+      );
+      resolvedBases.set(key, [revision, base, root]);
+      void reads
+        .resolveLocalCover(key, [revision, base, saved[2], root])
+        .catch(() => undefined);
+    }
+  }
   function endCoveredLocal() {
     if (closed) return;
+    resolveCovers();
     const state = reads.state();
     const live = new Set<string>();
     for (const key of reads.localUnreadKeys()) {
@@ -1793,24 +1826,24 @@ export function createUnread({
       const saved = reads.localCover(key);
       // A reply marked before its root loaded resolves its thread later: the
       // thread position it learns then is the baseline, not an advance.
-      const pending = saved?.[3] === UNRESOLVED_ROOT;
-      const root = pending
-        ? byId.get(key.slice(4))?.rootId
-        : saved?.[3] || undefined;
+      // Until it is saved, a resolution made this load stands in for it.
+      const revision = reads.localUnread(key);
+      const resolved =
+        saved?.[3] === UNRESOLVED_ROOT &&
+        resolvedBases.get(key)?.[0] === revision
+          ? resolvedBases.get(key)
+          : undefined;
+      const root = resolved
+        ? resolved[2]
+        : saved?.[3] === UNRESOLVED_ROOT
+          ? undefined
+          : saved?.[3] || undefined;
       const at = saved
         ? (effectiveFrontier(state, key, saved[2], root) ?? -1)
         : localCover(key, state);
       if (at === undefined) continue;
       live.add(key);
-      const revision = reads.localUnread(key);
-      if (pending && root && resolvedBases.get(key)?.[0] !== revision)
-        resolvedBases.set(key, [revision, Math.max(saved[1], at)]);
-      const resolved = resolvedBases.get(key);
-      const base = pending
-        ? resolved && resolved[0] === revision
-          ? resolved[1]
-          : saved[1]
-        : (saved?.[1] ?? localBases.get(key));
+      const base = resolved ? resolved[1] : (saved?.[1] ?? localBases.get(key));
       if (base === undefined) localBases.set(key, at);
       else if (at > base && !clearing.has(key)) {
         clearing.add(key);
@@ -2579,6 +2612,7 @@ export function createUnread({
       // projection affected by a deletion, including delete-of-edit chains.
     }
     if (evicted) dropOrphans();
+    if (changed.size) resolveCovers();
     if (changed.size) {
       // The session admits profiles from this same batch after unread evidence.
       if (profiles)
@@ -2954,6 +2988,8 @@ export function createUnread({
             ids: new Set(verified),
             visible: (id, measured) => valid() && visible(id, measured),
           });
+          for (const id of markedWhileShown)
+            if (!inView(id)) markedWhileShown.delete(id);
         },
         async catchUp(id: string, rootId?: string) {
           if (!valid()) return;
@@ -3015,7 +3051,10 @@ export function createUnread({
                     (entry) => !entry.parentId && entry.event.created_at <= cut,
                   )
                   .map((entry) => `msg:${entry.event.id}`)
-          ).filter((local) => reads.localUnread(local));
+          ).filter(
+            (local) =>
+              reads.localUnread(local) && !markedWhileShown.has(local.slice(4)),
+          );
           const fresh = (journal: ReadJournal) =>
             current(journal) &&
             reminders.every(
@@ -3075,7 +3114,7 @@ export function createUnread({
             ) {
               // Shown: its own local reminder ends with no new read mark.
               const local = targetKey(target);
-              if (reads.localUnread(local))
+              if (reads.localUnread(local) && !markedWhileShown.has(id))
                 await reads.clearLocalUnread(
                   local,
                   [local],
@@ -3606,7 +3645,10 @@ export function createUnread({
       };
       if (!valid()) throw new Error("Unread target unavailable");
       if (target.kind === "message") refuseAgentCoordination(target.messageId);
-      if (target.kind === "message") indexEvidence();
+      if (target.kind === "message") {
+        indexEvidence();
+        if (inView(target.messageId)) markedWhileShown.add(target.messageId);
+      }
       const result = await reads.markLocalUnread(
         key,
         valid,
