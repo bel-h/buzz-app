@@ -344,6 +344,13 @@ if (harness === "hosted") {
     type: hosted.key,
   }));
 }
+if (harness === "elsewhere") {
+  snapshot.agents = snapshot.agents.map((agent) => ({
+    ...agent,
+    place: "elsewhere",
+    relay: "wss://relay.example",
+  }));
+}
 const reviewing = new URLSearchParams(location.search).has("review");
 const changing = new URLSearchParams(location.search).has("change");
 const types = thinkingTypes[thinkingHarness ?? ""]
@@ -408,6 +415,13 @@ Object.assign(window, {
 });
 const agents = {
   snapshot: () => snapshot,
+  remove: async (key: string) => {
+    snapshot = {
+      ...snapshot,
+      agents: snapshot.agents.filter((agent) => agent.key !== key),
+    };
+    for (const listener of listeners) listener();
+  },
   subscribe: (listener: () => void) => {
     listeners.add(listener);
     return () => listeners.delete(listener);
