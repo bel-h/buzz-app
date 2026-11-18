@@ -58,7 +58,11 @@ import { threadReference } from "../../features/relay/thread-reference";
 import type { ChannelLabel } from "../../features/channels/channel-icon";
 import { appClient, readFile } from "../../buzz-mcp/app-client";
 import { readAuthorNames } from "../../features/agent-harness/author-names";
-import { project, readCanvas } from "../../features/agent-harness/project";
+import {
+  project,
+  readCanvas,
+  worksElsewhere,
+} from "../../features/agent-harness/project";
 import {
   referencedFolders,
   referencedSkills,
@@ -802,7 +806,7 @@ export class CodexRuntime {
         {},
         undefined,
         home,
-        sessionPlace(conversation),
+        conversation,
       );
       try {
         signal.throwIfAborted();
@@ -1825,7 +1829,10 @@ export class CodexRuntime {
           project(
             canvasRead.text,
             // A Solo chat is one conversation, with no thread root.
-            Boolean(this.folder(reads.scope, agent.key, channelId)),
+            worksElsewhere(
+              this.folder(reads.scope, agent.key, channelId),
+              agent.promptSections?.(channelId),
+            ),
           ).section,
         folders.section,
         skills,
@@ -2209,8 +2216,6 @@ export class CodexRuntime {
         workspace,
         {},
         delivery.synced,
-        undefined,
-        "standalone",
       );
       hookBridge = bridge;
       const text = await prompt();
@@ -2820,8 +2825,8 @@ export class CodexRuntime {
     synced?: Delivery["synced"],
     /** The agent's workspace, when `workspace` is the conversation's folder. */
     home?: string,
-    /** What the thread is, for its Session Model. */
-    place?: Facts["place"],
+    /** The conversation the thread is for; none for a one-off turn. */
+    conversation?: Readonly<{ channelId: string; root?: string }>,
   ) {
     const normalized = await rpc.request<{
       config: {
@@ -2862,8 +2867,18 @@ export class CodexRuntime {
     const credential = await rpc.toolCredential(agent);
     // Read once: what the thread is told and what its saved prompt shows
     // come from the same choices.
-    const choices = agent.promptSections?.();
-    const base = composeBase(baseFacts(settings, home, place), choices);
+    const choices = agent.promptSections?.(
+      conversation?.channelId,
+      conversation?.root,
+    );
+    const base = composeBase(
+      baseFacts(
+        settings,
+        home,
+        conversation ? sessionPlace(conversation) : "standalone",
+      ),
+      choices,
+    );
     const params = {
       model,
       cwd: workspace,
@@ -2968,7 +2983,7 @@ export class CodexRuntime {
         request,
         request.synced,
         home,
-        sessionPlace(request.conversation),
+        request.conversation,
       );
     if (voiceInstructions) {
       Object.assign(params.config, {
@@ -3155,7 +3170,12 @@ export class CodexRuntime {
       seat = lane.voice;
       // A seat keeps its loaded thread between turns, and the owner can
       // change a section meanwhile: its turns get the sections as they are.
-      const choices = seat && agent.promptSections?.();
+      const choices =
+        seat &&
+        agent.promptSections?.(
+          request.conversation.channelId,
+          request.conversation.root,
+        );
       if (
         seat &&
         adopted === undefined &&
