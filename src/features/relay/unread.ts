@@ -182,6 +182,10 @@ export interface UnreadCapability {
    * a message marked unread while that visit shows it stays unread until
    * the visit measures it away or `leave`s. Without it, the lease is the visit. */
   reading(channelId: string, rootId?: string, visit?: object): ReadingHandle;
+  /** `visit` presents this thread in a pane, whether or not any row counts as
+   * shown: the thread marked unread during it stays marked through its
+   * catch-ups until `leave`. Presence reads nothing. */
+  present(channelId: string, rootId: string, visit: object): void;
   /** The reader departed: a return is a new visit. */
   leave(visit: object): void;
   /** Whether the viewer follows this canonical root: an explicit choice,
@@ -454,12 +458,23 @@ export function createUnread({
   /** Messages marked unread while shown, and the visits that showed them:
    * those visits leave the reminder alone until they measure it away or end. */
   const markedWhileShown = new Map<string, Set<object>>();
-  const shields = (id: string, visit: object) =>
-    !!markedWhileShown.get(id)?.has(visit);
+  /** Each visit's presented thread, by its `thread:` key. */
+  const presenting = new Map<object, string>();
+  /** Threads marked unread while presented, and the visits presenting them:
+   * those visits' catch-ups leave the thread's own reminder until they end. */
+  const markedWhilePresented = new Map<string, Set<object>>();
+  const shields = (local: string, visit: object) =>
+    !!(
+      local.startsWith("msg:")
+        ? markedWhileShown.get(local.slice(4))
+        : markedWhilePresented.get(local)
+    )?.has(visit);
   function leave(visit: object) {
     shownBy.delete(visit);
-    for (const [id, holders] of markedWhileShown)
-      if (holders.delete(visit) && !holders.size) markedWhileShown.delete(id);
+    presenting.delete(visit);
+    for (const marks of [markedWhileShown, markedWhilePresented])
+      for (const [id, holders] of marks)
+        if (holders.delete(visit) && !holders.size) marks.delete(id);
   }
   // Per-visit message overlay; only the sidebar hint is persisted in read state.
   const forcedMessages = new Map<string, Set<string>>();
@@ -2972,6 +2987,10 @@ export function createUnread({
       saved = next;
       followsChanged(changed);
     },
+    present(channelId, rootId, visit) {
+      if (closed || !allowed(channelId)) return;
+      presenting.set(visit, targetKey({ kind: "thread", channelId, rootId }));
+    },
     leave,
     reading(channelId, rootId, visit) {
       if (closed || !allowed(channelId) || handles.size >= 64)
@@ -3130,8 +3149,7 @@ export function createUnread({
                   )
                   .map((entry) => `msg:${entry.event.id}`)
           ).filter(
-            (local) =>
-              reads.localUnread(local) && !shields(local.slice(4), stay),
+            (local) => reads.localUnread(local) && !shields(local, stay),
           );
           const fresh = (journal: ReadJournal) =>
             current(journal) &&
@@ -3192,7 +3210,7 @@ export function createUnread({
             ) {
               // Shown: its own local reminder ends with no new read mark.
               const local = targetKey(target);
-              if (reads.localUnread(local) && !shields(id, stay))
+              if (reads.localUnread(local) && !shields(local, stay))
                 await reads.clearLocalUnread(
                   local,
                   [local],
@@ -3762,6 +3780,12 @@ export function createUnread({
         for (const [visit, shown] of shownBy)
           if (shown.has(target.messageId)) holders.add(visit);
         if (holders.size) markedWhileShown.set(target.messageId, holders);
+      }
+      if (target.kind === "thread") {
+        const holders = new Set<object>();
+        for (const [visit, presented] of presenting)
+          if (presented === key) holders.add(visit);
+        if (holders.size) markedWhilePresented.set(key, holders);
       }
       const result = await reads.markLocalUnread(
         key,

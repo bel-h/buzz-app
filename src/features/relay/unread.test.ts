@@ -7625,6 +7625,123 @@ it("catch-up and display clear local reminders when the read mark is already the
   expect(h.journal()?.localUnread[`msg:${top.id}`]).toBeUndefined();
 });
 
+/** A read thread, ready to be marked unread while it is presented. */
+async function presentedThread() {
+  const h = setup();
+  h.grant("room");
+  const root = message(h.alice, "room", "root", 11);
+  const reply = message(h.alice, "room", "reply", 12, [
+    ["e", root.id, "", "reply"],
+  ]);
+  const other = message(h.alice, "room", "other", 13);
+  h.emit([root, reply, other]);
+  const lease = h.session.unread.reading("room", root.id);
+  await lease.catchUp(reply.id, root.id);
+  lease.dispose();
+  const thread = {
+    kind: "thread" as const,
+    channelId: "room",
+    rootId: root.id,
+  };
+  const key = `thread:${root.id}`;
+  const catchUp = async (visit: object) => {
+    const next = h.session.unread.reading("room", root.id, visit);
+    await next.catchUp(reply.id, root.id);
+    next.dispose();
+    await flush();
+  };
+  return { h, root, reply, other, thread, key, catchUp };
+}
+
+it("a thread marked unread while presented, with no row shown, stays so for that visit", async () => {
+  const { h, thread, key, catchUp } = await presentedThread();
+  const visit = {};
+  h.session.unread.present("room", thread.rootId, visit);
+  await h.session.unread.markUnreadLocal(thread);
+  // Renewed leases and empty measurements in the same visit leave it.
+  await catchUp(visit);
+  h.session.unread.reading("room", thread.rootId, visit).view([], () => false);
+  await catchUp(visit);
+  expect(h.journal()?.localUnread[key]).toBeDefined();
+  // Leaving reads nothing, and a later visit without its bottom keeps it.
+  h.session.unread.leave(visit);
+  await flush();
+  expect(h.journal()?.localUnread[key]).toBeDefined();
+  const later = {};
+  h.session.unread.present("room", thread.rootId, later);
+  await flush();
+  expect(h.journal()?.localUnread[key]).toBeDefined();
+  // Reaching the bottom on that later visit ends it.
+  await catchUp(later);
+  expect(h.journal()?.localUnread[key]).toBeUndefined();
+});
+
+it("thread presence protects only its own visit and root, and only marks made during it", async () => {
+  const { h, other, thread, key, catchUp } = await presentedThread();
+  // Another root presented, and another pane's visit, do not protect it.
+  const elsewhere = {};
+  h.session.unread.present("room", other.id, elsewhere);
+  const pane = {};
+  h.session.unread.present("room", thread.rootId, pane);
+  await h.session.unread.markUnreadLocal(thread);
+  await catchUp(elsewhere);
+  expect(h.journal()?.localUnread[key]).toBeUndefined();
+  await h.session.unread.markUnreadLocal(thread);
+  const second = {};
+  await catchUp(second);
+  expect(h.journal()?.localUnread[key]).toBeUndefined();
+  // A mark made before the visit presented it is not protected by it.
+  await h.session.unread.markUnreadLocal(thread);
+  h.session.unread.leave(pane);
+  const visit = {};
+  h.session.unread.present("room", thread.rootId, visit);
+  await catchUp(visit);
+  expect(h.journal()?.localUnread[key]).toBeUndefined();
+});
+
+it("an explicit read or a real advance still ends a thread mark made while presented", async () => {
+  const { h, root, thread, key } = await presentedThread();
+  const visit = {};
+  h.session.unread.present("room", root.id, visit);
+  await h.session.unread.markUnreadLocal(thread);
+  await h.session.unread.prepareThreadRead("room", root.id)();
+  expect(h.journal()?.localUnread[key]).toBeUndefined();
+  // A reply arriving after the mark, read in the same visit.
+  await h.session.unread.markUnreadLocal(thread);
+  const later = message(h.alice, "room", "later", 20, [
+    ["e", root.id, "", "reply"],
+  ]);
+  h.emit([later]);
+  const lease = h.session.unread.reading("room", root.id, visit);
+  await lease.catchUp(later.id, root.id);
+  lease.dispose();
+  await vi.waitFor(() => expect(h.journal()?.localUnread[key]).toBeUndefined());
+  // A channel read past it on this device.
+  await h.session.unread.markUnreadLocal(thread);
+  clock(30);
+  const top = message(h.alice, "room", "top", 29);
+  h.emit([top]);
+  const channel = h.session.unread.reading("room");
+  await channel.catchUp(top.id);
+  channel.dispose();
+  await vi.waitFor(() => expect(h.journal()?.localUnread[key]).toBeUndefined());
+  // Another device reading past it.
+  await h.session.unread.markUnreadLocal(thread);
+  clock(40);
+  const marker = await signReadState(
+    {
+      slot: "b".repeat(32),
+      createdAt: 40,
+      blob: { v: 1, client_id: "peer", contexts: { room: 40 } },
+    },
+    h.viewer.secret,
+  );
+  h.emit([marker]);
+  await flush();
+  await h.session.unread.refresh();
+  await vi.waitFor(() => expect(h.journal()?.localUnread[key]).toBeUndefined());
+});
+
 it("channel catch-up stops at the newest top-level post, never a broadcast reply", async () => {
   const h = setup();
   h.grant("room");

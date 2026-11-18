@@ -30,6 +30,7 @@ function setup({
   catchUpMessageId = undefined as string | undefined,
   rootId = undefined as string | undefined,
   enabled = true,
+  concealed = false,
   focus = "element" as "element" | "composer" | "parent" | "outside" | "header",
 } = {}) {
   vi.useFakeTimers();
@@ -49,6 +50,7 @@ function setup({
   panel.dataset.readingSurface = "";
   const header = document.createElement("button");
   panel.append(header, element);
+  panel.toggleAttribute("inert", concealed);
   document.body.append(panel, composer, parent, outside);
   ({ element, composer, parent, outside, header })[focus].focus();
   vi.spyOn(element, "getClientRects").mockReturnValue([
@@ -111,6 +113,7 @@ function setup({
     unread: {
       sync: () => ({ capability: supported ? "frontier-sync" : "unsupported" }),
       reading,
+      present: vi.fn(),
       leave,
     },
   } as unknown as RelaySession;
@@ -153,6 +156,12 @@ function setup({
     /** An ancestor attribute change, with no transition or focus event. */
     conceal: (hidden: boolean, target: HTMLElement = panel) => {
       target.toggleAttribute("inert", hidden);
+      attributes([{ target }]);
+    },
+    /** Accessibility isolation of an ancestor, as a modal menu applies. */
+    isolate: (isolated: boolean, target: HTMLElement = panel) => {
+      if (isolated) target.setAttribute("aria-hidden", "true");
+      else target.removeAttribute("aria-hidden");
       attributes([{ target }]);
     },
     panel,
@@ -790,6 +799,80 @@ it("a completed measurement that shows no row is reported, as a measurement", as
   readingPositioned(h.element);
   expect(h.leases.length).toBe(leases);
 });
+it("accessibility isolation pauses the same visit; concealment during it ends the visit", async () => {
+  const h = setup();
+  const first = h.reading.mock.calls[0]?.[2];
+  await vi.advanceTimersByTimeAsync(300);
+  // A modal menu hides the pane from assistive technology only: paused.
+  h.isolate(true);
+  const paused = h.leases.at(-1);
+  await vi.advanceTimersByTimeAsync(300);
+  expect(paused?.observe).not.toHaveBeenCalled();
+  expect(h.session.unread.leave).not.toHaveBeenCalled();
+  // Dismissed: the same visit resumes and earns its next dwell.
+  h.isolate(false);
+  expect(h.reading.mock.calls.at(-1)?.[2]).toBe(first);
+  await vi.advanceTimersByTimeAsync(300);
+  expect(h.dwelled()?.observe).toHaveBeenCalledWith(["visible"]);
+  expect(h.session.unread.leave).not.toHaveBeenCalled();
+  // Actually concealed while isolated: that is a departure.
+  h.isolate(true);
+  h.conceal(true);
+  expect(h.session.unread.leave).toHaveBeenCalledExactlyOnceWith(first);
+  h.isolate(false);
+  h.conceal(false);
+  expect(h.reading.mock.calls.at(-1)?.[2]).not.toBe(first);
+});
+
+it("a shown thread is presented for its whole visit, before any row reads or focus", async () => {
+  const h = setup({ rootId: "root", focus: "outside", settled: false });
+  const present = vi.mocked(h.session.unread.present);
+  expect(present).toHaveBeenCalledOnce();
+  const [channel, root, first] = present.mock.calls[0] ?? [];
+  expect([channel, root]).toEqual(["room", "root"]);
+  await vi.advanceTimersByTimeAsync(300);
+  // Presence reads nothing.
+  expect(h.reading).not.toHaveBeenCalled();
+  // An aria-only pause keeps it; actual concealment departs.
+  h.isolate(true);
+  h.isolate(false);
+  expect(h.session.unread.leave).not.toHaveBeenCalled();
+  h.conceal(true);
+  expect(h.session.unread.leave).toHaveBeenCalledExactlyOnceWith(first);
+  h.conceal(false);
+  expect(present).toHaveBeenCalledTimes(2);
+  const second = present.mock.calls[1]?.[2];
+  expect(second).not.toBe(first);
+  // A hidden document departs; showing again is a new visit.
+  h.setVisibility("hidden");
+  document.dispatchEvent(new Event("visibilitychange"));
+  expect(h.session.unread.leave).toHaveBeenLastCalledWith(second);
+  h.setVisibility("visible");
+  document.dispatchEvent(new Event("visibilitychange"));
+  const third = present.mock.calls[2]?.[2];
+  expect(third).not.toBe(second);
+  // Retargeting ends it and presents the new conversation.
+  h.retarget("other");
+  expect(h.session.unread.leave).toHaveBeenLastCalledWith(third);
+  expect(present.mock.calls.at(-1)?.slice(0, 2)).toEqual(["other", "root"]);
+  const fourth = present.mock.calls.at(-1)?.[2];
+  h.unmount();
+  expect(h.session.unread.leave).toHaveBeenLastCalledWith(fourth);
+});
+
+it("a retained thread pane that starts concealed is not presented until revealed", () => {
+  const h = setup({ rootId: "root", concealed: true });
+  const present = vi.mocked(h.session.unread.present);
+  expect(present).not.toHaveBeenCalled();
+  h.conceal(false);
+  expect(present).toHaveBeenCalledOnce();
+});
+
+it("a channel list presents no thread", () => {
+  const h = setup();
+  expect(h.session.unread.present).not.toHaveBeenCalled();
+});
+
 it("departing ends the visit: returning, or remounting, is a new one", async () => {
   const h = setup();
   vi.advanceTimersByTime(100);

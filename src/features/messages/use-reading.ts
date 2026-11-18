@@ -3,8 +3,11 @@ import type { RelaySession } from "../relay/session";
 import type { ReadingHandle } from "../relay/unread";
 import { useMessageEditScope } from "./MessageEditScope";
 
-/** Shared document attention gate for reading and row visits. */
+// Accessibility isolation, such as a modal menu, pauses reading; the same
+// visit resumes once it lifts. Actual concealment also ends the visit.
 const CONCEALED = '[inert], [hidden], [aria-hidden="true"]';
+const DEPARTED = "[inert], [hidden]";
+/** Shared document attention gate for reading and row visits. */
 export function readingDocumentActive() {
   return document.visibilityState === "visible" && document.hasFocus();
 }
@@ -79,6 +82,23 @@ export function useReading({
       if (visited) session.unread.leave(visit);
       visit = {};
       visited = showing = false;
+    }
+    // A thread shown in its pane is presented for the whole visit, whatever
+    // its rows measure: a thread marked unread then stays so until departure.
+    function present() {
+      if (
+        !rootId ||
+        visited ||
+        document.visibilityState !== "visible" ||
+        element.closest(DEPARTED)
+      )
+        return;
+      try {
+        session.unread.present(channelId, rootId, visit);
+        visited = true;
+      } catch {
+        // Membership may disappear between commit and observation.
+      }
     }
     const observing = new Set<ReadingHandle>();
     // The message list or its own composer: typing under a conversation is
@@ -323,7 +343,10 @@ export function useReading({
     window.addEventListener("blur", stop);
     window.addEventListener("focus", schedule);
     const visibility = () => {
-      if (document.visibilityState === "visible") return schedule();
+      if (document.visibilityState === "visible") {
+        present();
+        return schedule();
+      }
       stop();
       depart();
     };
@@ -344,6 +367,7 @@ export function useReading({
     // A retained pane concealed by an ancestor, even with no transition or
     // focus change, is a departure; layout, focus and blur are not.
     let concealed = !!element.closest(CONCEALED);
+    let departed = !!element.closest(DEPARTED);
     const concealment = new MutationObserver((records) => {
       if (
         !records.some(
@@ -353,11 +377,14 @@ export function useReading({
       )
         return;
       const now = !!element.closest(CONCEALED);
+      const gone = !!element.closest(DEPARTED);
+      if (gone && !departed) depart();
+      if (!gone && departed) present();
+      departed = gone;
       if (now === concealed) return;
       concealed = now;
       if (!now) return schedule();
       stop();
-      depart();
     });
     concealment.observe(document.documentElement, {
       attributes: true,
@@ -366,6 +393,7 @@ export function useReading({
     });
     const resize = new ResizeObserver(reflow);
     resize.observe(element);
+    present();
     schedule();
     return () => {
       stopped = true;
