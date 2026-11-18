@@ -718,7 +718,11 @@ export function AgentCreateDialog({
                   key={settingsAgent.type}
                   agent={settingsAgent}
                   save={saveSettings}
-                  settingsHost={{ pendingSave: saveSettings }}
+                  settingsHost={{
+                    pendingSave: saveSettings,
+                    proposedVoice:
+                      update?.request.settings?.voice !== undefined,
+                  }}
                 />
               </AgentSaveFooter.Provider>
             ) : (
