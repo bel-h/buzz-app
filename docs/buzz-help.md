@@ -1785,10 +1785,11 @@ tab, asks **Discard changes?** first; **Keep editing** keeps them.
   API for a decision provider, such as TypeSafe. Only sections the Settings
   sidebar currently shows are linked. Back from one returns to those details.
 - **Settings → Decisions API** lists each community you joined, with a menu
-  that chooses its decision provider and, below it, that provider's setup for
-  the community. Builderlab is offered where the community has a Builderlab
-  sign-in server; its setup is the sign-in to that server, which communities
-  on the same server share, and Settings names them. TypeSafe's API key is one
+  that chooses its decision provider and, below it, whether that provider can
+  answer there. Builderlab is offered where the community has a Builderlab
+  sign-in server. You sign in to that server in Builderlab's own settings;
+  communities on the same server share that sign-in, so their availability
+  matches, and Settings names them. TypeSafe's API key is one
   key that every community using TypeSafe shares. Until you choose, a
   community uses Builderlab where it can answer and TypeSafe elsewhere. While
   a chosen Builderlab cannot answer in a community (not signed in, or the

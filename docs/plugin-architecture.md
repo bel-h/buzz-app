@@ -3568,8 +3568,8 @@ export function apply(ctx: Context) {
     // the same scope share one setup.
     offered: (community) => true,
     setupScope: (community) => undefined,
-    // Shown in Settings for each community that chose it; without
-    // communities, once.
+    // Shown in Settings for each community that chose it, such as why it
+    // can't answer there; without communities, once.
     Settings: ({ active, community }) => null,
   });
 }
