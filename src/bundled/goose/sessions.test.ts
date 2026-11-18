@@ -626,6 +626,49 @@ describe("AgentSessions", () => {
     expect(fake.geese[1]?.killed).toBe(false);
   });
 
+  it.each(["closes", "exits"] as const)(
+    "keeps the newer goose current when an older one finishes starting after it, and drops the older's session once it %s",
+    async (end) => {
+      let limit: number | undefined;
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => (release = resolve));
+      const { fake, sessions } = setup({}, false, {
+        compactAt: () => limit,
+        wrap: (spawn) => async (id, options) => {
+          const process = await spawn(id, options);
+          if (fake.geese.length === 1) await gate;
+          return process;
+        },
+      });
+      const first = sessions.deliver("a", "one", 1);
+      await vi.waitFor(() => expect(fake.geese).toHaveLength(1));
+      limit = 200000;
+      await sessions.deliver("b", "other", 2);
+      release();
+      await first;
+      expect(fake.geese[0]?.opened).toHaveLength(1);
+      // Closing the newer goose's last session leaves it running.
+      await sessions.reset("b", "new");
+      await flush(30);
+      expect(fake.geese[1]?.killed).toBe(false);
+      await sessions.deliver("c", "more", 3);
+      expect(fake.geese).toHaveLength(2);
+      if (end === "closes") {
+        // The older one stops once its last session closes.
+        await sessions.reset("a", "new");
+        await vi.waitFor(() => expect(fake.geese[0]?.killed).toBe(true));
+      } else {
+        // Its exit drops its session, which reopens in the newer one.
+        fake.geese[0]?.exit(1, "crashed");
+        await flush(30);
+        await sessions.deliver("a", "again", 4);
+        expect(fake.geese[1]?.opened).toHaveLength(3);
+      }
+      expect(fake.geese).toHaveLength(2);
+      expect(fake.geese[1]?.killed).toBe(false);
+    },
+  );
+
   it("stops a drained goose before starting one with a changed compaction threshold", async () => {
     let limit: number | undefined;
     let release!: () => void;

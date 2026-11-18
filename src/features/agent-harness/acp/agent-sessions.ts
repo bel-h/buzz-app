@@ -182,6 +182,12 @@ export class AgentSessions {
   /** Earlier processes a newer one replaced, each stopped once no session is
    * in it. */
   private readonly replaced = new Set<AcpProcess>();
+  /** Processes whose exit drops their sessions. */
+  private readonly known = new WeakSet<AcpProcess>();
+  /** How many processes have been asked for, and which ask `process`
+   * answered: a start can finish after a later one. */
+  private asked = 0;
+  private promoted = 0;
   private readonly live = new Map<string, Live>();
   /** One-off turns running or starting, by label. */
   private readonly once = new Map<string, Live | undefined>();
@@ -584,6 +590,7 @@ export class AgentSessions {
     const launch = await this.options.launch();
     // Removed meanwhile: a process started now would outlive it.
     if (this.disposed) throw new Error(`${this.options.label} was stopped`);
+    const asked = ++this.asked;
     const [process, cwd] = await Promise.all([
       // Only this open is opening: no other can be in it.
       this.options.process.get(
@@ -591,16 +598,7 @@ export class AgentSessions {
       ),
       absolute(resolveDirectory, launch.workspace),
     ]);
-    if (process !== this.process) {
-      if (this.process) this.replaced.add(this.process);
-      this.process = process;
-      void process.exited.then(() => {
-        this.replaced.delete(process);
-        if (this.process === process) this.process = undefined;
-        for (const [key, live] of this.live)
-          if (live.process === process) this.drop(key, live);
-      });
-    }
+    this.promote(process, asked);
     // Busy until it is adopted as a conversation's.
     const slot: Slot = { idle: () => false, evict: async () => undefined };
     const room = pool.take(slot);
@@ -783,6 +781,24 @@ export class AgentSessions {
     return live.process.close(live.session, true).then(() => {
       this.closing.delete(live);
       this.retire();
+    });
+  }
+  /** Makes the latest ask's `process` the current one; an earlier ask's
+   * that finished late is replaced, and stops once no session is in it. */
+  private promote(process: AcpProcess, asked: number) {
+    if (asked > this.promoted) {
+      this.promoted = asked;
+      if (this.process && this.process !== process)
+        this.replaced.add(this.process);
+      this.process = process;
+    } else if (process !== this.process) this.replaced.add(process);
+    if (this.known.has(process)) return;
+    this.known.add(process);
+    void process.exited.then(() => {
+      this.replaced.delete(process);
+      if (this.process === process) this.process = undefined;
+      for (const [key, live] of this.live)
+        if (live.process === process) this.drop(key, live);
     });
   }
   /** Whether a session is in `process`, or closing in it. */
