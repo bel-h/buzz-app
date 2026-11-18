@@ -1784,17 +1784,17 @@ tab, asks **Discard changes?** first; **Keep editing** keeps them.
   its settings: sections it adds, such as GitHub comment authors, and Decisions
   API for a decision provider, such as TypeSafe. Only sections the Settings
   sidebar currently shows are linked. Back from one returns to those details.
-- **Settings → Decisions API** has two parts. **Providers** shows each decision
-  provider once, with its settings (TypeSafe's API key, Builderlab's sign-in)
-  and the communities where it can answer. **Communities** has a provider menu
-  for each community you joined. A menu offers only the providers that can
-  answer in that community: Builderlab where that community's Builderlab
-  sign-in offers your account decisions, TypeSafe once its key is saved. Until
-  you choose, a community uses Builderlab where it can and TypeSafe elsewhere.
-  If a chosen Builderlab stops answering in a community, your TypeSafe key
-  answers there. If none of your communities offer Builderlab decisions to your
-  account, Providers says so and suggests contacting your account
-  administrator.
+- **Settings → Decisions API** lists each community you joined, with a menu
+  that chooses its decision provider and, below it, that provider's setup for
+  the community. Builderlab is offered where the community has a Builderlab
+  sign-in server; its setup is the sign-in to that server, which communities
+  on the same server share, and Settings names them. TypeSafe's API key is one
+  key that every community using TypeSafe shares. Until you choose, a
+  community uses Builderlab where it can answer and TypeSafe elsewhere. While
+  a chosen Builderlab cannot answer in a community (not signed in, or the
+  account cannot use decisions), your TypeSafe key answers there, and the row
+  says so. A Builderlab account without decisions access says to contact your
+  account administrator.
 - In **Settings → Decisions API**, TypeSafe’s saved API key stays masked. Its
   chevron menu offers **Replace / Remove**. Replacement starts blank and masked,
   with inline **Cancel / Save** controls. **Save** stays disabled until you enter

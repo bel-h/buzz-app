@@ -3563,7 +3563,14 @@ export function apply(ctx: Context) {
       // request is already checked and has its timeoutMs; signal aborts at it.
       return { outcome: "answered", model: "example-1", answers: {} };
     },
-    Settings: ({ active }) => null, // shown under the provider in Settings
+    // Optional: whether it can be chosen and set up for a community, and
+    // which setup (such as an account) the community uses. Communities with
+    // the same scope share one setup.
+    offered: (community) => true,
+    setupScope: (community) => undefined,
+    // Shown in Settings for each community that chose it; without
+    // communities, once.
+    Settings: ({ active, community }) => null,
   });
 }
 ```
@@ -3575,9 +3582,10 @@ the reply. An answer of the wrong type, an unknown choice, a value outside 0 to
 1 or a missing answer makes the call `invalid_response`; answers to questions
 that were not asked are dropped.
 
-Settings > Decisions API shows every provider once, with its settings and the
-communities where its `status(community)` can answer, and the user chooses a
-provider for each joined community. Choices are kept on this device, by the
+Settings > Decisions API lists each joined community with a menu of the
+providers `offered` there, and below it the chosen provider's `Settings` for
+that community, noting the other communities that share its setup. The user
+chooses a provider for each community. Choices are kept on this device, by the
 community's relay host. Each request is routed in its `community`. Until the
 user chooses for that community, the first default provider that is on and can
 answer there (`ready` or `unconfirmed`) does: Builderlab
