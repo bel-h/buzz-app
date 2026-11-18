@@ -884,6 +884,58 @@ it("serves every agent from one server and routes each tool call to its own agen
   expect(contents(b.agent.publish as never)).toEqual(["FROM OTHER"]);
   expect(f.runtime.sessions("9".repeat(64))[0]?.status).toBe("Idle");
 });
+it("keeps other turns alive when unsubscribe times out and confirms release before resuming", async () => {
+  vi.useFakeTimers();
+  const f = fixture();
+  const b = second(f);
+  const firstCleanup = deferred<void>();
+  const nextCleanup = deferred<void>();
+  const unsubscribes = () =>
+    f.sent.filter((wire) => wire.method === "thread/unsubscribe");
+  try {
+    await f.runtime.run(f.delivery("first"));
+    await f.runtime.run(b.delivery("other work"));
+    await vi.waitFor(() => expect(f.starts()).toHaveLength(2));
+    f.held.set("thread/unsubscribe", firstCleanup.promise);
+    await f.complete(0, "");
+    await vi.waitFor(() => expect(unsubscribes()).toHaveLength(1));
+
+    f.held.set("thread/unsubscribe", nextCleanup.promise);
+    await f.runtime.run(f.delivery("queued follow-up"));
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(f.process.end).not.toHaveBeenCalled();
+    expect(f.runtime.sessions(pubkey)[0]).toMatchObject({
+      status: "Needs attention",
+      detail: "Codex thread/unsubscribe timed out",
+    });
+    expect(b.agent.publish).not.toHaveBeenCalled();
+
+    // Codex may have processed the first request even if Buzz got no answer.
+    // The follow-up must wait for a confirmed release before resuming.
+    await vi.waitFor(() => expect(unsubscribes()).toHaveLength(2));
+    firstCleanup.resolve();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(f.sent.some((wire) => wire.method === "thread/resume")).toBe(false);
+
+    f.held.delete("thread/unsubscribe");
+    nextCleanup.resolve();
+    await vi.waitFor(() => expect(f.starts()).toHaveLength(3));
+    expect(servers(f)).toHaveLength(1);
+    expect(
+      f.sent.find((wire) => wire.method === "thread/resume")?.params,
+    ).toMatchObject(unsubscribes()[0]?.params as object);
+
+    await f.complete(1, "OTHER FINISHED");
+    await f.complete(2, "FOLLOW-UP FINISHED");
+    expect(contents(b.agent.publish as never)).toEqual(["OTHER FINISHED"]);
+    expect(contents(f.publish)).toEqual(["FOLLOW-UP FINISHED"]);
+  } finally {
+    firstCleanup.resolve();
+    nextCleanup.resolve();
+    f.runtime.dispose();
+    vi.useRealTimers();
+  }
+});
 it("keeps an agent's two communities' threads apart, each under its membership's key", async () => {
   const f = fixture();
   const elsewhere = `${pubkey}@other.example`;
@@ -3684,8 +3736,11 @@ it("ends the server when its agent stops running and suppresses a late final ans
 
 it("reports an interruption cleanup failure when Codex reports surviving terminals", async () => {
   const f = fixture([{ processId: "42" }]);
-  await f.runtime.run(f.delivery("work"));
+  const b = second(f);
+  await f.runtime.run(b.delivery("other work"));
   await vi.waitFor(() => expect(f.starts()).toHaveLength(1));
+  await f.runtime.run(f.delivery("work"));
+  await vi.waitFor(() => expect(f.starts()).toHaveLength(2));
   f.interrupt();
   await vi.waitFor(() => expect(f.publish).toHaveBeenCalledTimes(1));
   expect(f.publish.mock.calls[0]?.[0]).toMatchObject({
@@ -3695,6 +3750,14 @@ it("reports an interruption cleanup failure when Codex reports surviving termina
   });
   expect(f.runtime.sessions(pubkey)[0]?.status).toBe("Needs attention");
   expect(f.process.end).toHaveBeenCalled();
+  await vi.waitFor(() =>
+    expect(b.agent.publish).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content:
+          "Codex could not finish: Buzz closed the Codex connection after background terminal cleanup failed.",
+      }),
+    ),
+  );
 });
 /** The threads whose start prompt is saved, oldest first, and their parts. */
 const savedPrompts = (storage: Map<string, string>) => {

@@ -57,6 +57,7 @@ export class AppServer {
   private buffer = "";
   private stderr = "";
   private listeners = new Set<(message: Wire) => void>();
+  private readonly unconfirmedReleases = new Set<string>();
   private closing?: Promise<void> | undefined;
   private gone = false;
   private opened?: [Spawn, string | undefined, boolean];
@@ -132,11 +133,23 @@ export class AppServer {
     this.closing = undefined;
     this.gone = false;
     this.buffer = this.stderr = "";
+    this.unconfirmedReleases.clear();
     return this.open(spawn, cwd, protectedRuntime);
   }
   /** Whether the process has exited. */
   get exited() {
     return this.gone;
+  }
+  /** A timed-out release may have reached Codex. Wait for a confirmed
+   * unsubscribe before resuming that thread with new instructions. */
+  async releaseThread(threadId: string) {
+    this.unconfirmedReleases.add(threadId);
+    await this.request("thread/unsubscribe", { threadId });
+    this.unconfirmedReleases.delete(threadId);
+  }
+  async confirmThreadReleased(threadId: string) {
+    if (this.unconfirmedReleases.has(threadId))
+      await this.releaseThread(threadId);
   }
   onMessage(listener: (message: Wire) => void) {
     this.listeners.add(listener);
@@ -258,8 +271,19 @@ export class AppServer {
       });
     });
   }
-  close(): Promise<void> {
-    this.fail(new Error("Codex connection closed"));
+  close(
+    cleanup?:
+      | "turn interrupt"
+      | "thread unsubscribe"
+      | "background terminal cleanup",
+  ): Promise<void> {
+    this.fail(
+      new Error(
+        cleanup
+          ? `Buzz closed the Codex connection after ${cleanup} failed`
+          : "Codex connection closed",
+      ),
+    );
     if (!this.process) return Promise.resolve();
     if (this.closing) return this.closing;
     const process = this.process;

@@ -861,6 +861,8 @@ export class CodexRuntime {
         throw new Error(
           "The workspace changed. Send a message to start its session first.",
         );
+      await rpc.confirmThreadReleased(thread.threadId);
+      signal.throwIfAborted();
       const { params, bridge } = await this.prepare(
         rpc,
         agent,
@@ -891,9 +893,7 @@ export class CodexRuntime {
         throw error;
       } finally {
         await bridge?.close();
-        await rpc
-          .request("thread/unsubscribe", { threadId: thread.threadId })
-          .catch(() => undefined);
+        await rpc.releaseThread(thread.threadId).catch(() => undefined);
       }
     });
   }
@@ -1794,9 +1794,7 @@ export class CodexRuntime {
         await Promise.all([opened?.close(), drained]);
         if (media !== opened) await media?.close();
         if (loaded) {
-          await server.rpc
-            .request("thread/unsubscribe", { threadId: loaded.threadId })
-            .catch(() => {});
+          await server.rpc.releaseThread(loaded.threadId).catch(() => {});
           await loaded.bridge?.close();
         }
         delete lane.voice;
@@ -2693,7 +2691,7 @@ export class CodexRuntime {
             threadId: once.threadId,
             turnId: once.turnId,
           })
-          .catch(() => server.rpc.close());
+          .catch(() => server.rpc.close("turn interrupt"));
       this.status(agent.key, key, "Needs attention", message(error));
       return { ok: false, error: message(error) };
     } finally {
@@ -2856,7 +2854,7 @@ export class CodexRuntime {
       if (stopping) return;
       stopping = rpc
         .request("turn/interrupt", { threadId, turnId: turn.turnId })
-        .catch(() => rpc.close());
+        .catch(() => rpc.close("turn interrupt"));
     };
     const off = rpc.onMessage(interrupt);
     signal.addEventListener("abort", interrupt);
@@ -2870,7 +2868,7 @@ export class CodexRuntime {
     } catch (error) {
       await rpc
         .request("thread/unsubscribe", { threadId })
-        .catch(() => rpc.close());
+        .catch(() => rpc.close("thread unsubscribe"));
       throw error;
     } finally {
       signal.removeEventListener("abort", interrupt);
@@ -3246,7 +3244,7 @@ export class CodexRuntime {
         throw new Error("Codex background terminals could not be stopped");
     } catch (error) {
       // A failed cleanup must not leave shells unreachable behind an idle lane.
-      await rpc.close();
+      await rpc.close("background terminal cleanup");
       throw error;
     }
   }
@@ -3509,6 +3507,8 @@ export class CodexRuntime {
       let fresh = !resuming;
       if (resuming) {
         const { threadId } = existing;
+        await rpc.confirmThreadReleased(threadId);
+        signal.throwIfAborted();
         const missing = (error: unknown) => {
           if (message(error) !== `no rollout found for thread id ${threadId}`)
             throw error;
@@ -3561,8 +3561,7 @@ export class CodexRuntime {
         fresh,
       };
     } catch (error) {
-      if (threadId)
-        await rpc.request("thread/unsubscribe", { threadId }).catch(() => {});
+      if (threadId) await rpc.releaseThread(threadId).catch(() => {});
       await bridge?.close();
       throw error;
     }
@@ -3640,6 +3639,7 @@ export class CodexRuntime {
     active.nativeCompleted = followed.completed;
     let hookBridge: Awaited<ReturnType<typeof openHookBridge>> | undefined;
     let explain: (() => string | undefined) | undefined;
+    let turnFailed = false;
     try {
       const rpc = await server.opening;
       signal.throwIfAborted();
@@ -3873,6 +3873,7 @@ export class CodexRuntime {
         this.status(agent.key, key, "Idle");
       }
     } catch (error) {
+      turnFailed = true;
       // Refused before any turn began, it took nothing in.
       if (error instanceof Refused && !active.turnId) restoreNotes(request);
       for (const taken of active.requests) taken.failActivity(message(error));
@@ -3905,7 +3906,7 @@ export class CodexRuntime {
             });
             await this.terminals(server.rpc, active.threadId);
           } catch {
-            await server.rpc.close();
+            await server.rpc.close("turn interrupt");
           }
         }
       }
@@ -3943,9 +3944,14 @@ export class CodexRuntime {
       // Release the subscription before the next resume: loaded-thread rejoin
       // ignores instruction/config overrides while a client is subscribed.
       if (active.threadId && !lane.voice)
-        await server.rpc
-          .request("thread/unsubscribe", { threadId: active.threadId })
-          .catch(() => server.rpc.close());
+        await server.rpc.releaseThread(active.threadId).catch((error) => {
+          if (
+            !turnFailed &&
+            (this.server === server ||
+              this.protectedServers.get(agent.key) === server)
+          )
+            this.status(agent.key, key, "Needs attention", message(error));
+        });
       await hookBridge?.close();
       if (active.voiceRetirement) await active.voiceRetirement.catch(() => {});
       if (lane.active === active) {
