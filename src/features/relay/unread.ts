@@ -140,6 +140,9 @@ export type ReadingHandle = Readonly<{
   view(
     messageIds: readonly string[],
     visible: (messageId: string, measured: boolean) => boolean,
+    /** False for a placeholder while the consumer re-measures: it keeps the
+     * visit's last measurement, which marked-while-shown protection follows. */
+    measured?: boolean,
   ): void;
   /** Only message IDs actually visible to the active consumer; no caller timestamps. */
   observe(messageIds: readonly string[]): Promise<void>;
@@ -174,8 +177,13 @@ export interface UnreadCapability {
   revision(): number;
   /** Access/cache/connection retirement fence. */
   generation(): number;
-  /** `rootId` names the thread a reader shows, which bounds its DM reads. */
-  reading(channelId: string, rootId?: string): ReadingHandle;
+  /** `rootId` names the thread a reader shows, which bounds its DM reads.
+   * `visit` is one reader's stay in this conversation, across its leases:
+   * a message marked unread while that visit shows it stays unread until
+   * the visit measures it away or `leave`s. Without it, the lease is the visit. */
+  reading(channelId: string, rootId?: string, visit?: object): ReadingHandle;
+  /** The reader departed: a return is a new visit. */
+  leave(visit: object): void;
   /** Whether the viewer follows this canonical root: an explicit choice,
    * otherwise writing or replying anywhere in its thread. */
   following(channelId: string, rootId: string): boolean;
@@ -410,11 +418,18 @@ export function createUnread({
       visible: (messageId: string, measured: boolean) => boolean;
     }
   >();
-  /** Messages marked unread while shown: being shown ends their reminder only
-   * on a later visit, after every reader has stopped showing them. */
-  const markedWhileShown = new Set<string>();
-  const inView = (id: string) =>
-    [...views.values()].some((view) => view.ids.has(id));
+  /** Each visit's last completed measurement. */
+  const shownBy = new Map<object, ReadonlySet<string>>();
+  /** Messages marked unread while shown, and the visits that showed them:
+   * those visits leave the reminder alone until they measure it away or end. */
+  const markedWhileShown = new Map<string, Set<object>>();
+  const shields = (id: string, visit: object) =>
+    !!markedWhileShown.get(id)?.has(visit);
+  function leave(visit: object) {
+    shownBy.delete(visit);
+    for (const [id, holders] of markedWhileShown)
+      if (holders.delete(visit) && !holders.size) markedWhileShown.delete(id);
+  }
   // Per-visit message overlay; only the sidebar hint is persisted in read state.
   const forcedMessages = new Map<string, Set<string>>();
   // A force mark can be queued behind a read's save before its overlay is committed.
@@ -1770,6 +1785,8 @@ export function createUnread({
     string,
     readonly [number | undefined, number, string]
   >();
+  /** Resolutions saved or saving; a failed one is retried as captured. */
+  const coverSaves = new Map<string, Promise<void> | true>();
   const clearing = new Set<string>();
   function localCover(key: string, state: ReadState) {
     const separator = key.indexOf(":");
@@ -1796,12 +1813,13 @@ export function createUnread({
     for (const key of reads.localUnreadKeys()) {
       const saved = reads.localCover(key);
       const revision = reads.localUnread(key);
-      if (
-        saved?.[3] !== UNRESOLVED_ROOT ||
-        revision === undefined ||
-        resolvedBases.get(key)?.[0] === revision
-      )
+      if (saved?.[3] !== UNRESOLVED_ROOT || revision === undefined) continue;
+      const captured = resolvedBases.get(key);
+      if (captured?.[0] === revision) {
+        if (!coverSaves.has(key))
+          save(key, revision, captured[1], saved[2], captured[2]);
         continue;
+      }
       indexEvidence();
       const root = byId.get(key.slice(4))?.rootId;
       if (!root) continue;
@@ -1810,9 +1828,26 @@ export function createUnread({
         effectiveFrontier(reads.state(), key, saved[2], root) ?? -1,
       );
       resolvedBases.set(key, [revision, base, root]);
-      void reads
-        .resolveLocalCover(key, [revision, base, saved[2], root])
-        .catch(() => undefined);
+      save(key, revision, base, saved[2], root);
+    }
+    function save(
+      key: string,
+      revision: number,
+      base: number,
+      channel: string,
+      root: string,
+    ) {
+      const saving = reads
+        .resolveLocalCover(key, [revision, base, channel, root])
+        .then(
+          () => {
+            if (coverSaves.get(key) === saving) coverSaves.set(key, true);
+          },
+          () => {
+            if (coverSaves.get(key) === saving) coverSaves.delete(key);
+          },
+        );
+      coverSaves.set(key, saving);
     }
   }
   function endCoveredLocal() {
@@ -1874,7 +1909,10 @@ export function createUnread({
     for (const key of localBases.keys())
       if (!live.has(key)) localBases.delete(key);
     for (const key of resolvedBases.keys())
-      if (!live.has(key)) resolvedBases.delete(key);
+      if (!live.has(key)) {
+        resolvedBases.delete(key);
+        coverSaves.delete(key);
+      }
   }
   const stopRead = reads.subscribe(publish);
   const stopLocal = reads.subscribe(endCoveredLocal);
@@ -2903,7 +2941,8 @@ export function createUnread({
       saved = next;
       followsChanged(changed);
     },
-    reading(channelId, rootId) {
+    leave,
+    reading(channelId, rootId, visit) {
       if (closed || !allowed(channelId) || handles.size >= 64)
         throw new Error("Reading handle unavailable");
       let active = true;
@@ -2913,10 +2952,13 @@ export function createUnread({
       // stamp fences the lease too.
       const unreadSet = reads.unreadSet(channelId);
       const observed = new Set<string>();
+      const owned = !visit;
+      const stay = visit ?? {};
       const dispose = () => {
         active = false;
         handles.delete(dispose);
         views.delete(dispose);
+        if (owned) leave(stay);
       };
       // A newer manual unread cancels this lease. Inside a save, check the
       // journal being replaced: another window may have marked it since.
@@ -2973,6 +3015,7 @@ export function createUnread({
         view(
           ids: readonly string[],
           visible: (id: string, measured: boolean) => boolean,
+          measured = true,
         ) {
           if (!valid() || ids.length > 128) return;
           const verified = ids.filter((id) => {
@@ -2988,8 +3031,12 @@ export function createUnread({
             ids: new Set(verified),
             visible: (id, measured) => valid() && visible(id, measured),
           });
-          for (const id of markedWhileShown)
-            if (!inView(id)) markedWhileShown.delete(id);
+          if (!measured) return;
+          const shown = new Set(verified);
+          shownBy.set(stay, shown);
+          for (const [id, holders] of markedWhileShown)
+            if (!shown.has(id) && holders.delete(stay) && !holders.size)
+              markedWhileShown.delete(id);
         },
         async catchUp(id: string, rootId?: string) {
           if (!valid()) return;
@@ -3053,7 +3100,7 @@ export function createUnread({
                   .map((entry) => `msg:${entry.event.id}`)
           ).filter(
             (local) =>
-              reads.localUnread(local) && !markedWhileShown.has(local.slice(4)),
+              reads.localUnread(local) && !shields(local.slice(4), stay),
           );
           const fresh = (journal: ReadJournal) =>
             current(journal) &&
@@ -3114,7 +3161,7 @@ export function createUnread({
             ) {
               // Shown: its own local reminder ends with no new read mark.
               const local = targetKey(target);
-              if (reads.localUnread(local) && !markedWhileShown.has(id))
+              if (reads.localUnread(local) && !shields(id, stay))
                 await reads.clearLocalUnread(
                   local,
                   [local],
@@ -3647,7 +3694,10 @@ export function createUnread({
       if (target.kind === "message") refuseAgentCoordination(target.messageId);
       if (target.kind === "message") {
         indexEvidence();
-        if (inView(target.messageId)) markedWhileShown.add(target.messageId);
+        const holders = new Set<object>();
+        for (const [visit, shown] of shownBy)
+          if (shown.has(target.messageId)) holders.add(visit);
+        if (holders.size) markedWhileShown.set(target.messageId, holders);
       }
       const result = await reads.markLocalUnread(
         key,

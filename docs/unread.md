@@ -296,6 +296,9 @@ timeline and the thread being read, without reading unopened threads' replies.
   advance of that mark, automatic or explicit, clears it, and so does catch-up
   or display of an already-covered message. A reply marked before its thread
   root loads takes the thread's mark when the root resolves as that baseline.
+  A message marked while a reader shows it is not cleared by that reader's
+  display until its visit measures the row away or ends (unmount, retarget,
+  a hidden window or pane); another pane's visit is independent.
   On a whole channel, after a complete snapshot, it syncs as
   a version-2 group, and reading the channel clears it on every device; without
   a complete snapshot, or while a peer group is held back, it stays on this

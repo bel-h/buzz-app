@@ -93,7 +93,8 @@ function setup({
   let observe = async () => {};
   // The real lease fences on the manual-unread revision current at creation.
   let manual = 0;
-  const reading = vi.fn(() => {
+  const leave = vi.fn();
+  const reading = vi.fn((_channel: string, _root?: string, _visit?: object) => {
     const lease = {
       manual,
       view: vi.fn(),
@@ -108,6 +109,7 @@ function setup({
     unread: {
       sync: () => ({ capability: supported ? "frontier-sync" : "unsupported" }),
       reading,
+      leave,
     },
   } as unknown as RelaySession;
   const view = renderHook(useReading, {
@@ -197,7 +199,7 @@ function row(id: string, top: number, bottom: number) {
 }
 it("reports only fully visible settled evidence after dwell, not mounted overscan", () => {
   const h = setup();
-  expect(h.reading).toHaveBeenCalledExactlyOnceWith("room", undefined);
+  expect(h.reading).toHaveBeenCalledExactlyOnceWith("room", undefined, {});
   vi.advanceTimersByTime(299);
   expect(h.leases[0]?.observe).not.toHaveBeenCalled();
   vi.advanceTimersByTime(1);
@@ -514,6 +516,7 @@ it.each(["blur", "scroll", "unmount"] as const)(
     expect(h.leases[0]?.view).toHaveBeenLastCalledWith(
       [],
       expect.any(Function),
+      false,
     );
     expect(h.leases[0]?.view.mock.lastCall?.[1]("visible", true)).toBe(false);
     // A view-only replacement still reports the row, with no timer of its own.
@@ -576,14 +579,21 @@ it("releases the old channel and session on rerender and only observes the curre
   h.retarget("next-room");
   expect(h.leases[0]?.dispose).toHaveBeenCalledOnce();
   expect(oldValidity("visible", true)).toBe(false);
-  expect(h.reading).toHaveBeenLastCalledWith("next-room", undefined);
-  const nextReading = vi.fn((_channelId: string) => h.reading());
+  expect(h.reading).toHaveBeenLastCalledWith("next-room", undefined, {});
+  const nextReading = vi.fn(
+    (_channelId: string, _rootId?: string, _visit?: object) =>
+      h.reading("next-room"),
+  );
   h.retarget("next-room", {
     ...h.session,
     unread: { ...h.session.unread, reading: nextReading },
   });
   expect(h.leases[1]?.dispose).toHaveBeenCalledOnce();
-  expect(nextReading).toHaveBeenCalledExactlyOnceWith("next-room", undefined);
+  expect(nextReading).toHaveBeenCalledExactlyOnceWith(
+    "next-room",
+    undefined,
+    {},
+  );
   vi.advanceTimersByTime(299);
   for (const lease of h.leases) expect(lease.observe).not.toHaveBeenCalled();
   vi.advanceTimersByTime(1);
@@ -630,7 +640,7 @@ it("bottom dwell catches up through the newest row, including a tall clipped row
   );
   // Its leases name the thread, which bounds what a DM read may cover.
   for (const call of h.reading.mock.calls)
-    expect(call).toEqual(["room", "thread"]);
+    expect(call).toEqual(["room", "thread", {}]);
 });
 it("a broadcast reply as the bottom row earns dwell but catches up through the top-level post", async () => {
   const h = setup({ latestMessageId: "broadcast", catchUpMessageId: "top" });
@@ -730,3 +740,63 @@ it.each(["transitionend", "animationend"])(
     expect(h.leases[0]?.observe).toHaveBeenCalledExactlyOnceWith(["visible"]);
   },
 );
+it("one visit spans dwell renewal and reflow handoffs, whose empty views are not measurements", async () => {
+  const h = setup();
+  await vi.advanceTimersByTimeAsync(300);
+  const visit = h.reading.mock.calls[0]?.[2];
+  expect(visit).toBeDefined();
+  // Dwell renewal: the observed lease's empty view is a handoff.
+  expect(h.dwelled()?.view).toHaveBeenLastCalledWith(
+    [],
+    expect.any(Function),
+    false,
+  );
+  // Scroll reflow: the old lease goes, and the deferred one starts empty.
+  h.element.dispatchEvent(new Event("scroll"));
+  expect(h.leases.at(-1)?.view).toHaveBeenLastCalledWith(
+    [],
+    expect.any(Function),
+    false,
+  );
+  await vi.advanceTimersByTimeAsync(16);
+  expect(h.leases.at(-1)?.view).toHaveBeenLastCalledWith(
+    ["visible"],
+    expect.any(Function),
+  );
+  for (const call of h.reading.mock.calls) expect(call[2]).toBe(visit);
+  expect(h.session.unread.leave).not.toHaveBeenCalled();
+});
+it("a completed measurement that shows no row is reported, as a measurement", async () => {
+  const h = setup();
+  vi.advanceTimersByTime(100);
+  h.setRows([row("visible", 600, 700)]);
+  h.mutation();
+  await vi.advanceTimersByTimeAsync(16);
+  expect(h.leases.at(-1)?.view).toHaveBeenLastCalledWith(
+    [],
+    expect.any(Function),
+  );
+  expect(h.leases.at(-1)?.dispose).toHaveBeenCalled();
+  // Nothing shown since: a further empty measurement takes no lease.
+  const leases = h.leases.length;
+  readingPositioned(h.element);
+  expect(h.leases.length).toBe(leases);
+});
+it("departing ends the visit: returning, or remounting, is a new one", async () => {
+  const h = setup();
+  vi.advanceTimersByTime(100);
+  const first = h.reading.mock.calls[0]?.[2];
+  h.setVisibility("hidden");
+  document.dispatchEvent(new Event("visibilitychange"));
+  expect(h.session.unread.leave).toHaveBeenLastCalledWith(first);
+  h.setVisibility("visible");
+  document.dispatchEvent(new Event("visibilitychange"));
+  const second = h.reading.mock.calls.at(-1)?.[2];
+  expect(second).not.toBe(first);
+  // Focus moving away is not a departure.
+  window.dispatchEvent(new Event("blur"));
+  window.dispatchEvent(new Event("focus"));
+  expect(h.reading.mock.calls.at(-1)?.[2]).toBe(second);
+  h.unmount();
+  expect(h.session.unread.leave).toHaveBeenLastCalledWith(second);
+});

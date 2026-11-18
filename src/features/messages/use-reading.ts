@@ -67,6 +67,18 @@ export function useReading({
     // A deferred measurement's lease, captured when its event arrived.
     let pending: ReadingHandle | undefined;
     let stopped = false;
+    // This reader's stay in the conversation, across its leases: a message
+    // marked unread while shown stays unread until a measurement excludes it
+    // or the reader departs. Returning is a new visit.
+    let visit = {};
+    let visited = false;
+    // Whether the visit's last completed measurement showed any row.
+    let showing = false;
+    function depart() {
+      if (visited) session.unread.leave(visit);
+      visit = {};
+      visited = showing = false;
+    }
     const observing = new Set<ReadingHandle>();
     // The message list or its own composer: typing under a conversation is
     // reading it. A parent scope's composer belongs to another surface. A panel
@@ -203,7 +215,7 @@ export function useReading({
       pending = acquire();
       if (!pending) return;
       try {
-        pending.view([], viewing);
+        pending.view([], viewing, false);
       } catch {
         unqueue();
         return;
@@ -218,7 +230,9 @@ export function useReading({
     }
     function acquire() {
       try {
-        return session.unread.reading(channelId, rootId);
+        const lease = session.unread.reading(channelId, rootId, visit);
+        visited = true;
+        return lease;
       } catch {
         return undefined; // Membership may disappear between commit and observation.
       }
@@ -229,18 +243,32 @@ export function useReading({
       cancel();
       if (!active()) {
         lease?.dispose();
+        if (
+          !element.isConnected ||
+          element.closest('[inert], [hidden], [aria-hidden="true"]') ||
+          !element.getClientRects().length
+        )
+          depart();
         return;
       }
       const ids = visibleIds();
       const bottom = bottomId();
       if (!ids.length && !bottom) {
-        lease?.dispose();
+        // A completed measurement that shows no row, unlike a handoff's.
+        const empty = lease ?? (showing ? acquire() : undefined);
+        try {
+          empty?.view([], viewing);
+          showing = false;
+        } finally {
+          empty?.dispose();
+        }
         return;
       }
       handle = lease ?? acquire();
       if (!handle) return;
       try {
         handle.view(ids, viewing);
+        showing = !!ids.length;
       } catch {
         cancel();
         return;
@@ -268,10 +296,11 @@ export function useReading({
           // Viewing belongs only to the current handle: the write lease keeps
           // its read intent but stops reporting rows that may scroll away.
           // A view-only lease keeps that evidence until the next cancellation.
-          observed.view([], () => false);
+          observed.view([], () => false, false);
           try {
-            handle = session.unread.reading(channelId, rootId);
+            handle = session.unread.reading(channelId, rootId, visit);
             handle.view([...visible], viewing);
+            showing = !!visible.size;
           } catch {
             handle = undefined;
           }
@@ -298,8 +327,11 @@ export function useReading({
     document.addEventListener("focusout", focus);
     window.addEventListener("blur", stop);
     window.addEventListener("focus", schedule);
-    const visibility = () =>
-      document.visibilityState === "visible" ? schedule() : stop();
+    const visibility = () => {
+      if (document.visibilityState === "visible") return schedule();
+      stop();
+      depart();
+    };
     document.addEventListener("visibilitychange", visibility);
     // Pane transforms can bring unchanged rows into view without a resize.
     const motion = (event: Event) => {
@@ -320,6 +352,7 @@ export function useReading({
     return () => {
       stopped = true;
       stop();
+      depart();
       document.removeEventListener("transitionend", motion);
       document.removeEventListener("animationend", motion);
       mutation.disconnect();

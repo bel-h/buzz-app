@@ -14,10 +14,11 @@ import {
   type ReadStateStorage,
 } from "./read-state-storage";
 import { eventDto, type RelayEvent } from "./events";
-import type {
-  ThreadActivitySnapshot,
-  UnreadCapability,
-  UnreadSnapshot,
+import {
+  createUnread,
+  type ThreadActivitySnapshot,
+  type UnreadCapability,
+  type UnreadSnapshot,
 } from "./unread";
 import type { SavedHead } from "./persistence";
 import type { ReadStateSigning } from "./read-state-host";
@@ -7751,7 +7752,8 @@ it("a message marked unread while shown stays unread until a later visit", async
   const other = message(h.alice, "room", "other", 13);
   h.emit([root, reply, other]);
   const key = `msg:${reply.id}`;
-  let lease = h.session.unread.reading("room", root.id);
+  const visit = {};
+  let lease = h.session.unread.reading("room", root.id, visit);
   lease.view([root.id, reply.id], () => true);
   await lease.catchUp(reply.id, root.id);
   await h.session.unread.markUnreadLocal({
@@ -7760,25 +7762,59 @@ it("a message marked unread while shown stays unread until a later visit", async
     messageId: reply.id,
   });
   // The reader renews its lease after the mark and keeps showing the reply.
+  lease.view([], () => false, false);
   lease.dispose();
-  lease = h.session.unread.reading("room", root.id);
+  lease = h.session.unread.reading("room", root.id, visit);
+  lease.view([], () => true, false);
   lease.view([root.id, reply.id], () => true);
   await lease.observe([reply.id]);
   await lease.catchUp(reply.id, root.id);
   expect(h.journal()?.localUnread[key]).toBeDefined();
   lease.dispose();
   // Another conversation, then a new visit.
+  h.session.unread.leave(visit);
   const away = h.session.unread.reading("room");
   away.view([other.id], () => true);
   away.dispose();
-  lease = h.session.unread.reading("room", root.id);
+  lease = h.session.unread.reading("room", root.id, {});
   lease.view([root.id, reply.id], () => true);
   await lease.observe([reply.id]);
   lease.dispose();
   expect(h.journal()?.localUnread[key]).toBeUndefined();
 });
 
-async function unresolvedReply() {
+it("a completed measurement without the marked row ends its visit's protection, whatever another pane shows", async () => {
+  const h = setup();
+  h.grant("room");
+  const top = message(h.alice, "room", "top", 11);
+  h.emit([top]);
+  const key = `msg:${top.id}`;
+  const visit = {};
+  const pane = {};
+  const lease = h.session.unread.reading("room", undefined, visit);
+  lease.view([top.id], () => true);
+  await lease.observe([top.id]);
+  const held = h.session.unread.reading("room", undefined, pane);
+  held.view([top.id], () => true);
+  await h.session.unread.markUnreadLocal({
+    kind: "message",
+    channelId: "room",
+    messageId: top.id,
+  });
+  // Measured away, then shown again on a renewed lease of the same visit.
+  lease.view([], () => true);
+  lease.dispose();
+  const back = h.session.unread.reading("room", undefined, visit);
+  back.view([top.id], () => true);
+  await back.observe([top.id]);
+  back.dispose();
+  held.dispose();
+  expect(h.journal()?.localUnread[key]).toBeUndefined();
+});
+
+async function unresolvedReply(
+  beforeRoot?: (r: ReturnType<typeof setup>) => void,
+) {
   const h = setup();
   h.grant("room");
   const root = message(h.alice, "room", "root", 11);
@@ -7814,6 +7850,7 @@ async function unresolvedReply() {
     messageId: reply.id,
   });
   expect(r.journal()?.localCovers?.[key]?.[3]).toBe("?");
+  beforeRoot?.(r);
   r.emit([root]);
   return { r, root, reply, key };
 }
@@ -7859,4 +7896,132 @@ it("a resolved root survives a reload, so a peer's thread advance clears it", as
   await vi.waitFor(() =>
     expect(again.journal()?.localUnread[key]).toBeUndefined(),
   );
+});
+
+it("a failed save of a resolved root is retried as captured, so a peer's thread advance clears it after a reload", async () => {
+  const { r, root, key } = await unresolvedReply((r) => r.failSave());
+  // An unrelated save succeeds; the resolution is saved as first captured.
+  r.grant("other");
+  await r.session.unread.markChannelRead("other");
+  await vi.waitFor(() =>
+    expect(r.journal()?.localCovers?.[key]?.slice(1)).toEqual([
+      25,
+      "room",
+      root.id,
+    ]),
+  );
+  const saved = r.journal();
+  if (!saved) throw new Error("Missing journal");
+  r.dispose();
+  const advanced: ReadJournal = {
+    ...saved,
+    state: {
+      ...saved.state,
+      frontiers: { ...saved.state.frontiers, [`thread:${root.id}`]: 30 },
+    },
+  };
+  const again = setup({}, true, () => advanced);
+  again.grant("room");
+  again.grant("other");
+  await again.session.unread.markChannelRead("other");
+  await vi.waitFor(() =>
+    expect(again.journal()?.localUnread[key]).toBeUndefined(),
+  );
+});
+
+it("an advance's projected clear keeps a reminder another window marked again meanwhile", async () => {
+  const h = setup();
+  const viewer = h.viewer.pubkey;
+  const disk: { journal: ReadJournal | undefined } = { journal: undefined };
+  const channels = {
+    list: () => ({
+      channels: [
+        { id: "room", cached: false, members: [viewer], channelType: "stream" },
+      ],
+    }),
+    subscribeList: () => () => {},
+  };
+  const owner = () => {
+    const storage: ReadStateStorage = {
+      capture: async () => disk.journal,
+      close() {},
+      async update(change) {
+        disk.journal = readJournal(change(disk.journal), viewer);
+        return disk.journal;
+      },
+    };
+    const reads = createReadState({
+      viewer,
+      reader: { read: async () => [] },
+      host: {
+        decode: async () => [],
+        sign: async () => {
+          throw new Error("Not signed here");
+        },
+        publish: async () => {},
+      },
+      lock: async (_signal, work) => work(),
+      storage,
+      floor: () => 0,
+      now: () => 100,
+      debounceMs: 60_000,
+    });
+    const unread = createUnread({
+      viewer,
+      reader: { read: async () => [] } as never,
+      reads,
+      channels: channels as never,
+    });
+    return { reads, unread, storage };
+  };
+  const root = message(h.alice, "room", "root", 10);
+  const key = `msg:${root.id}`;
+  const target = {
+    kind: "message" as const,
+    channelId: "room",
+    messageId: root.id,
+  };
+  const a = owner();
+  let release = () => {};
+  try {
+    await a.reads.ready;
+    a.unread.accept([root]);
+    await a.reads.read("room", 10, () => true);
+    await a.unread.capability.markUnreadLocal(target);
+    const b = owner();
+    try {
+      await b.reads.ready;
+      b.unread.accept([root]);
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      let started = () => {};
+      const held = new Promise<void>((resolve) => {
+        started = resolve;
+      });
+      const update = a.storage.update.bind(a.storage);
+      let calls = 0;
+      a.storage.update = async (change) => {
+        if (++calls === 2) {
+          started();
+          await gate;
+        }
+        return update(change);
+      };
+      // The raw advance: public reads clear the reminder in their own save.
+      await a.reads.read("room", 20, () => true);
+      await held;
+      await b.unread.capability.markUnreadLocal(target);
+      const fresh = disk.journal?.localUnread[key];
+      expect(fresh).toBeDefined();
+      release();
+      await a.reads.read("barrier", 0, () => true);
+      expect(disk.journal?.localUnread[key]).toBe(fresh);
+    } finally {
+      release();
+      b.unread.dispose();
+    }
+  } finally {
+    a.unread.dispose();
+  }
 });
