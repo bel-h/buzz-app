@@ -116,6 +116,7 @@ import {
   parseSearchOperators,
 } from "./parseSearchOperators";
 import { avatarMedia } from "../../shared/avatar-source";
+import { PreviewText, mentionedIds } from "../../features/messages/PreviewText";
 import {
   useVerifiedNames,
   withVerifiedNames,
@@ -1018,6 +1019,7 @@ export function SearchResults({
       ...search.messages.flatMap((message) => [
         message.authorId,
         ...(message.workflowOwnerId ? [message.workflowOwnerId] : []),
+        ...mentionedIds(message.mentioned),
       ]),
       ...personDirectory.people.flatMap((person) =>
         person.ownerPubkey ? [person.ownerPubkey] : [],
@@ -1708,18 +1710,31 @@ export function SearchResults({
       list.channels.find((channel) => channel.id === message.channelId)
         ?.members ?? noMembers,
     );
-    const shown = snippet(message.text || message.preview, terms);
+    const text = message.text || message.preview;
+    const shown = snippet(text, terms);
     return {
       key: message.id,
       label: shown.text || "Attachment",
       ...(shown.matches.length ? { matches: shown.matches } : {}),
+      labelContent: shown.text ? (
+        <PreviewText
+          text={shown.text}
+          full={text}
+          start={shown.start}
+          mentions={message.mentioned}
+          matches={shown.matches}
+          session={session}
+          channelId={message.channelId}
+        />
+      ) : undefined,
       peek: {
         kind: "message" as const,
         channelId: message.channelId,
         messageId: message.id,
         createdAt: message.createdAt,
         authorId: message.workflowOwnerId ?? message.authorId,
-        text: message.text || message.preview,
+        text,
+        mentioned: message.mentioned,
       },
       detail: `${names.get(message.channelId) ?? channel?.name ?? "Conversation"} · ${message.workflowOwnerId ? workflowLabel(name) : name} · ${formatItemTimestamp(message.createdAt)}`,
       detailIcon: channel && channelIcon(channel),

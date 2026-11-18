@@ -45,6 +45,9 @@ export type SearchDestination = {
   rank?: number;
   key: string;
   label: string;
+  /** Shown in place of `label` where text alone cannot show it, as a
+   * message's mention chips; `matches` still index `label`. */
+  labelContent?: ReactNode;
   detail?: string;
   /** Quiet metadata at the row's end, such as a count. */
   trailing?: ReactNode;
@@ -613,6 +616,7 @@ export function SearchChoices({
       content,
       key,
       label,
+      labelContent,
       detail,
       detailIcon: DetailIcon,
       detailIconLabel,
@@ -750,7 +754,9 @@ export function SearchChoices({
             label={
               <>
                 <span className="block truncate text-body-sm">
-                  <MatchedLabel label={label} positions={matches} />
+                  {labelContent ?? (
+                    <MatchedLabel label={label} positions={matches} />
+                  )}
                 </span>
                 {detail && (
                   <span
