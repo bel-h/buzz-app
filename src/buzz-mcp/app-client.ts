@@ -73,12 +73,13 @@ export function appClient(
     ...(options.callSignal ? { signal: options.callSignal } : {}),
     ...(agent.settle
       ? {
-          settle: () =>
-            agent.settle?.(
+          settle: async () => {
+            await agent.settle?.(
               options.callSignal ??
                 options.signal ??
                 new AbortController().signal,
-            ) ?? Promise.resolve(),
+            );
+          },
         }
       : {}),
     ...(agent.protection

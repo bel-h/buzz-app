@@ -462,7 +462,7 @@ export type RunnerHost = {
    * new until ready, but keeps custody and its turn meanwhile. */
   reloading?(key: AgentKey): boolean;
   /** Waits while the agent's community reloads in place (`AgentHandle.settle`). */
-  settle?(agent: Agent, signal: AbortSignal): Promise<void>;
+  settle?(agent: Agent, signal: AbortSignal): Promise<boolean>;
   /** A running agent, in any community. */
   agent(key: AgentKey): Agent | undefined;
   /** Whether the agent is in the event's channel, or undefined while its
@@ -3364,7 +3364,10 @@ export class AgentRunners {
           return event;
         },
         settle: async (signal: AbortSignal) =>
-          this.host.settle?.(agent, AbortSignal.any([lifetime, signal])),
+          (await this.host.settle?.(
+            agent,
+            AbortSignal.any([lifetime, signal]),
+          )) ?? false,
         agentTypes: () => this.host.agentTypes(),
         // Drafts outlive the run's handover deadline, as a turn still working may
         // submit one, but not the agent or its type.
