@@ -159,3 +159,45 @@ it("keeps an accessible qualifier separate from the authored name and stays iner
   );
   expect(container.querySelector("button, a, [tabindex], [title]")).toBeNull();
 });
+
+it("shows a resolved identity's avatar in place of the sigil", () => {
+  const { container, rerender } = render(
+    <InlineChip
+      address={{ kind: "agent", id: "b".repeat(64) }}
+      interactive={false}
+      face={{
+        label: "Helper",
+        avatarUrl: "https://example.org/helper.png",
+        loading: false,
+        resolved: true,
+      }}
+    />,
+  );
+  const chip = screen.getByRole("img", { name: "Agent Helper" });
+  expect(chip.querySelector("img")).toHaveAttribute(
+    "src",
+    "https://example.org/helper.png",
+  );
+  expect(chip.querySelector("[data-avatar-shape]")).toHaveAttribute(
+    "data-avatar-shape",
+    "squircle",
+  );
+  expect(container.querySelector(".inline-chip-trigger")).toBeNull();
+
+  rerender(
+    <InlineChip
+      address={{ kind: "agent", id: "b".repeat(64) }}
+      interactive={false}
+      face={{
+        label: "Helper",
+        avatarUrl: "https://example.org/helper.png",
+        loading: true,
+        resolved: true,
+      }}
+    />,
+  );
+  expect(container.querySelector("img")).toBeNull();
+  expect(container.querySelector(".inline-chip-trigger")).toHaveTextContent(
+    "@",
+  );
+});

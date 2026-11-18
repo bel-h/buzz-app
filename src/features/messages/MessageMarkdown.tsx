@@ -25,6 +25,7 @@ import {
 } from "./ReferenceText";
 import { profileKey } from "../profiles/target";
 import referenceStyles from "../../shared/InlineReference.module.css";
+import { avatarMedia } from "../../shared/avatar-source";
 import Markdown, { type Components, type ExtraProps } from "react-markdown";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
@@ -700,7 +701,19 @@ function PreparedMessageMarkdown({
               : undefined
           }
         >
-          <MentionLabel agent={!!agent} label={label} />
+          <MentionLabel
+            agent={!!agent}
+            label={label}
+            avatar={
+              key
+                ? avatarMedia(
+                    (participantProfiles ?? directory.profiles).get(key)
+                      ?.picture,
+                    media,
+                  )
+                : undefined
+            }
+          />
         </Mention>
       );
     }

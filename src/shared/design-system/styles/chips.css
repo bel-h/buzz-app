@@ -117,6 +117,23 @@
     }
   }
 
+  /* An identity's avatar in place of a person or agent chip's sigil or icon,
+     in the composer and in messages alike. Taller than the 1em icon, so the
+     negative block margin keeps the line box; an inline-block that clips takes
+     its baseline from its bottom margin edge, so -0.125em centres it on the
+     capitals like the icon. */
+  .inline-chip-avatar {
+    display: inline-block;
+    overflow: hidden;
+    /* No line box of its own, so the avatar fills the box from its top. */
+    line-height: 0;
+    width: 1.3em;
+    height: 1.3em;
+    margin-block: -0.15em;
+    margin-right: 0.3em;
+    vertical-align: -0.125em;
+  }
+
   .inline-chip-label {
     min-width: 0;
     overflow: hidden;

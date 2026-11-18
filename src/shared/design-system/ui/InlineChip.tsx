@@ -8,6 +8,7 @@ import {
   chipFaces,
 } from "../chips/faceResolver";
 
+import { Avatar } from "./Avatar";
 import { PreviewCard } from "./PreviewCard";
 
 /**
@@ -56,12 +57,30 @@ export function InlineChip({
   const Icon = KIND_ICON[address.kind];
   const trigger = CHIP_KIND_TRIGGER[address.kind];
   const kind = accessibleKind(address.kind);
+  // A resolved identity's avatar takes the sigil's place; a loading chip keeps
+  // the sigil so its spinner has a box to borrow.
+  const avatar =
+    (address.kind === "person" || address.kind === "agent") &&
+    face.resolved &&
+    !face.loading
+      ? face.avatarUrl
+      : undefined;
 
   const content = (
     <>
       {Icon ? <Icon className="inline-chip-icon" aria-hidden="true" /> : null}
       <span className="inline-chip-label">
-        {trigger ? (
+        {avatar ? (
+          <span className="inline-chip-avatar">
+            <Avatar
+              src={avatar}
+              alt=""
+              fallback={face.label}
+              size="fill"
+              shape={address.kind === "agent" ? "squircle" : "circle"}
+            />
+          </span>
+        ) : trigger ? (
           // While the face resolves, a spinner borrows the sigil's box: the
           // glyph stays in the flow (painted transparent) so nothing shifts
           // when it returns. A kind without a sigil carries its icon instead.
