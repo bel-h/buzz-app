@@ -597,23 +597,65 @@ describe("AgentSessions", () => {
 
   it("stops a drained goose before starting one with a changed compaction threshold", async () => {
     let limit: number | undefined;
-    let started = 0;
+    let release!: () => void;
+    const exit = new Promise<void>((resolve) => (release = resolve));
+    let stopping = false;
     const { fake, sessions } = setup({}, false, {
       compactAt: () => limit,
       // At the host's process limit, a second goose can start only once the
-      // first has gone.
+      // first has exited, which it does only once released.
       wrap: (spawn) => async (id, options) => {
-        if (started++ && !fake.geese[0]?.killed)
-          throw new Error("Too many processes");
-        return spawn(id, options);
+        const first = fake.geese[0];
+        if (first && !first.killed) throw new Error("Too many processes");
+        const process = await spawn(id, options);
+        return first
+          ? process
+          : {
+              ...process,
+              kill: async () => {
+                stopping = true;
+                await exit;
+                await process.kill();
+              },
+            };
       },
     });
     await sessions.runOnce("watch/x", () => "look");
     limit = 200000;
-    await expect(sessions.runOnce("watch/y", () => "look")).resolves.toEqual(
+    const run = sessions.runOnce("watch/y", () => "look");
+    await vi.waitFor(() => expect(stopping).toBe(true));
+    await flush(30);
+    expect(fake.geese).toHaveLength(1);
+    release();
+    await expect(run).resolves.toEqual(expect.objectContaining({ ok: true }));
+    expect(fake.geese).toHaveLength(2);
+    expect(fake.geese[1]?.env.GOOSE_AUTO_COMPACT_TOKEN_LIMIT).toBe("200000");
+  });
+
+  it("keeps a goose whose session is still opening when the compaction threshold changes", async () => {
+    let limit: number | undefined;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const { fake, sessions } = setup({}, false, {
+      compactAt: () => limit,
+      wrap: (spawn) => async (id, options) => {
+        const process = await spawn(id, options);
+        const [first] = fake.geese;
+        if (first && fake.geese.length === 1) first.promptGate = gate;
+        return process;
+      },
+    });
+    const opening = sessions.runOnce("watch/x", () => "look");
+    await vi.waitFor(() => expect(fake.geese[0]?.opened).toHaveLength(1));
+    limit = 200000;
+    const other = sessions.runOnce("watch/y", () => "look");
+    await vi.waitFor(() => expect(fake.geese).toHaveLength(2));
+    expect(fake.geese[0]?.killed).toBe(false);
+    release();
+    await expect(opening).resolves.toEqual(
       expect.objectContaining({ ok: true }),
     );
-    expect(fake.geese).toHaveLength(2);
+    await expect(other).resolves.toEqual(expect.objectContaining({ ok: true }));
     expect(fake.geese[1]?.env.GOOSE_AUTO_COMPACT_TOKEN_LIMIT).toBe("200000");
   });
 
