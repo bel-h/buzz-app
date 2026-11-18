@@ -12,6 +12,7 @@ import {
   PULL_RETAIN_MS,
   PULL_SLOW_REFRESH_MS,
   PULLS_PER_READ,
+  REMEMBERED_FOR_MS,
 } from "./pull-states";
 import { createRememberedStates } from "./remembered-states";
 
@@ -2075,5 +2076,25 @@ it("keeps showing what was remembered while GitHub is out of reach, but not one 
     expect(remembered.get(second)).toBeUndefined();
   } finally {
     for (const unwatch of stop) unwatch();
+  }
+});
+
+it("reads a remembered merged pull request again once it was read a day ago", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+  const remembered = createRememberedStates(null);
+  remembered.remember(
+    [[pull, { state: "merged", title: "Long ago" }]],
+    Date.now() - REMEMBERED_FOR_MS,
+  );
+  const gh = mockGh(async () => ({ r0: rollup("MERGED") }));
+  const states = createPullStates(gh, { remembered });
+  const stop = states.watch(pull, () => {});
+  try {
+    expect(states.get(pull)).toEqual({ state: "merged", title: "Long ago" });
+    await vi.waitFor(() => expect(gh).toHaveBeenCalledOnce());
+    await vi.advanceTimersByTimeAsync(PULL_REFRESH_MS * 3);
+    expect(gh).toHaveBeenCalledOnce();
+  } finally {
+    stop();
   }
 });

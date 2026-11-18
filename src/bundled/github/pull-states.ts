@@ -40,6 +40,9 @@ export const PUBLIC_READS_PER_HOUR = 30;
 const PUBLIC_READ_EARNED_MS = (60 * 60_000) / PUBLIC_READS_PER_HOUR;
 /** How long a pull request nobody shows or has asked for is kept. */
 export const PULL_RETAIN_MS = 15 * 60_000;
+/** How long what was read in an earlier session counts as polled, so one
+ * merged is read again about once a day it is shown. */
+export const REMEMBERED_FOR_MS = 24 * 60 * 60_000;
 /** The feedback text one read asks for at most, GitHub's limit for one
  * `nodes` lookup; the rest waits for the next. */
 export const FEEDBACK_READ = 100;
@@ -785,13 +788,17 @@ export function createPullStates(
    * readers' interval after, and a public poll takes the longest unpolled. */
   const polledAt = new Map<string, number>();
   /** When `url` was polled, or else read before, when it was remembered:
-   * a merged one is then not read again, and one read a moment ago waits
-   * its turn. */
+   * a merged one is then not read again that day, and one read a moment
+   * ago waits its turn. */
   const lastPolled = (url: string) => {
     const polled = polledAt.get(url);
     if (polled !== undefined || states.has(url)) return polled;
     const before = remembered?.readAt(url);
-    return before === undefined ? undefined : Math.min(before, Date.now());
+    // One remembered from long ago is read again, so a merged one whose
+    // repository is now out of reach is not shown as it was for good.
+    return before === undefined || before <= Date.now() - REMEMBERED_FOR_MS
+      ? undefined
+      : Math.min(before, Date.now());
   };
   /** Not polled again before then: after GitHub answered for none, or while
    * a public read is not yet earned. */
@@ -1069,8 +1076,8 @@ export function createPullStates(
         if (error?.message !== failed) failing.push(url);
         // GitHub answered for others but not this one, so it is gone or
         // out of reach: links show it unavailable rather than as it was.
-        if (!error) read.push([url, state as PullState]);
-        else if (state === "failed") lost.push(url);
+        if (state === "failed") lost.push(url);
+        else if (!error) read.push([url, state]);
         const at = readAt.get(url) ?? now;
         for (const { resolve } of asked.get(url)?.waiting ?? [])
           resolve({ state, readAt: at, error });
