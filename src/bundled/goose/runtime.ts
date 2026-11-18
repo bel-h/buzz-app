@@ -67,7 +67,12 @@ import {
   turnPrompt,
 } from "../claude-code/prompt";
 import { readAuthorNames } from "../../features/agent-harness/author-names";
-import { ownerCanvas, readProject } from "../../features/agent-harness/project";
+import {
+  ownerCanvas,
+  readProject,
+  worksElsewhere,
+} from "../../features/agent-harness/project";
+import { sectionsOf } from "../../features/agent-harness/sections/compose";
 import {
   type GooseProcess,
   REQUEST_TIMEOUT_MS,
@@ -787,6 +792,7 @@ export class GooseRuntime {
                   session.channelWrites.startingCanvas(channelId),
                 )
             : undefined,
+          worksElsewhere(undefined, entry.handle?.promptSections?.(channelId)),
         )
       : Promise.resolve(undefined);
     const threadRead = (thread || (resumed && !dm)) && !topLevel;
@@ -985,8 +991,9 @@ export class GooseRuntime {
         model: entry.config.model.trim(),
         effort: entry.config.effort,
       }),
-      // The prompt's other parts, its instructions, team, name and core
-      // memory, reach a running session in place as its next turn starts.
+      // The prompt's other parts, its instructions, team, name, core memory
+      // and its conversation's sections, reach a running session in place
+      // as its next turn starts.
       fingerprint: () =>
         JSON.stringify([
           entry.config.provider.trim() ? 0 : this.defaultsRevision,
@@ -994,7 +1001,7 @@ export class GooseRuntime {
           entry.config.scope,
           addedKey(this.added()),
         ]),
-      launch: async () => {
+      launch: async (conversation) => {
         const { workspace, instructions, scope } = entry.config;
         const memory = await this.core(agent);
         return {
@@ -1011,7 +1018,9 @@ export class GooseRuntime {
             instructions,
             team: entry.team,
             ...(memory === undefined ? {} : { memory }),
-            sections: entry.handle?.promptSections?.(),
+            // A conversation's prompt has the sections of the plugin that
+            // manages it.
+            sections: sectionsOf(entry.handle, conversation),
           }),
         };
       },
