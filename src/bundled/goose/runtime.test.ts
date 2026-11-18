@@ -1258,6 +1258,7 @@ describe("GooseRuntime", () => {
     expect(promptSections).toHaveBeenCalledWith(channel, managedRoot.id);
     expect(promptOf(0)).toContain(wrapper);
     expect(promptOf(0)).not.toContain("Make file changes on a new branch");
+    expect(promptOf(0)).toContain("This session is one thread");
     // Another conversation of the same agent has the default rule.
     expect(promptOf(1)).not.toContain("<plugin-section id=");
     expect(promptOf(1)).toContain("Make file changes on a new branch");
@@ -1282,7 +1283,7 @@ describe("GooseRuntime", () => {
   });
 
   it("builds a one-off turn's prompt with no conversation's sections", async () => {
-    const { agent, runOnce } = setup();
+    const { agent, runOnce, goose } = setup();
     const promptSections = vi.fn(() => ({}));
     Object.assign(agent, { promptSections });
     await runOnce("timer/daily", "Post the daily summary.");
@@ -1291,6 +1292,9 @@ describe("GooseRuntime", () => {
       [undefined, undefined],
       [undefined, undefined],
     ]);
+    expect(goose()?.prompts.get(goose()?.turns[0]?.sessionId ?? "")).toContain(
+      "This run joins no conversation",
+    );
   });
 
   it("tells a Solo chat whose plugin gives the working location to read its Canvas's folders", async () => {
