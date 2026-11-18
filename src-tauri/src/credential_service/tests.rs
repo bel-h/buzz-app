@@ -1,4 +1,4 @@
-use super::policy::{classify, Verdict};
+use super::policy::{classify, Verdict, AUTH_PROOFS, ORDINARY, REFUSED, SENSITIVE};
 use super::*;
 use crate::federated_identity::{agent::AgentTokens, FederatedIdentity};
 use buzz_agent_controller::{AppAgent, Secret};
@@ -947,24 +947,83 @@ fn the_policy_binds_each_proof_to_the_community() {
     ));
 }
 
+const SIGNING_CLASSES: [(&str, &[u16]); 4] = [
+    ("ORDINARY", ORDINARY),
+    ("SENSITIVE", SENSITIVE),
+    ("REFUSED", REFUSED),
+    ("AUTH_PROOFS", AUTH_PROOFS),
+];
+
+fn classes_of(kind: u16) -> Vec<&'static str> {
+    SIGNING_CLASSES
+        .iter()
+        .flat_map(|(name, kinds)| {
+            kinds
+                .iter()
+                .filter(move |k| **k == kind)
+                .map(move |_| *name)
+        })
+        .collect()
+}
+
+fn buzz_kinds() -> Vec<(u16, &'static str)> {
+    include_str!("buzz_kinds.txt")
+        .lines()
+        .filter(|line| !line.starts_with('#') && !line.is_empty())
+        .map(|line| {
+            let (kind, name) = line.split_once(' ').unwrap();
+            (kind.parse().unwrap(), name)
+        })
+        .collect()
+}
+
 #[test]
-fn every_kind_has_one_class() {
-    let classes = |kind| classify(kind, &[], NOW, NOW, RELAY);
-    for kind in [
-        7, 9, 30174, 20001, 24200, 40002, 41010, 45010, 46020, 1621, 1984,
-    ] {
-        assert_eq!(classes(kind), Verdict::Sign, "{kind}");
+fn signing_classes_are_disjoint() {
+    for (_, kinds) in SIGNING_CLASSES {
+        for &kind in kinds {
+            let classes = classes_of(kind);
+            assert!(
+                classes.len() == 1,
+                "Kind {kind} is listed {classes:?} in policy.rs; keep it in exactly one of ORDINARY, SENSITIVE, REFUSED or AUTH_PROOFS"
+            );
+        }
     }
-    for kind in [
-        0, 3, 5, 9005, 9044, 10002, 10100, 28936, 30621, 41011, 45011,
-    ] {
+}
+
+#[test]
+fn every_buzz_kind_has_one_signing_class() {
+    for (kind, name) in buzz_kinds() {
+        let classes = classes_of(kind);
         assert!(
-            matches!(classes(kind), Verdict::Deny(reason) if reason.contains("use Buzz")),
+            classes.len() == 1,
+            "Kind {kind} ({name}) from block/buzz is listed {classes:?} in policy.rs; add it to exactly one of ORDINARY, SENSITIVE or REFUSED. To pick up new block/buzz kinds, run `node scripts/sync-buzz-kinds.mjs`"
+        );
+    }
+}
+
+#[test]
+fn every_class_gets_its_verdict() {
+    let verdict = |kind| classify(kind, &[], NOW, NOW, RELAY);
+    for &kind in ORDINARY {
+        assert_eq!(verdict(kind), Verdict::Sign, "{kind}");
+    }
+    for &kind in SENSITIVE {
+        assert!(
+            matches!(verdict(kind), Verdict::Deny(reason) if reason.contains("use Buzz")),
             "{kind}"
         );
     }
-    for kind in [1, 4, 1059, 24243, 24245, 30350, 39000] {
-        assert!(matches!(classes(kind), Verdict::Deny(_)), "{kind}");
+    for kind in REFUSED.iter().copied().chain([30350, 65000]) {
+        assert!(
+            matches!(verdict(kind), Verdict::Deny(reason) if reason.contains("is not signed for local callers")),
+            "{kind}"
+        );
+    }
+    for &kind in AUTH_PROOFS {
+        assert!(
+            matches!(verdict(kind), Verdict::Deny(reason) if !reason.contains("use Buzz") && !reason.contains("is not signed for local callers")),
+            "{kind}"
+        );
     }
 }
 
