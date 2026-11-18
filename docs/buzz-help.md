@@ -301,6 +301,9 @@ mention anyone. Explicit agent watches on that room can still receive them.
   also find people already verified by a matching verified name or username.
   Adding channel members also finds a verified person by their verified name,
   or by their public key, even if they never set up a profile.
+- A profile whose key is archived in the community says so. If the community
+  recorded a new key for it, the profile says "This key was replaced by" and
+  links the new key's profile.
 - Profile names omit surrounding whitespace. Names with layout or directional
   controls fall back to a safe handle or public-key fragment. Names that match
   a loaded verified name after ignoring hidden characters gain a public-key suffix.
