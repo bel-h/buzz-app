@@ -7775,7 +7775,10 @@ it("a message marked unread while shown stays unread until a later visit", async
   h.session.unread.leave(visit);
   const away = h.session.unread.reading("room");
   away.view([other.id], () => true);
+  await away.observe([other.id]);
   away.dispose();
+  // Departing reads nothing: only the later visit clears.
+  expect(h.journal()?.localUnread[key]).toBeDefined();
   lease = h.session.unread.reading("room", root.id, {});
   lease.view([root.id, reply.id], () => true);
   await lease.observe([reply.id]);

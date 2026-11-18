@@ -65,14 +65,16 @@ function setup({
   const scroller = { current: element };
   const position = { current: settled };
   let mutation = () => {};
+  let attributes: (records: { target: Node }[]) => void = () => {};
   const disconnected = vi.fn();
   vi.stubGlobal(
     "MutationObserver",
     class {
-      constructor(callback: () => void) {
-        mutation = callback;
+      constructor(private callback: (records: { target: Node }[]) => void) {}
+      observe(_target: Node, options: MutationObserverInit) {
+        if (options.attributes) attributes = this.callback;
+        else mutation = () => this.callback([]);
       }
-      observe() {}
       disconnect = disconnected;
     },
   );
@@ -148,6 +150,12 @@ function setup({
     position,
     disconnected,
     mutation: () => mutation(),
+    /** An ancestor attribute change, with no transition or focus event. */
+    conceal: (hidden: boolean, target: HTMLElement = panel) => {
+      target.toggleAttribute("inert", hidden);
+      attributes([{ target }]);
+    },
+    panel,
     /** A completed dwell hands viewing to a fresh view-only lease after it. */
     dwelled: () => leases.at(-2),
     setVisibility: (next: DocumentVisibilityState) => {
@@ -611,7 +619,7 @@ it("StrictMode releases its probe lease and disconnects observation on unmount",
   h.unmount();
   expect(validity()).toBe(false);
   for (const lease of h.leases) expect(lease.dispose).toHaveBeenCalledOnce();
-  expect(h.disconnected).toHaveBeenCalledTimes(4);
+  expect(h.disconnected).toHaveBeenCalledTimes(6);
   act(() => {
     elementEvents(h.element);
     window.dispatchEvent(new Event("focus"));
@@ -799,4 +807,37 @@ it("departing ends the visit: returning, or remounting, is a new one", async () 
   expect(h.reading.mock.calls.at(-1)?.[2]).toBe(second);
   h.unmount();
   expect(h.session.unread.leave).toHaveBeenLastCalledWith(second);
+});
+it("losing its layout box cancels reading but keeps the visit; concealment ends it", async () => {
+  const h = setup();
+  const first = h.reading.mock.calls[0]?.[2];
+  const rects = vi.mocked(h.element.getClientRects);
+  // A relayout frame with no box at all, then the same rows again.
+  rects.mockReturnValue([] as unknown as DOMRectList);
+  h.element.dispatchEvent(new Event("scroll"));
+  await vi.advanceTimersByTimeAsync(16);
+  rects.mockReturnValue([
+    new DOMRect(0, 0, 500, 500),
+  ] as unknown as DOMRectList);
+  h.element.dispatchEvent(new Event("scroll"));
+  await vi.advanceTimersByTimeAsync(16);
+  expect(h.session.unread.leave).not.toHaveBeenCalled();
+  expect(h.reading.mock.calls.at(-1)?.[2]).toBe(first);
+  // An unrelated attribute change elsewhere is not this pane's.
+  const elsewhere = document.createElement("div");
+  document.body.append(elsewhere);
+  h.conceal(true, elsewhere);
+  expect(h.session.unread.leave).not.toHaveBeenCalled();
+  // Concealed by an ancestor, unchanged rows, no transition event: departed.
+  h.conceal(true);
+  expect(h.session.unread.leave).toHaveBeenCalledExactlyOnceWith(first);
+  const leases = h.leases.length;
+  h.conceal(false);
+  expect(h.leases.length).toBe(leases + 1);
+  const second = h.reading.mock.calls.at(-1)?.[2];
+  expect(second).not.toBe(first);
+  await vi.advanceTimersByTimeAsync(300);
+  expect(h.dwelled()?.observe).toHaveBeenCalledExactlyOnceWith(["visible"]);
+  h.unmount();
+  expect(h.disconnected).toHaveBeenCalled();
 });

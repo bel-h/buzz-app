@@ -4,6 +4,7 @@ import type { ReadingHandle } from "../relay/unread";
 import { useMessageEditScope } from "./MessageEditScope";
 
 /** Shared document attention gate for reading and row visits. */
+const CONCEALED = '[inert], [hidden], [aria-hidden="true"]';
 export function readingDocumentActive() {
   return document.visibilityState === "visible" && document.hasFocus();
 }
@@ -113,7 +114,7 @@ export function useReading({
     const ready = () =>
       !stopped &&
       element.isConnected &&
-      !element.closest('[inert], [hidden], [aria-hidden="true"]') &&
+      !element.closest(CONCEALED) &&
       settled.current &&
       readingDocumentActive() &&
       focused(document.activeElement);
@@ -243,12 +244,6 @@ export function useReading({
       cancel();
       if (!active()) {
         lease?.dispose();
-        if (
-          !element.isConnected ||
-          element.closest('[inert], [hidden], [aria-hidden="true"]') ||
-          !element.getClientRects().length
-        )
-          depart();
         return;
       }
       const ids = visibleIds();
@@ -346,6 +341,29 @@ export function useReading({
       subtree: true,
       characterData: true,
     });
+    // A retained pane concealed by an ancestor, even with no transition or
+    // focus change, is a departure; layout, focus and blur are not.
+    let concealed = !!element.closest(CONCEALED);
+    const concealment = new MutationObserver((records) => {
+      if (
+        !records.some(
+          (record) =>
+            record.target instanceof Element && record.target.contains(element),
+        )
+      )
+        return;
+      const now = !!element.closest(CONCEALED);
+      if (now === concealed) return;
+      concealed = now;
+      if (!now) return schedule();
+      stop();
+      depart();
+    });
+    concealment.observe(document.documentElement, {
+      attributes: true,
+      subtree: true,
+      attributeFilter: ["inert", "hidden", "aria-hidden"],
+    });
     const resize = new ResizeObserver(reflow);
     resize.observe(element);
     schedule();
@@ -356,6 +374,7 @@ export function useReading({
       document.removeEventListener("transitionend", motion);
       document.removeEventListener("animationend", motion);
       mutation.disconnect();
+      concealment.disconnect();
       resize.disconnect();
       for (const event of ["pointerdown", "keydown", "reading-positioned"])
         element.removeEventListener(event, schedule);
