@@ -25,6 +25,9 @@ pub(crate) enum Answer {
     Once,
     /// Once, and the same kind from the same pairing until [`WINDOW`] ends.
     Window,
+    /// The pairing was revoked while it waited; never sent by the page.
+    #[serde(skip)]
+    Revoked,
 }
 
 /// What the page is told.
@@ -162,6 +165,7 @@ impl Pairings {
                 (self.notify)(Notice::Changed);
                 Ok(())
             }
+            Ok(Ok(Answer::Revoked)) => Err(Failure::revoked()),
             Ok(_) => Err(Failure::new("denied", "Declined in Buzz")),
             Err(_) => Err(Failure::new(
                 "approval_required",
@@ -209,16 +213,12 @@ impl Pairings {
         }
     }
 
-    /// Ends pairing `id`'s windows and declines a signature it waits on.
+    /// Ends pairing `id`'s windows and revokes a signature it waits on.
     pub(super) fn forget(&self, id: &str) {
         let mut state = self.state();
         state.windows.retain(|window| window.pairing != id);
-        if state
-            .signing
-            .as_ref()
-            .is_some_and(|pending| pending.pairing == id)
-        {
-            state.signing = None;
+        if let Some(pending) = state.signing.take_if(|pending| pending.pairing == id) {
+            let _ = pending.send.send(Answer::Revoked);
         }
     }
 
