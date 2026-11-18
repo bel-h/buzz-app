@@ -1262,6 +1262,10 @@ export function createTabs({
           : config.scope === "channel"
             ? "One session per channel"
             : "One session per thread";
+      if (group === "compactAt")
+        return config.compactAt
+          ? `${Number(config.compactAt) / 1000}K tokens`
+          : "Model default";
       return config[group];
     };
     const conflict = (group: SettingGroup) =>
@@ -1441,6 +1445,7 @@ export function createTabs({
                 onChange={(value) => setDraft(withCompactAt(draft, value))}
               />
             </SettingsGroup>
+            {conflict("compactAt")}
             <div className="grid gap-2">
               {conflict("instructions")}
               <AgentInstructions
