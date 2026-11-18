@@ -77,7 +77,6 @@ export function sidebarSections<T extends ChannelSummary>(
     (channel) =>
       !channel.archived && (!channel.hidden || channel.channelType === "dm"),
   );
-  // Forums list, star and move like any other channel.
   const streams = active.filter((channel) => channel.channelType !== "dm");
   const dms = active.filter(
     (channel) => channel.channelType === "dm" && !hiddenDms.has(channel.id),
