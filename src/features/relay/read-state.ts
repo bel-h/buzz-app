@@ -43,6 +43,7 @@ import {
   newReadJournal,
   newSlotId,
   newUnreadJournal,
+  UNRESOLVED_ROOT,
   type HeldGroup,
   type LocalCover,
   type ReadJournal,
@@ -173,6 +174,11 @@ const keptCovers = (
     ([key, [revision]]) => localUnread[key] === revision,
   );
   return kept.length ? Object.fromEntries(kept) : undefined;
+};
+/** A mark's saved cover, if it is the one saved with the mark's revision. */
+const coverOf = (journal: ReadJournal, key: string) => {
+  const cover = journal.localCovers?.[key];
+  return cover && journal.localUnread[key] === cover[0] ? cover : undefined;
 };
 const localState = (journal: ReadJournal, now: number): ReadState => {
   const frontiers: Record<string, number> = {
@@ -590,6 +596,7 @@ export function createReadState({
     valid: Validity,
     options?: LocalUnreadUndo,
     captured?: CapturedReadUndo,
+    covers: Readonly<Record<string, LocalCover>> = {},
   ): (() => Promise<ReadMutationResult>) | undefined {
     if (
       !options ||
@@ -621,13 +628,33 @@ export function createReadState({
             const revision = current.revision + 1;
             const localUnread = { ...current.localUnread };
             for (const key of cleared) localUnread[key] = revision;
+            // Only device-local receipt/retention effects are reverted. The
+            // action never advances synced prefixes; own/publication state stays.
+            const restored = { ...current, ...(captured?.before ?? {}) };
+            // A restored mark keeps its context, covered from now: the read
+            // it undoes may have advanced past its old cover.
+            const localCovers = { ...current.localCovers };
+            for (const key of cleared) {
+              const cover = covers[key];
+              if (!cover) continue;
+              const [, , channel, root] = cover;
+              localCovers[key] = [
+                revision,
+                effectiveFrontier(
+                  localState(restored, now()),
+                  key,
+                  channel,
+                  root && root !== UNRESOLVED_ROOT ? root : undefined,
+                ) ?? -1,
+                channel,
+                root,
+              ];
+            }
             return {
-              ...current,
-              // Only device-local receipt/retention effects are reverted. The
-              // action never advances synced prefixes; own/publication state stays.
-              ...(captured?.before ?? {}),
+              ...restored,
               revision,
               localUnread,
+              localCovers: keptCovers(localCovers, localUnread),
               acceptedRevision:
                 current.acceptedRevision === current.revision
                   ? revision
@@ -1064,6 +1091,7 @@ export function createReadState({
         let previousLocalUnread = 0;
         let synced = false;
         const clearedLocalUnread: string[] = [];
+        const clearedCovers: Record<string, LocalCover> = {};
         const saved = await save((current) => {
           if (!currentValid(current)) throw new ObservationExpired();
           if (
@@ -1100,8 +1128,11 @@ export function createReadState({
           if (unread === false)
             for (const clearKey of new Set(clearLocalKeys)) {
               const previous = localUnread[clearKey];
-              if (undoOptions && previous !== undefined)
+              if (undoOptions && previous !== undefined) {
                 clearedLocalUnread.push(clearKey);
+                const cover = coverOf(current, clearKey);
+                if (cover) clearedCovers[clearKey] = cover;
+              }
               delete localUnread[clearKey];
             }
           const own = advanceOwn(
@@ -1132,7 +1163,7 @@ export function createReadState({
                   localState(current, now()),
                   key,
                   cover.channelId,
-                  cover.rootId,
+                  cover.rootId === UNRESOLVED_ROOT ? undefined : cover.rootId,
                 ) ?? -1,
                 cover.channelId,
                 cover.rootId ?? "",
@@ -1180,6 +1211,8 @@ export function createReadState({
           clearedLocalUnread,
           currentValid,
           undoOptions,
+          undefined,
+          clearedCovers,
         );
         return {
           operationId: `${saved.slot}:${saved.revision}`,
@@ -1659,12 +1692,7 @@ export function createReadState({
     localUnread: (key: string) => journal?.localUnread[key],
     localUnreadKeys: () => Object.keys(journal?.localUnread ?? {}),
     /** A mark's saved covering context, while it is still the saved mark. */
-    localCover: (key: string) => {
-      const cover = journal?.localCovers?.[key];
-      return cover && journal?.localUnread[key] === cover[0]
-        ? cover
-        : undefined;
-    },
+    localCover: (key: string) => journal && coverOf(journal, key),
     /** A key's saved synced mark-unread stamp: a newer one fences reading. */
     unreadSet: (key: string) => journal?.state.overrides[key]?.set ?? 0,
     revision: () => journal?.revision ?? 0,
@@ -1778,6 +1806,7 @@ export function createReadState({
             ? await capturedValidity(valid, fence)
             : valid;
           const clearedLocalUnread = new Set<string>();
+          const clearedCovers: Record<string, LocalCover> = {};
           const token =
             options.preserveCapturedSet && options.undo
               ? newSlotId()
@@ -1832,8 +1861,11 @@ export function createReadState({
             }
             const clearLocalUnread = (key: string) => {
               const previous = localUnread[key];
-              if (options.undo && previous !== undefined)
+              if (options.undo && previous !== undefined) {
                 clearedLocalUnread.add(key);
+                const cover = coverOf(current, key);
+                if (cover) clearedCovers[key] = cover;
+              }
               delete localUnread[key];
             };
             for (const { key } of messages) clearLocalUnread(key);
@@ -1927,6 +1959,7 @@ export function createReadState({
             currentValid,
             options.undo,
             captured,
+            clearedCovers,
           );
           return {
             operationId: `${saved.slot}:${saved.revision}`,

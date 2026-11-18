@@ -89,8 +89,10 @@ viewport):
 - Channel catch-up moves the channel's main read mark (`<channel>`) to the
   newest top-level post reached, never to a reply (a broadcast reply included).
   Everything at or below it is read on every device, replies included. Reaching
-  the live bottom also ends a manual unread on the channel, synced or local;
-  marked messages stay unread.
+  the live bottom also ends a manual unread on the channel, synced or local,
+  and this device's reminders on the top-level messages it covers, even when
+  the mark does not move. Synced message marks and thread and reply reminders
+  stay unread.
 - Thread catch-up moves the thread's mark (`thread:<root>`) to its newest reply.
   A collapsed newest reply, or one outside the bottom viewport in a
   branch-ordered thread, cannot earn catch-up; visible rows still read individually.
@@ -176,10 +178,11 @@ viewport):
   `pending`), a read revision changed since attention left, or evidence that is
   not observed and complete settles it with no divider and reading resumes at
   once. A placed divider never moves.
-- Both keys use verified event timestamps, never wall time. Neither enters generic
-  channel/thread inheritance or remote override baselines. Channel catch-up ends
-  a local manual unread on the channel itself; message and thread manual-unread
-  intent stays. Catch-up uses the same cancellable reading lease.
+- Both keys use verified event timestamps, never wall time, and both are main
+  read marks: a message or thread inherits them like any other read. Channel
+  catch-up ends the channel's manual unread and this device's top-level message
+  reminders it covers; thread catch-up ends the thread's and its replies'.
+  Catch-up uses the same cancellable reading lease.
 - A DM is read whole. Any earned dwell in a DM, on visible rows or at the bottom,
   advances the DM's channel frontier through the newest retained verified message
   (replies included) and ends a local manual unread on the DM. It writes no
@@ -289,8 +292,11 @@ timeline and the thread being read, without reading unopened threads' replies.
   for the selected community only, through one shared action and toast copy.
   Escape marks the open conversation through `markChannelRead`.
 - `markUnreadLocal(target)` on a message or thread is durable **on this browser
-  profile/device only**; automatic reading does not clear it, and an explicit
-  mark-through does. On a whole channel, after a complete snapshot, it syncs as
+  profile/device only**. It saves the read mark that covered it then; any later
+  advance of that mark, automatic or explicit, clears it, and so does catch-up
+  or display of an already-covered message. A reply marked before its thread
+  root loads takes the thread's mark when the root resolves as that baseline.
+  On a whole channel, after a complete snapshot, it syncs as
   a version-2 group, and reading the channel clears it on every device; without
   a complete snapshot, or while a peer group is held back, it stays on this
   device. A refused clear is not retried: its warning persists, across reloads,

@@ -1186,11 +1186,22 @@ it("a follow commit reloads the other window's owner, without an echo", async ()
   expect(b.read().get(K)).toBeUndefined();
   const heard = vi.fn();
   const spy = new BroadcastChannel(broadcastName);
-  spy.onmessage = heard;
+  const barrier = new BroadcastChannel(broadcastName);
+  let drained!: () => void;
+  const done = new Promise<void>((resolve) => {
+    drained = resolve;
+  });
+  spy.onmessage = (event: MessageEvent) => {
+    if (event.data === "barrier") drained();
+    else heard(event);
+  };
   await a.set(K, false);
   await vi.waitFor(() => expect(b.read().get(K)).toBe(false));
-  await new Promise((resolve) => setTimeout(resolve, 50));
+  // Anything b posted while reloading is delivered before this marker.
+  barrier.postMessage("barrier");
+  await done;
   expect(heard).toHaveBeenCalledOnce();
+  barrier.close();
   spy.close();
   a.dispose();
   b.dispose();

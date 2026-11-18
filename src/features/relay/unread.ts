@@ -16,7 +16,7 @@ import type {
   ReadMutationResult,
   ReadSyncSnapshot,
 } from "./read-state";
-import type { ReadJournal } from "./read-state-storage";
+import { type ReadJournal, UNRESOLVED_ROOT } from "./read-state-storage";
 import { markMessage } from "./read-state-retention";
 import { LIVE_RESUME_LAG } from "./live";
 import type { Priority, RelayReader } from "./reader";
@@ -1760,6 +1760,11 @@ export function createUnread({
   // The read mark covering each device-local message or thread unread when it
   // was first seen. Any later advance, from this device or a peer, ends it.
   const localBases = new Map<string, number>();
+  /** Revision and baseline of a mark whose unresolved root has loaded. */
+  const resolvedBases = new Map<
+    string,
+    readonly [number | undefined, number]
+  >();
   const clearing = new Set<string>();
   function localCover(key: string, state: ReadState) {
     const separator = key.indexOf(":");
@@ -1786,13 +1791,26 @@ export function createUnread({
       // A mark saved with its cover compares against that, not against
       // whatever evidence this load happens to have.
       const saved = reads.localCover(key);
+      // A reply marked before its root loaded resolves its thread later: the
+      // thread position it learns then is the baseline, not an advance.
+      const pending = saved?.[3] === UNRESOLVED_ROOT;
+      const root = pending
+        ? byId.get(key.slice(4))?.rootId
+        : saved?.[3] || undefined;
       const at = saved
-        ? (effectiveFrontier(state, key, saved[2], saved[3] || undefined) ?? -1)
+        ? (effectiveFrontier(state, key, saved[2], root) ?? -1)
         : localCover(key, state);
       if (at === undefined) continue;
       live.add(key);
-      const base = saved?.[1] ?? localBases.get(key);
       const revision = reads.localUnread(key);
+      if (pending && root && resolvedBases.get(key)?.[0] !== revision)
+        resolvedBases.set(key, [revision, Math.max(saved[1], at)]);
+      const resolved = resolvedBases.get(key);
+      const base = pending
+        ? resolved && resolved[0] === revision
+          ? resolved[1]
+          : saved[1]
+        : (saved?.[1] ?? localBases.get(key));
       if (base === undefined) localBases.set(key, at);
       else if (at > base && !clearing.has(key)) {
         clearing.add(key);
@@ -1822,6 +1840,8 @@ export function createUnread({
     }
     for (const key of localBases.keys())
       if (!live.has(key)) localBases.delete(key);
+    for (const key of resolvedBases.keys())
+      if (!live.has(key)) resolvedBases.delete(key);
   }
   const stopRead = reads.subscribe(publish);
   const stopLocal = reads.subscribe(endCoveredLocal);
@@ -2971,7 +2991,7 @@ export function createUnread({
             requireMessage(target, id) === event &&
             (!rootId || manual(`thread:${rootId}`, journal) <= manualRevision);
           // Reaching the live bottom of a channel ends a manual unread on the
-          // channel, synced or local. Marked messages stay unread.
+          // channel, synced or local. Synced message marks stay unread.
           const endManual =
             !rootId &&
             (!!reads.localUnread(channelId) ||
@@ -2980,15 +3000,22 @@ export function createUnread({
                 effectiveFrontier(state, channelId),
               ));
           // Reaching a thread's bottom ends its own and its replies' local
-          // reminders, even when the read mark is already there.
-          const reminders = rootId
-            ? [
-                key,
-                ...rows
-                  .filter((entry) => entry.rootId === rootId)
-                  .map((entry) => `msg:${entry.event.id}`),
-              ].filter((local) => reads.localUnread(local))
-            : [];
+          // reminders, a channel's those of the top-level messages it covers,
+          // even when the read mark is already there.
+          const reminders = (
+            rootId
+              ? [
+                  key,
+                  ...rows
+                    .filter((entry) => entry.rootId === rootId)
+                    .map((entry) => `msg:${entry.event.id}`),
+                ]
+              : rows
+                  .filter(
+                    (entry) => !entry.parentId && entry.event.created_at <= cut,
+                  )
+                  .map((entry) => `msg:${entry.event.id}`)
+          ).filter((local) => reads.localUnread(local));
           const fresh = (journal: ReadJournal) =>
             current(journal) &&
             reminders.every(
@@ -2996,7 +3023,11 @@ export function createUnread({
             );
           if ((effectiveFrontier(state, key, channelId) ?? -1) >= cut) {
             if (endManual)
-              await reads.clearLocalUnread(channelId, [channelId], current);
+              await reads.clearLocalUnread(
+                channelId,
+                [channelId, ...reminders],
+                fresh,
+              );
             else if (reminders.length)
               await reads.clearLocalUnread(key, reminders, fresh);
           } else
@@ -3586,7 +3617,10 @@ export function createUnread({
               channelId: target.channelId,
               rootId:
                 target.kind === "message"
-                  ? byId.get(target.messageId)?.rootId
+                  ? (byId.get(target.messageId)?.rootId ??
+                    (byId.get(target.messageId)?.parentId
+                      ? UNRESOLVED_ROOT
+                      : undefined))
                   : undefined,
             },
       );

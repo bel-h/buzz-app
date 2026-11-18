@@ -7553,3 +7553,190 @@ it("channel catch-up stops at the newest top-level post, never a broadcast reply
   expect(h.session.unread.attention("room", unseen.id).unread).toBe(true);
   lease.dispose();
 });
+
+it("a reply marked before its root loads learns the thread position, then clears on a real advance", async () => {
+  const h = setup();
+  h.grant("room");
+  const root = message(h.alice, "room", "root", 11);
+  const reply = message(h.alice, "room", "reply", 12, [
+    ["e", root.id, "", "reply"],
+  ]);
+  h.emit([root, reply]);
+  let lease = h.session.unread.reading("room", root.id);
+  await lease.catchUp(reply.id, root.id);
+  lease.dispose();
+  const saved = h.journal();
+  if (!saved) throw new Error("Missing journal");
+  h.dispose();
+  // A reload where only the reply is retained when it is marked.
+  const r = setup({}, true, () => saved);
+  r.grant("room");
+  r.emit([reply]);
+  const key = `msg:${reply.id}`;
+  await r.session.unread.markUnreadLocal({
+    kind: "message",
+    channelId: "room",
+    messageId: reply.id,
+  });
+  expect(r.journal()?.localCovers?.[key]?.[3]).toBe("?");
+  // Learning the thread position that already covered it is not a read.
+  r.grant("other");
+  r.emit([root]);
+  await r.session.unread.markChannelRead("other");
+  await flush();
+  expect(r.journal()?.localUnread[key]).toBeDefined();
+  // A real advance of that thread is.
+  const later = message(r.alice, "room", "later", 15, [
+    ["e", root.id, "", "reply"],
+  ]);
+  r.emit([later]);
+  lease = r.session.unread.reading("room", root.id);
+  await lease.catchUp(later.id, root.id);
+  lease.dispose();
+  await vi.waitFor(() => expect(r.journal()?.localUnread[key]).toBeUndefined());
+});
+
+it("Undo of a read restores a local reminder's cover, across a reload", async () => {
+  const h = setup();
+  h.grant("room");
+  const top = message(h.alice, "room", "top", 11);
+  h.emit([top]);
+  const key = `msg:${top.id}`;
+  await h.session.unread.markUnreadLocal({
+    kind: "message",
+    channelId: "room",
+    messageId: top.id,
+  });
+  const result = await requireCapturedRead(h.session.unread, [top.id]);
+  assert(result.undo);
+  expect(h.journal()?.localCovers?.[key]).toBeUndefined();
+  await result.undo();
+  const revision = h.journal()?.localUnread[key];
+  expect(revision).toBeGreaterThan(0);
+  expect(h.journal()?.localCovers?.[key]).toEqual([revision, -1, "room", ""]);
+  const saved = h.journal();
+  if (!saved) throw new Error("Missing journal");
+  h.dispose();
+  const r = setup({}, true, () => saved);
+  r.grant("room");
+  r.emit([top]);
+  await flush();
+  expect(r.journal()?.localUnread[key]).toBe(revision);
+  expect(r.journal()?.localCovers?.[key]).toEqual([revision, -1, "room", ""]);
+  // The restored cover still ends on a real advance.
+  clock(30);
+  await r.session.unread.markChannelRead("room");
+  await vi.waitFor(() => expect(r.journal()?.localUnread[key]).toBeUndefined());
+});
+
+it("channel catch-up at an unchanged mark clears covered top-level reminders only", async () => {
+  const h = setup();
+  h.grant("room");
+  const tall = message(h.alice, "room", "tall", 11);
+  const reply = message(h.alice, "room", "reply", 12, [
+    ["e", tall.id, "", "reply"],
+  ]);
+  const bottom = message(h.alice, "room", "bottom", 13);
+  h.emit([channelMetadata(h, "stream"), tall, reply, bottom]);
+  let lease = h.session.unread.reading("room");
+  await lease.catchUp(bottom.id);
+  lease.dispose();
+  expect(h.journal()?.state.frontiers.room).toBe(13);
+  // Taller than the viewport, so never fully shown: only catch-up ends it.
+  await h.session.unread.markUnreadLocal({
+    kind: "message",
+    channelId: "room",
+    messageId: tall.id,
+  });
+  await h.session.unread.markUnreadLocal({
+    kind: "message",
+    channelId: "room",
+    messageId: reply.id,
+  });
+  lease = h.session.unread.reading("room");
+  await lease.catchUp(bottom.id);
+  lease.dispose();
+  expect(h.journal()?.state.frontiers.room).toBe(13);
+  expect(h.journal()?.localUnread[`msg:${tall.id}`]).toBeUndefined();
+  expect(h.journal()?.localUnread[`msg:${reply.id}`]).toBeDefined();
+  // A mark saved after the lease began survives that lease's catch-up.
+  lease = h.session.unread.reading("room");
+  await h.session.unread.markUnreadLocal({
+    kind: "message",
+    channelId: "room",
+    messageId: tall.id,
+  });
+  await expect(lease.catchUp(bottom.id)).rejects.toThrow(
+    "Reading observation expired",
+  );
+  lease.dispose();
+  expect(h.journal()?.localUnread[`msg:${tall.id}`]).toBeDefined();
+});
+
+it("a local reminder saves its read mark, so an advance while closed clears it on reload", async () => {
+  const h = setup();
+  h.grant("room");
+  const top = message(h.alice, "room", "top", 11);
+  h.emit([top]);
+  const key = `msg:${top.id}`;
+  await h.session.unread.markUnreadLocal({
+    kind: "message",
+    channelId: "room",
+    messageId: top.id,
+  });
+  const saved = h.journal();
+  if (!saved) throw new Error("Missing journal");
+  h.dispose();
+  // Another window read the channel while this owner was closed.
+  const advanced: ReadJournal = {
+    ...saved,
+    state: {
+      ...saved.state,
+      frontiers: { ...saved.state.frontiers, room: 20 },
+    },
+  };
+  const r = setup({}, true, () => advanced);
+  r.grant("room");
+  r.emit([top]);
+  await vi.waitFor(() => expect(r.journal()?.localUnread[key]).toBeUndefined());
+});
+
+it("Undo of a channel read keeps a thread reminder's cover across a reload before its root loads", async () => {
+  const h = setup();
+  h.grant("room");
+  const root = message(h.alice, "room", "root", 11);
+  const reply = message(h.alice, "room", "reply", 12, [
+    ["e", root.id, "", "reply"],
+  ]);
+  h.emit([root, reply]);
+  const key = `thread:${root.id}`;
+  await h.session.unread.markUnreadLocal({
+    kind: "thread",
+    channelId: "room",
+    rootId: root.id,
+  });
+  clock(20);
+  const result = await h.session.unread.markChannelRead("room");
+  assert(result.undo, "a channel read should offer Undo");
+  await result.undo();
+  const revision = h.journal()?.localUnread[key];
+  expect(revision).toBeGreaterThan(0);
+  // Undo keeps the channel's read mark, so that mark is the new baseline.
+  expect(h.journal()?.state.frontiers.room).toBe(20);
+  expect(h.journal()?.localCovers?.[key]).toEqual([revision, 20, "room", ""]);
+  const saved = h.journal();
+  if (!saved) throw new Error("Missing journal");
+  h.dispose();
+  const r = setup({}, true, () => saved);
+  r.grant("room");
+  r.grant("other");
+  await r.session.unread.markChannelRead("other");
+  await flush();
+  expect(r.journal()?.localUnread[key]).toBe(revision);
+  // A real advance still ends it.
+  r.emit([root, reply]);
+  clock(40);
+  r.emit([message(r.alice, "room", "later", 39)]);
+  await r.session.unread.markChannelRead("room");
+  await vi.waitFor(() => expect(r.journal()?.localUnread[key]).toBeUndefined());
+});

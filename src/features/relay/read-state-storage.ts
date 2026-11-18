@@ -30,7 +30,7 @@ export type ReadJournal = Readonly<{
   localUnread: Readonly<Record<string, number>>;
   /** What covered each local message or thread unread when it was marked:
    * [its `localUnread` revision, the covering read mark, channel, root ("" for
-   * none)]. A later advance past it ends the mark, after a reload too. */
+   * none, `UNRESOLVED_ROOT` while unknown)]. A later advance past it ends the mark, after a reload too. */
   localCovers?: Readonly<Record<string, LocalCover>> | undefined;
   /** Local interaction order, bounded with retained frontier hints. */
   recent?: Readonly<Record<string, number>>;
@@ -68,6 +68,8 @@ export type ReadJournal = Readonly<{
  * (or this device's, if greater) at the time it was held. Never admitted, so
  * it gets the incoming cutoff, not the local discard guard, when it resolves. */
 export type LocalCover = readonly [number, number, string, string];
+/** A cover's root while the message's thread is not yet known: not "none". */
+export const UNRESOLVED_ROOT = "?";
 export type HeldGroup = readonly [number, number, number, number];
 export type UnreadJournal = Readonly<{
   /** This installation's one version-2 coordinate. */

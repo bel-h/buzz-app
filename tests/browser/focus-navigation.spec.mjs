@@ -579,7 +579,17 @@ test.extend({ readState: true, threadUnread: true })(
     await page
       .getByRole("textbox", { name: "Message #Alpha", exact: true })
       .click();
-    const newest = Math.max(...history.map((event) => event.created_at));
+    // Channel catch-up stops at the newest top-level post, never a reply.
+    const newest = Math.max(
+      ...history
+        .filter(
+          (event) =>
+            !event.tags.some(
+              ([name, , , marker]) => name === "e" && marker === "reply",
+            ),
+        )
+        .map((event) => event.created_at),
+    );
     await expect
       .poll(async () => (await frontiers())["alpha"] ?? 0)
       .toBeGreaterThanOrEqual(newest);

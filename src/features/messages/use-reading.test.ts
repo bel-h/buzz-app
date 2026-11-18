@@ -27,6 +27,7 @@ function setup({
   settled = true,
   strict = false,
   latestMessageId = undefined as string | undefined,
+  catchUpMessageId = undefined as string | undefined,
   rootId = undefined as string | undefined,
   enabled = true,
   focus = "element" as "element" | "composer" | "parent" | "outside" | "header",
@@ -116,6 +117,7 @@ function setup({
       scroller,
       settled: position,
       latestMessageId,
+      catchUpMessageId,
       rootId,
       enabled,
     },
@@ -165,6 +167,7 @@ function setup({
         scroller,
         settled: position,
         latestMessageId,
+        catchUpMessageId,
         rootId,
         enabled,
       }),
@@ -175,6 +178,7 @@ function setup({
         scroller,
         settled: position,
         latestMessageId: id,
+        catchUpMessageId,
         rootId,
         enabled,
       }),
@@ -627,6 +631,17 @@ it("bottom dwell catches up through the newest row, including a tall clipped row
   // Its leases name the thread, which bounds what a DM read may cover.
   for (const call of h.reading.mock.calls)
     expect(call).toEqual(["room", "thread"]);
+});
+it("a broadcast reply as the bottom row earns dwell but catches up through the top-level post", async () => {
+  const h = setup({ latestMessageId: "broadcast", catchUpMessageId: "top" });
+  h.setRows([row("top", 0, 100), row("broadcast", 100, 200)]);
+  h.mutation();
+  vi.advanceTimersToNextFrame();
+  await vi.advanceTimersByTimeAsync(300);
+  expect(h.dwelled()?.catchUp).toHaveBeenCalledExactlyOnceWith(
+    "top",
+    undefined,
+  );
 });
 it("a new latest message keeps observation and catches up after its row is measured", async () => {
   const h = setup({ latestMessageId: "bottom" });

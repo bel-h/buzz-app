@@ -273,7 +273,7 @@ test("focus cancellation and local manual-unread survive reload until explicit m
   // runner delays must not overtake a later fixed pause target.
   await options(page, true);
   await page
-    .getByRole("button", { name: "Mark unread on this device", exact: true })
+    .getByRole("button", { name: "Mark as unread", exact: true })
     .click();
   // This durable action is ordered behind any erroneous dwell mutation in the
   // same read-state queue; a separate IndexedDB read alone is not a barrier.
@@ -317,7 +317,7 @@ test("focus cancellation and local manual-unread survive reload until explicit m
   // as a reader would.
   await park(page);
   await page
-    .getByRole("button", { name: "Mark unread on this device", exact: true })
+    .getByRole("button", { name: "Mark as unread", exact: true })
     .click();
   await expect.poll(async () => marked(await journal(page))).toBe(true);
   await history(page).evaluate((element) => {
@@ -442,7 +442,7 @@ test.describe("explicit mark-through with membership activity", () => {
         await options(page);
         await page
           .getByRole("button", {
-            name: "Mark unread on this device",
+            name: "Mark as unread",
             exact: true,
           })
           .click();
