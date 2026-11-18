@@ -30,7 +30,11 @@ pub(super) const AUTH_PROOFS: &[u16] = &[NIP42_AUTH, NIP98_AUTH, BLOSSOM_AUTH];
 /// open and hide (41010, 41012), archive requests (9035, 9036), workflow
 /// triggers (46020), jobs (43001–43006), agent memory (30174), observer
 /// frames (24200) and reports to the community's moderators (1984), which the
-/// relay queues for moderators only and never acts on.
+/// relay queues for moderators only and never acts on. A report, like a shared
+/// note, binds to no community: one naming only a person (`p`, as
+/// `buzz messages report --pubkey` sends) can be copied to any public relay
+/// that honors NIP-56. That is accepted, as for 30023: it says no more than
+/// the person reported here.
 pub(super) const ORDINARY: &[u16] = &[
     7, 9, 1617, 1618, 1619, 1621, 1630, 1631, 1632, 1633, 1984, 9035, 9036, 10000, 10001, 10003,
     10030, 20001, 20002, 20003, 24200, 30000, 30003, 30023, 30030, 30078, 30174, 30315, 40002,
