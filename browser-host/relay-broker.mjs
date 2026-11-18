@@ -1386,9 +1386,11 @@ export function relayBrokerPlugin({
             } catch {
               if (!res.destroyed)
                 return json(res, 400, {
-                  error: readStateDecode
-                    ? "Read state could not be decoded"
-                    : "Sidebar preferences could not be decoded",
+                  error: followsDecode
+                    ? "Thread follows could not be decoded"
+                    : readStateDecode
+                      ? "Read state could not be decoded"
+                      : "Sidebar preferences could not be decoded",
                 });
             } finally {
               clearTimeout(deadline);

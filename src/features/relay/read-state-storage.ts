@@ -71,6 +71,9 @@ export type UnreadJournal = Readonly<{
    * never makes an expired mark live again. */
   watermark: number;
   held: Readonly<Record<string, readonly HeldGroup[]>>;
+  /** A refused channel clear's warning, kept across reloads. The clear
+   * itself is not retried; the user reads again. */
+  blockedClear?: string;
 }>;
 export const HELD_GROUPS_PER_KEY = 8;
 export const newUnreadJournal = (): UnreadJournal => ({
@@ -111,7 +114,9 @@ function readUnread(raw: unknown, slots: readonly string[]): UnreadJournal {
     slots.includes(raw.slot) ||
     !uint32(raw.watermark) ||
     !record(raw.held) ||
-    Object.keys(raw.held).length > READ_STATE_KEYS / 3
+    Object.keys(raw.held).length > READ_STATE_KEYS / 3 ||
+    (raw.blockedClear !== undefined &&
+      (typeof raw.blockedClear !== "string" || raw.blockedClear.length > 200))
   )
     throw new Error("Invalid saved unread state");
   const held: Record<string, readonly HeldGroup[]> = {};
@@ -135,6 +140,9 @@ function readUnread(raw: unknown, slots: readonly string[]): UnreadJournal {
     slot: raw.slot,
     watermark: raw.watermark,
     held: Object.freeze(held),
+    ...(raw.blockedClear === undefined
+      ? {}
+      : { blockedClear: raw.blockedClear as string }),
   });
 }
 /** Storage is untrusted. Corrupt intent is an error, never an empty journal to overwrite. */
@@ -250,17 +258,13 @@ export function readJournal(raw: unknown, viewer: string): ReadJournal {
     new Set([raw.slot, ...spill]).size !== spill.length + 1
   )
     throw new Error("Invalid saved read slots");
-  // An unexpected saved unread shape (an earlier draft) starts a fresh
-  // version-2 record rather than stopping startup.
+  // A malformed saved unread record is corrupt intent: an error, like the rest.
   let unread: UnreadJournal | undefined;
   let fresh = true;
-  if (raw.unread !== undefined)
-    try {
-      unread = readUnread(raw.unread, [raw.slot, ...(spill as string[])]);
-      fresh = false;
-    } catch {
-      unread = newUnreadJournal();
-    }
+  if (raw.unread !== undefined) {
+    unread = readUnread(raw.unread, [raw.slot, ...(spill as string[])]);
+    fresh = false;
+  }
   // Before own values were kept apart, the journal published everything it held.
   const own =
     (raw.own as Record<string, number> | undefined) ??

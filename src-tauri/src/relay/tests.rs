@@ -3621,7 +3621,59 @@ async fn thread_follows_codec_is_a_separate_exact_shape() {
     let mut tampered = signed.clone();
     tampered["tags"] = serde_json::json!([["d", "channel-sort"], ["t", "thread-follows"]]);
     assert!(host.decode_thread_follows(vec![tampered]).await.is_err());
-    assert!(host.decode_thread_follows(vec![signed; 17]).await.is_err());
+    assert!(host
+        .decode_thread_follows(vec![signed.clone(); 17])
+        .await
+        .is_err());
+    // An own event whose payload can't be read decodes to null, and is never
+    // published; a readable one is forwarded byte-for-byte.
+    let mut unreadable = signed.clone();
+    unreadable["content"] = "not-ciphertext".into();
+    let hash = Sha256::digest(
+        serde_json::to_vec(&serde_json::json!([
+            0,
+            unreadable["pubkey"],
+            unreadable["created_at"],
+            unreadable["kind"],
+            unreadable["tags"],
+            unreadable["content"]
+        ]))
+        .unwrap(),
+    );
+    let secp = secp256k1::Secp256k1::new();
+    let keypair = secp256k1::Keypair::from_seckey_byte_array(&secp, [1; 32]).unwrap();
+    unreadable["id"] = format!("{hash:x}").into();
+    unreadable["sig"] = secp
+        .sign_schnorr_no_aux_rand(&hash, &keypair)
+        .to_string()
+        .into();
+    let decoded = host
+        .decode_thread_follows(vec![unreadable.clone()])
+        .await
+        .unwrap();
+    assert!(decoded[0]["payload"].is_null());
+    assert!(super::readable_own_follows(&host, unreadable)
+        .await
+        .is_err());
+    assert_eq!(
+        super::readable_own_follows(&host, signed.clone())
+            .await
+            .unwrap(),
+        serde_json::to_string(&signed).unwrap()
+    );
+    // Follow client ids are 1-64 characters, like read state's.
+    for client_id in ["".to_string(), "é".repeat(65)] {
+        let payload = serde_json::json!({"v":1,"client_id":client_id,"threads":{}});
+        assert!(host
+            .sign_thread_follows("b".repeat(32), now, payload)
+            .await
+            .is_err());
+    }
+    let payload = serde_json::json!({"v":1,"client_id":"é".repeat(64),"threads":{}});
+    assert!(host
+        .sign_thread_follows("b".repeat(32), now, payload)
+        .await
+        .is_ok());
 }
 
 #[test]

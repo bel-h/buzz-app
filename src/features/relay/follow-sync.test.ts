@@ -187,6 +187,11 @@ it("round-trips unknown top-level and entry fields unchanged", () => {
     extra: { note: "x" },
   });
   expect(() => parseFollowPayload({ ...raw, threads: { bad: {} } })).toThrow();
+  for (const client_id of ["", "x".repeat(65), "é".repeat(65)])
+    expect(() => parseFollowPayload({ ...raw, client_id })).toThrow();
+  expect(
+    parseFollowPayload({ ...raw, client_id: "é".repeat(64) }).clientId,
+  ).toHaveLength(64);
 });
 
 it("merges slots by greater `at`, unfollow winning ties", () => {

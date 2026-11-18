@@ -885,7 +885,9 @@ fn validate_follow_payload(payload: &serde_json::Value) -> Result<()> {
         .as_object()
         .ok_or("Unsupported thread-follows payload")?;
     let valid = payload["v"] == 1
-        && payload["client_id"].is_string()
+        && payload["client_id"]
+            .as_str()
+            .is_some_and(|id| (1..=64).contains(&id.chars().count()))
         && threads.iter().all(|(key, entry)| {
             valid_follow_key(key)
                 && entry["follow"].is_boolean()

@@ -2169,7 +2169,8 @@ describe("publication fences", () => {
 
   it("an overfull primary reports a clear it cannot carry, while the read still saves", async () => {
     const f = fixture(T);
-    const owner = snapshotted(f, [])();
+    const make = snapshotted(f, []);
+    let owner = make();
     await owner.ready;
     await owner.refresh();
     await owner.read("room", T - 10, () => true);
@@ -2204,6 +2205,22 @@ describe("publication fences", () => {
     expect(owner.snapshot().error).toBe(
       "Channel mark read cannot be synchronized",
     );
+    // The refused clear is not retried, but its notice survives a reload.
+    const sends = f.host.publish.mock.calls.length;
+    owner.dispose();
+    owner = make();
+    await owner.ready;
+    await owner.refresh();
+    expect(owner.snapshot()).toMatchObject({
+      status: "error",
+      error: "Channel mark read cannot be synchronized",
+    });
+    expect(owner.state().overrides.room?.clear).toBe(0);
+    await owner.read("elsewhere", T - 9, () => true);
+    expect(owner.snapshot().error).toBe(
+      "Channel mark read cannot be synchronized",
+    );
+    expect(f.host.publish.mock.calls.length).toBe(sends);
     // Peers clear their groups and this mark: the failed clear no longer
     // needs syncing, so the notice goes.
     for (let n = 0; n < 150; n++)
@@ -2645,9 +2662,9 @@ describe("expiring unread (version 2)", () => {
     // Held back, and never merged or shown while held.
     expect(owner.state().overrides.far).toBeUndefined();
     expect(held(f).far).toEqual([[T + 661, 0, 0, 0]]);
-    await expect(owner.markLocalUnread("room", () => true)).rejects.toThrow(
-      "ahead of this clock",
-    );
+    // While held, a new mark stays on this device.
+    await owner.markLocalUnread("room", () => true);
+    expect(owner.state().overrides.room).toBeUndefined();
     // The clock catches up: the group merges, and marks work again.
     f.setNow(T + 1);
     await owner.upkeep();
@@ -2761,6 +2778,24 @@ describe("expiring unread (version 2)", () => {
     owner.accept([far]);
     await owner.refresh();
     expect(held(f).far).toHaveLength(1);
+  });
+
+  it("a held group re-delivered after a local read keeps one group with the larger frontier", async () => {
+    const f = fixture(T);
+    const far = await peerUnreadMarker(f, "far", 0, {
+      createdAt: T,
+      set: T + 700,
+    });
+    f.addRemote(far);
+    const owner = await started(f);
+    expect(held(f).far).toHaveLength(1);
+    for (let i = 1; i <= 10; i++) {
+      await owner.read("far", 100 + i, () => true);
+      owner.accept([far]);
+      await owner.refresh();
+    }
+    expect(held(f).far).toHaveLength(1);
+    expect(held(f).far?.[0]?.[3]).toBe(110);
   });
 
   it("a held incoming group gets the incoming cutoff, not the local discard guard", async () => {
@@ -2935,47 +2970,17 @@ describe("expiring unread (version 2)", () => {
 
 describe("saved expiring unread journal", () => {
   const T2 = 1800000000;
-  it("an unexpected saved unread shape starts a fresh record instead of stopping startup", () => {
+  it("a malformed saved unread record is an error, never a fresh journal", () => {
     const key = keypair();
-    const journal = readJournal(
-      {
-        ...newReadJournal(),
-        unread: { held: { room: { s: 1 } }, watermark: "x" },
-      },
-      key.pubkey,
-    );
-    expect(journal.unread).toMatchObject({ watermark: 0, held: {} });
-    expect(journal.unread?.slot).toMatch(/^[0-9a-f]{32}$/);
-  });
-  it("an unexpected saved unread shape drops the envelope its old slot was sending", () => {
-    const key = keypair();
-    const old = "a".repeat(32);
-    const event = eventDto(
-      finalizeEvent(
+    expect(() =>
+      readJournal(
         {
-          kind: 30078,
-          created_at: 5,
-          tags: [
-            ["d", `read-state-unread-v2:${old}`],
-            ["t", "read-state-unread-v2"],
-          ],
-          content: "x",
+          ...newReadJournal(),
+          unread: { held: { room: { s: 1 } }, watermark: "x" },
         },
-        key.secret,
+        key.pubkey,
       ),
-    );
-    const journal = readJournal(
-      {
-        ...newReadJournal(),
-        revision: 1,
-        lastCreatedAt: 5,
-        unread: { slot: old, held: { room: { s: 1 } }, watermark: "x" },
-        pending: { event, revision: 1 },
-      },
-      key.pubkey,
-    );
-    expect(journal.pending).toBeUndefined();
-    expect(journal.unread?.slot).not.toBe(old);
+    ).toThrow("Invalid saved unread state");
   });
   it("a version-2 record from another device ignores unpaired groups and stray read positions", async () => {
     const f = fixture(T2);

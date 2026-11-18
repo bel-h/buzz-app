@@ -899,9 +899,9 @@ export function createUnread({
       state.overrides[channelId],
       effectiveFrontier(state, channelId),
     );
-    // Channel catch-up never acknowledges thread replies: retained evidence
-    // cannot prove nonparticipation, especially after reload. Only ordinary
-    // top-level messages inherit it; reply attention/direct thread dots survive.
+    // Channel catch-up writes the channel frontier, so replies and mentions
+    // older than its cut are read too. An `activity:` frontier still covers
+    // ordinary top-level messages only.
     const ordinary = timeline(entry, dm)
       ? state.frontiers[`activity:${channelId}`]
       : undefined;

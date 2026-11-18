@@ -46,6 +46,7 @@ import {
   type HeldGroup,
   type ReadJournal,
   type ReadStateStorage,
+  type UnreadJournal,
 } from "./read-state-storage";
 import {
   LARGE_READ_DEADLINE_MS,
@@ -123,6 +124,13 @@ export class CapturedReadNotRetainedError extends Error {
     this.name = "CapturedReadNotRetainedError";
   }
 }
+const withBlockedClear = (
+  unread: UnreadJournal,
+  error?: string,
+): UnreadJournal => {
+  const { blockedClear: _, ...rest } = unread;
+  return error === undefined ? rest : { ...rest, blockedClear: error };
+};
 const same = (a: unknown, b: unknown): boolean => {
   if (Object.is(a, b)) return true;
   if (!a || !b || typeof a !== "object" || typeof b !== "object") return false;
@@ -493,6 +501,7 @@ export function createReadState({
     if (closed) return saved;
     if (!same(journal?.state.overrides, saved.state.overrides)) unreadEpoch++;
     journal = saved;
+    blockedClear = saved.unread?.blockedClear;
     state = localState(saved, now());
     armUpkeep();
     if (released) schedule();
@@ -507,6 +516,7 @@ export function createReadState({
     if (!current) return save((current) => current, false);
     if (closed) return;
     journal = current;
+    blockedClear = current.unread?.blockedClear;
     state = localState(current, now());
     armUpkeep();
     emit();
@@ -698,8 +708,16 @@ export function createReadState({
             value.baseline,
             Math.max(state.frontiers[key] ?? 0, mine[key] ?? 0),
           ];
+          // One group per (set, clear, baseline): a re-delivery after a local
+          // read only raises its frontier, never adds a group.
           const list = held[key] ?? [];
-          if (!list.some((other) => same(other, group))) {
+          const at = list.findIndex((other) =>
+            same(other.slice(0, 3), group.slice(0, 3)),
+          );
+          if (at >= 0) {
+            if (group[3] > (list[at]?.[3] ?? 0))
+              held[key] = list.map((other, i) => (i === at ? group : other));
+          } else {
             if (list.length >= HELD_GROUPS_PER_KEY)
               throw new Error("Too many unread groups held back");
             held[key] = [...list, group];
@@ -909,7 +927,8 @@ export function createReadState({
     if (unread) {
       // Without a complete load the mark stays on this device, labelled so.
       if (!channelContext(key) || snapshot.completeness !== "snapshot") return;
-      if (heldCount(current)) throw new Error(UNREAD_HELD);
+      // Held groups keep a new mark on this device, like an incomplete load.
+      if (heldCount(current)) return;
       const old = next.overrides[key];
       const set = unreadStamp(old, now());
       if (set === null) throw new Error(UNREAD_CLOCK);
@@ -1035,6 +1054,10 @@ export function createReadState({
           );
           if (groups) kept.state = groups;
           if (unread === true && !groups) localUnread[key] = revision;
+          // A refused clear is not retried: its warning persists until a
+          // publication fits again or a later read's clear succeeds.
+          const unreadJournal =
+            current.unread && withBlockedClear(current.unread, blockedClear);
           synced = timestamp !== undefined || !!groups;
           return {
             ...current,
@@ -1046,6 +1069,7 @@ export function createReadState({
             floor: kept.floor,
             own,
             localUnread,
+            ...(unreadJournal ? { unread: unreadJournal } : {}),
             acceptedRevision:
               !synced && current.acceptedRevision === current.revision
                 ? revision
@@ -1174,7 +1198,14 @@ export function createReadState({
           let groups: ReadBlob;
           try {
             groups = unreadOf(journal.state.overrides);
-            if (!heldCount(journal)) blockedClear = undefined;
+            if (!heldCount(journal) && blockedClear) {
+              blockedClear = undefined;
+              await save((current) =>
+                current.unread
+                  ? { ...current, unread: withBlockedClear(current.unread) }
+                  : current,
+              );
+            }
           } catch {
             groups = unreadOf(seenUnread?.parsed.state.overrides ?? {});
           }

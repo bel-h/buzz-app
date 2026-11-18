@@ -125,7 +125,8 @@ export function parseStoredFollows(
         const e = edit as unknown as FollowEdit;
         const entry = parseFollowPayload({
           v: 1,
-          client_id: "",
+          // Validates the entry only; any valid client id will do.
+          client_id: "journal",
           threads: { [key]: wireEntry(e.entry) },
         }).threads[key];
         return [key, { ...e, entry: entry as FollowEntry }];
@@ -270,12 +271,13 @@ export function createThreadFollowSync({
   };
   const settled = () =>
     health({
-      status: !synced
-        ? "local"
-        : Object.keys(stored.state.edits).length ||
-            Object.keys(stored.state.packets).length
-          ? "pending"
-          : "synchronized",
+      status:
+        !synced || !snapshotted()
+          ? "local"
+          : Object.keys(stored.state.edits).length ||
+              Object.keys(stored.state.packets).length
+            ? "pending"
+            : "synchronized",
       complete,
     });
   const errorText = (error: unknown) =>
@@ -466,7 +468,7 @@ export function createThreadFollowSync({
     return { current: { ...current, slots: [...current.slots, slot] }, slot };
   }
   function schedule(delay = debounceMs) {
-    if (closed || !synced) return;
+    if (closed || !synced || !snapshotted()) return;
     clearTimeout(timer);
     timer = setTimeout(() => void flush(), delay);
   }
@@ -510,7 +512,14 @@ export function createThreadFollowSync({
   /** Publish every dirty slot and retry retained packets byte-for-byte,
    * after a fresh read of our own heads (read before write). */
   function flush(): Promise<void> {
-    if (closed || !synced || !host?.signFollows || !host.publishFollows)
+    // Without the snapshot capability, choices stay local journal edits.
+    if (
+      closed ||
+      !synced ||
+      !snapshotted() ||
+      !host?.signFollows ||
+      !host.publishFollows
+    )
       return Promise.resolve();
     if (sending) return sending;
     const signal = budget(snapshotted());
@@ -764,7 +773,10 @@ export function createThreadFollowSync({
       }
       // Local only: never queued behind signing, sending or reads (§3).
       return (async () => {
-        if (!ready) throw new Error(NOT_READY);
+        // A relay without the snapshot keeps the tap as a local edit. Known
+        // gap: a later full recovery can retire it if the bounded read missed
+        // a newer own head.
+        if (!ready && snapshotted()) throw new Error(NOT_READY);
         await save((current, journal) => {
           if (ownUnreadable(current)) throw new Error(UNREADABLE);
           const placed = place(shared(current, journal), key, follow);

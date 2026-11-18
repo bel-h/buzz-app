@@ -100,9 +100,9 @@ viewport):
   and broadcast replies retained at dwell completion through the bottom row, as
   in Slack and Discord, so a mention taller than the viewport is still read. One
   that arrives while the catch-up is saving waits for its own dwell. Messages
-  marked unread keep their intent. These marks stay on this device:
-  frontier-only sync never publishes `msg:` marks, though it still reads them
-  from older clients.
+  marked unread keep their intent. These catch-up marks stay on this device;
+  only an explicit per-message Mark read publishes its `msg:` frontier, and
+  sync still reads `msg:` marks from older clients.
 - `thread-activity:<root>` acknowledges replies through the newest reply only in
   that thread. A collapsed newest reply, or one outside the bottom viewport in a
   branch-ordered thread, cannot earn catch-up; visible rows still read individually.
@@ -298,9 +298,14 @@ timeline and the thread being read, without reading unopened threads' replies.
   Mark all as read and the Shift+Escape shortcut (after a confirmation) use it
   for the selected community only, through one shared action and toast copy.
   Escape marks the open conversation through `markChannelRead`.
-- `markUnreadLocal(target)` is durable **on this browser profile/device only**.
-  Automatic reading does not clear it. An explicit mark-through clears that
-  target's local mark. `syncedManualUnread` is `false`.
+- `markUnreadLocal(target)` on a message or thread is durable **on this browser
+  profile/device only**; automatic reading does not clear it, and an explicit
+  mark-through does. On a whole channel, after a complete snapshot, it syncs as
+  a version-2 group, and reading the channel clears it on every device; without
+  a complete snapshot, or while a peer group is held back, it stays on this
+  device. A refused clear is not retried: its warning persists, across reloads,
+  until a publication fits again, and the user reads again. `syncedManualUnread`
+  stays `false`: it describes message and thread marks, which never sync.
 - `refresh()` retries evidence/marker observation; `retrySync()` refreshes markers
   and retries pending publication. `ReadMutationResult.durability === "saved"`
   means the local transaction committed, not that the relay accepted it.
@@ -774,9 +779,8 @@ retired. Journals that still carry the field load normally; the next save drops 
 
 Override groups, permanent clear floors, directly associated frontiers and possible
 inherited channel/thread frontiers are protected; capacity failure is visible,
-never floor truncation. Publication of any override-bearing state is deliberately
-blocked in this release. Remote registers can be reduced/displayed, but synchronized
-manual-unread and canonical override compaction are not enabled.
+never floor truncation. Only whole-channel groups publish override state, on the
+version-2 unread record; message and thread override groups stay on this device.
 
 Marker discovery uses the relay's host-bound NIP-11 `read_state_snapshot` descriptor
 when available, independently of request parameters. The exact versioned query

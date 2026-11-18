@@ -865,8 +865,8 @@ it("D1: without a complete snapshot, flush publishes nothing and keeps the work"
   await sync.refresh();
   await sync.flush();
   expect(r.published).toHaveLength(0);
-  expect(sync.snapshot()).toMatchObject({ status: "failed" });
-  expect(sync.snapshot().error).toContain("complete read");
+  // Missing capability is local-only, not a failure.
+  expect(sync.snapshot()).toMatchObject({ status: "local" });
   expect(disk.backup().follows?.state.edits[K]).toBeDefined();
   expect(sync.read().get(K)).toBe(true);
 });
@@ -943,10 +943,29 @@ it("startup gate: a tap before the first complete recovery is refused and change
   expect(sync.read().get(K)).toBeUndefined();
   // Nothing was saved.
   expect(() => disk.backup()).toThrow();
-  // Without the complete snapshot, recovery never opens the gate.
-  const partial = setup(r, { now: 1000 }, { snapshot: false });
-  await partial.refresh();
-  await expect(partial.set(K, true)).rejects.toThrow("not ready");
+});
+
+it("a relay without the snapshot keeps taps as local edits and never fails", async () => {
+  vi.useFakeTimers();
+  try {
+    const r = relay();
+    const disk = memoryStorage();
+    const local = setup(
+      r,
+      { now: 1000 },
+      { snapshot: false, storage: disk.storage },
+    );
+    await local.refresh();
+    await local.set(K, true);
+    expect(local.read().get(K)).toBe(true);
+    await vi.runAllTimersAsync();
+    await local.flush();
+    expect(r.published).toHaveLength(0);
+    expect(local.snapshot().status).toBe("local");
+    expect(Object.keys(disk.backup().follows?.state.edits ?? {})).toContain(K);
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 it("startup gate: a tap after complete recovery works, and a new writer starts closed", async () => {

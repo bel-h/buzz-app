@@ -341,7 +341,13 @@ export function mergeFollows(
 const FOLLOW_KEY = /^[a-zA-Z0-9_-]{1,128}:[0-9a-f]{64}$/;
 /** Parses a decrypted plaintext; throws when the coordinate is unreadable. */
 export function parseFollowPayload(raw: unknown): FollowPayload {
-  if (!record(raw) || raw.v !== 1 || typeof raw.client_id !== "string")
+  if (
+    !record(raw) ||
+    raw.v !== 1 ||
+    typeof raw.client_id !== "string" ||
+    raw.client_id.length < 1 ||
+    [...raw.client_id].length > 64
+  )
     throw new Error("Unreadable follow choices");
   const { v: _v, client_id, threads: rawThreads, ...extra } = raw;
   if (!record(rawThreads)) throw new Error("Unreadable follow choices");
