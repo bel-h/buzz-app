@@ -324,7 +324,13 @@ test("DM hide is per-viewer visibility, survives reload and never sends Leave or
     page.getByRole("textbox", { name: composerName, exact: true }),
   ).toBeVisible();
   await expect(row).toHaveCount(0);
-  // Someone else's message resurfaces it once the relay clears the hide.
+  // Someone else's message resurfaces it once the relay clears the hide, read
+  // from the relay's writer, while another conversation is open.
+  await sidebar.getByRole("button", { name: "Alpha", exact: true }).click();
+  await expect(
+    page.getByRole("textbox", { name: "Message #Alpha", exact: true }),
+  ).toBeVisible();
+  const readsBefore = app.report.queries.length;
   app.append(
     "primary",
     "22222222-2222-4222-8222-222222222222",
@@ -333,6 +339,14 @@ test("DM hide is per-viewer visibility, survives reload and never sends Leave or
     false,
   );
   await expect(row).toBeVisible();
+  expect(
+    app.report.queries
+      .slice(readsBefore)
+      .some(
+        ({ filter }) =>
+          filter.kinds?.includes(30622) && filter.consistency === "strong",
+      ),
+  ).toBe(true);
   expect(app.report.lifecyclePublications.map((event) => event.kind)).toEqual([
     41012,
   ]);
