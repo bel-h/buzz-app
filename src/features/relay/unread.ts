@@ -1764,15 +1764,25 @@ export function createUnread({
     const state = reads.state();
     const live = new Set<string>();
     for (const key of reads.localUnreadKeys()) {
-      const at = localCover(key, state);
+      // A mark saved with its cover compares against that, not against
+      // whatever evidence this load happens to have.
+      const saved = reads.localCover(key);
+      const at = saved
+        ? (effectiveFrontier(state, key, saved[2], saved[3] || undefined) ?? -1)
+        : localCover(key, state);
       if (at === undefined) continue;
       live.add(key);
-      const base = localBases.get(key);
+      const base = saved?.[1] ?? localBases.get(key);
+      const revision = reads.localUnread(key);
       if (base === undefined) localBases.set(key, at);
       else if (at > base && !clearing.has(key)) {
         clearing.add(key);
         void reads
-          .clearLocalUnread(key, [key], () => !closed)
+          .clearLocalUnread(
+            key,
+            [key],
+            (journal) => !closed && journal.localUnread[key] === revision,
+          )
           .catch(() => undefined)
           .finally(() => clearing.delete(key));
       }
@@ -2826,6 +2836,9 @@ export function createUnread({
       let active = true;
       const generation = epoch;
       const manualRevision = reads.revision();
+      // A synced channel mark unread changes no local revision: its saved
+      // stamp fences the lease too.
+      const unreadSet = reads.unreadSet(channelId);
       const observed = new Set<string>();
       const dispose = () => {
         active = false;
@@ -2841,7 +2854,10 @@ export function createUnread({
         !closed &&
         generation === epoch &&
         allowed(channelId) &&
-        manual(channelId, journal) <= manualRevision;
+        manual(channelId, journal) <= manualRevision &&
+        (journal
+          ? (journal.state.overrides[channelId]?.set ?? 0)
+          : reads.unreadSet(channelId)) <= unreadSet;
       handles.add(dispose);
       // Reading a DM reads all of it, through the newest retained message,
       // and ends a manual unread on it. A DM is all for the reader, so there
@@ -2911,6 +2927,8 @@ export function createUnread({
             return;
           }
           const event = requireMessage(target, id);
+          // A broadcast reply is shown in the channel but never its cutoff.
+          if (!rootId && threadReference(event)) return;
           // Catch-up moves the main read mark: a channel's to its newest
           // top-level message reached (never past a reply), a thread's to its
           // newest reply. Everything at or below it is read on every device.
@@ -2924,10 +2942,7 @@ export function createUnread({
               entry.event.created_at > event.created_at &&
               (rootId
                 ? entry.rootId === rootId
-                : !threadReference(entry.event) ||
-                  entry.event.tags.some(
-                    ([name, value]) => name === "broadcast" && value === "1",
-                  )),
+                : !threadReference(entry.event)),
           );
           if (newer) return;
           const cut = event.created_at;
@@ -2945,9 +2960,26 @@ export function createUnread({
                 state.overrides[channelId],
                 effectiveFrontier(state, channelId),
               ));
+          // Reaching a thread's bottom ends its own and its replies' local
+          // reminders, even when the read mark is already there.
+          const reminders = rootId
+            ? [
+                key,
+                ...rows
+                  .filter((entry) => entry.rootId === rootId)
+                  .map((entry) => `msg:${entry.event.id}`),
+              ].filter((local) => reads.localUnread(local))
+            : [];
+          const fresh = (journal: ReadJournal) =>
+            current(journal) &&
+            reminders.every(
+              (local) => manual(local, journal) <= manualRevision,
+            );
           if ((effectiveFrontier(state, key, channelId) ?? -1) >= cut) {
             if (endManual)
               await reads.clearLocalUnread(channelId, [channelId], current);
+            else if (reminders.length)
+              await reads.clearLocalUnread(key, reminders, fresh);
           } else
             await reads.read(
               key,
@@ -2991,6 +3023,17 @@ export function createUnread({
                 threadReference(event) ? root(event) : undefined,
               ) ?? -1) >= event.created_at
             ) {
+              // Shown: its own local reminder ends with no new read mark.
+              const local = targetKey(target);
+              if (reads.localUnread(local))
+                await reads.clearLocalUnread(
+                  local,
+                  [local],
+                  (journal) =>
+                    valid(journal) &&
+                    requireMessage(target, id) === event &&
+                    manual(local, journal) <= manualRevision,
+                );
               observed.add(id);
               continue;
             }
@@ -3513,8 +3556,20 @@ export function createUnread({
       };
       if (!valid()) throw new Error("Unread target unavailable");
       if (target.kind === "message") refuseAgentCoordination(target.messageId);
-      const result = await reads.markLocalUnread(key, valid, (save) =>
-        serialize(target.channelId, save),
+      if (target.kind === "message") indexEvidence();
+      const result = await reads.markLocalUnread(
+        key,
+        valid,
+        (save) => serialize(target.channelId, save),
+        target.kind === "channel"
+          ? undefined
+          : {
+              channelId: target.channelId,
+              rootId:
+                target.kind === "message"
+                  ? byId.get(target.messageId)?.rootId
+                  : undefined,
+            },
       );
       endCoveredLocal();
       return result;

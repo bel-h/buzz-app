@@ -17,6 +17,9 @@ type Reading = {
   session: RelaySession;
   channelId: string;
   latestMessageId?: string | undefined;
+  /** The newest row catch-up may read through, when it is not the bottom
+   * row (a channel's newest top-level post). Defaults to the bottom row. */
+  catchUpMessageId?: string | undefined;
   /** The thread this list shows: its bottom catches up that thread, and its
    * DM reads stop before unread messages it does not show. */
   rootId?: string | undefined;
@@ -43,6 +46,7 @@ export function useReading({
   session,
   channelId,
   latestMessageId,
+  catchUpMessageId,
   rootId,
   scroller,
   settled,
@@ -53,6 +57,7 @@ export function useReading({
   // Read at measurement time: a new latest message mutates the list, which
   // already remeasures in the next frame, so it must not restart observation.
   const latestId = useEffectEvent(() => latestMessageId);
+  const catchUpId = useEffectEvent(() => catchUpMessageId ?? latestMessageId);
   useEffect(() => {
     if (!enabled || !scroller.current) return;
     const element: HTMLElement = scroller.current;
@@ -270,8 +275,9 @@ export function useReading({
           } catch {
             handle = undefined;
           }
+          const through = caughtUp ? catchUpId() : undefined;
           void (async () => {
-            if (caughtUp) await observed.catchUp(bottom, rootId);
+            if (through) await observed.catchUp(through, rootId);
             await observed.observe(remained);
           })()
             .catch(() => {})

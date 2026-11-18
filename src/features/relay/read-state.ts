@@ -44,6 +44,7 @@ import {
   newSlotId,
   newUnreadJournal,
   type HeldGroup,
+  type LocalCover,
   type ReadJournal,
   type ReadStateStorage,
   type UnreadJournal,
@@ -163,6 +164,16 @@ const unreadClock = (journal: ReadJournal, now: number) =>
 /** Reserve and journal are disjoint; only own values are published. Unread
  * groups are shown expired and canonical at the expiry clock, so display
  * never waits for a save. */
+/** The covers of marks still saved at the revision they were saved with. */
+const keptCovers = (
+  covers: Readonly<Record<string, LocalCover>>,
+  localUnread: Readonly<Record<string, number>>,
+) => {
+  const kept = Object.entries(covers).filter(
+    ([key, [revision]]) => localUnread[key] === revision,
+  );
+  return kept.length ? Object.fromEntries(kept) : undefined;
+};
 const localState = (journal: ReadJournal, now: number): ReadState => {
   const frontiers: Record<string, number> = {
     ...journal.reserve,
@@ -377,7 +388,9 @@ export function createReadState({
   };
   type LocalUnreadAttempt = {
     key: string;
-    saved?: { revision: number; previous: number };
+    /** A message or thread mark's covering context, saved with it. */
+    cover?: Readonly<{ channelId: string; rootId?: string | undefined }>;
+    saved?: { revision: number; previous: number; set?: number | undefined };
   };
   const pendingLocalUnread = new Set<LocalUnreadAttempt>();
   type LocalUnreadFence = Promise<{ valid: Validity } | { error: unknown }>;
@@ -385,7 +398,10 @@ export function createReadState({
     return new Promise<ReadJournal | undefined>((resolve) =>
       resolve(storage.capture()),
     ).then(
-      (captured) => ({ revision: captured?.revision ?? 0 }),
+      (captured) => ({
+        revision: captured?.revision ?? 0,
+        sets: captured?.state.overrides ?? {},
+      }),
       (error: unknown) => ({ error }),
     );
   }
@@ -403,6 +419,16 @@ export function createReadState({
       return {
         valid: (current: ReadJournal) =>
           keys.every((key) => {
+            // A synced mark unread saved since the cut, by any window, is
+            // newer intent too; it changes no local-unread revision.
+            const set = current.state.overrides[key]?.set ?? 0;
+            if (
+              set > (captured.sets[key]?.set ?? 0) &&
+              !older.some(
+                (attempt) => attempt.key === key && attempt.saved?.set === set,
+              )
+            )
+              return false;
             let revision = current.localUnread[key] ?? 0;
             // An older queued save may overwrite a newer window's mark. Only
             // follow successful older saves back to the captured journal cut.
@@ -1068,6 +1094,7 @@ export function createReadState({
                   recent,
                 );
           const localUnread = { ...current.localUnread };
+          const localCovers = { ...current.localCovers };
           previousLocalUnread = localUnread[key] ?? 0;
           // Automatic observations do not clear explicit local manual-unread intent.
           if (unread === false)
@@ -1095,7 +1122,23 @@ export function createReadState({
             clearLocalKeys,
           );
           if (groups) kept.state = groups;
-          if (unread === true && !groups) localUnread[key] = revision;
+          if (unread === true && !groups) {
+            localUnread[key] = revision;
+            const cover = localUnreadAttempt?.cover;
+            if (cover) {
+              localCovers[key] = [
+                revision,
+                effectiveFrontier(
+                  localState(current, now()),
+                  key,
+                  cover.channelId,
+                  cover.rootId,
+                ) ?? -1,
+                cover.channelId,
+                cover.rootId ?? "",
+              ];
+            }
+          }
           // A refused clear is not retried: its warning persists until a
           // publication fits again or a later read's clear succeeds.
           const unreadJournal =
@@ -1112,6 +1155,7 @@ export function createReadState({
             floor: kept.floor,
             own,
             localUnread,
+            localCovers: keptCovers(localCovers, localUnread),
             ...(unreadJournal ? { unread: unreadJournal } : {}),
             acceptedRevision:
               !synced && current.acceptedRevision === current.revision
@@ -1123,6 +1167,7 @@ export function createReadState({
           localUnreadAttempt.saved = {
             revision: saved.revision,
             previous: previousLocalUnread,
+            set: saved.state.overrides[key]?.set,
           };
         health({
           status: capability === "frontier-sync" ? "pending" : "local",
@@ -1613,6 +1658,15 @@ export function createReadState({
     state: () => state,
     localUnread: (key: string) => journal?.localUnread[key],
     localUnreadKeys: () => Object.keys(journal?.localUnread ?? {}),
+    /** A mark's saved covering context, while it is still the saved mark. */
+    localCover: (key: string) => {
+      const cover = journal?.localCovers?.[key];
+      return cover && journal?.localUnread[key] === cover[0]
+        ? cover
+        : undefined;
+    },
+    /** A key's saved synced mark-unread stamp: a newer one fences reading. */
+    unreadSet: (key: string) => journal?.state.overrides[key]?.set ?? 0,
     revision: () => journal?.revision ?? 0,
     /** `revision`, less quiet saves from any window: they change no unread
      * state, so a reader's entry evidence outlives them. */
@@ -1892,8 +1946,9 @@ export function createReadState({
       enqueue: (
         save: () => Promise<ReadMutationResult>,
       ) => Promise<ReadMutationResult> = (save) => save(),
+      cover?: LocalUnreadAttempt["cover"],
     ) {
-      const attempt: LocalUnreadAttempt = { key };
+      const attempt: LocalUnreadAttempt = { key, ...(cover && { cover }) };
       pendingLocalUnread.add(attempt);
       try {
         return await enqueue(() =>

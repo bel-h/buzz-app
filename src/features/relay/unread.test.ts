@@ -9,6 +9,7 @@ import { deletionApplies, foldMessages } from "./fold";
 import {
   readJournal,
   newReadJournal,
+  newUnreadJournal,
   type ReadJournal,
   type ReadStateStorage,
 } from "./read-state-storage";
@@ -7419,4 +7420,136 @@ it("reading one Inbox row clears only that row's marks, not other marks in its c
   expect(h.session.unread.attention("room", a.id).unread).toBe(false);
   expect(h.session.unread.attention("room", b.id).unread).toBe(true);
   expect(h.journal()?.state.frontiers.room).toBe(frontier);
+});
+
+it("a reading lease is fenced by a synced mark unread another window saved", async () => {
+  const h = setup();
+  h.grant("room");
+  const row = message(h.alice, "room", "visible", 11);
+  h.emit([row]);
+  const lease = h.session.unread.reading("room");
+  const set = Math.floor(Date.now() / 1000);
+  // Another window's synced channel mark unread: no local-unread revision.
+  await h.storage.update((saved) => {
+    const current = saved ?? newReadJournal();
+    return {
+      ...current,
+      revision: current.revision + 1,
+      state: {
+        frontiers: { room: 0 },
+        overrides: { room: { set, clear: 0, baseline: 0 } },
+      },
+      unread: current.unread ?? newUnreadJournal(),
+    };
+  });
+  expect(h.journal()?.state.overrides.room?.set).toBe(set);
+  await expect(lease.observe([row.id])).rejects.toThrow(
+    "Reading observation expired",
+  );
+  // Once this window has loaded the mark, the lease ends without a save.
+  await lease.catchUp(row.id);
+  expect(h.journal()?.state.frontiers).toEqual({ room: 0 });
+  expect(h.journal()?.state.overrides.room?.set).toBe(set);
+  lease.dispose();
+});
+
+it("a local thread unread keeps its saved cover across a reload that lacks its root", async () => {
+  const h = setup();
+  h.grant("room");
+  const root = message(h.alice, "room", "root", 11);
+  const reply = message(h.alice, "room", "reply", 12, [
+    ["e", root.id, "", "reply"],
+  ]);
+  h.emit([root, reply]);
+  clock(20);
+  await h.session.unread.markChannelRead("room");
+  const thread = {
+    kind: "thread" as const,
+    channelId: "room",
+    rootId: root.id,
+  };
+  await h.session.unread.markUnreadLocal(thread);
+  const key = `thread:${root.id}`;
+  expect(h.journal()?.localCovers?.[key]?.slice(1)).toEqual([20, "room", ""]);
+  const saved = h.journal();
+  if (!saved) throw new Error("Missing journal");
+  h.dispose();
+  // A reload: a new owner over the saved journal, without the root loaded.
+  const r = setup({}, true, () => saved);
+  r.grant("room");
+  r.grant("other");
+  // A read-state notification before the root loads, and one after it: the
+  // channel mark has not moved, so the reminder stays.
+  await r.session.unread.markChannelRead("other");
+  r.emit([root]);
+  await r.session.unread.markChannelRead("other");
+  await flush();
+  expect(r.journal()?.localUnread[key]).toBeDefined();
+  // A real advance past the saved cover still ends it.
+  clock(40);
+  r.emit([message(r.alice, "room", "later", 39)]);
+  await r.session.unread.markChannelRead("room");
+  await vi.waitFor(() => expect(r.journal()?.localUnread[key]).toBeUndefined());
+});
+
+it("catch-up and display clear local reminders when the read mark is already there", async () => {
+  const h = setup();
+  h.grant("room");
+  const root = message(h.alice, "room", "root", 11);
+  const reply = message(h.alice, "room", "reply", 12, [
+    ["e", root.id, "", "reply"],
+  ]);
+  const top = message(h.alice, "room", "top", 13);
+  h.emit([root, reply, top]);
+  const thread = {
+    kind: "thread" as const,
+    channelId: "room",
+    rootId: root.id,
+  };
+  let lease = h.session.unread.reading("room", root.id);
+  await lease.catchUp(reply.id, root.id);
+  lease.dispose();
+  expect(h.journal()?.state.frontiers[`thread:${root.id}`]).toBe(12);
+  await h.session.unread.markUnreadLocal(thread);
+  lease = h.session.unread.reading("room", root.id);
+  await lease.catchUp(reply.id, root.id);
+  lease.dispose();
+  expect(h.journal()?.localUnread[`thread:${root.id}`]).toBeUndefined();
+  // A covered message marked unread on this device ends when shown.
+  clock(30);
+  await h.session.unread.markChannelRead("room");
+  const marked = {
+    kind: "message" as const,
+    channelId: "room",
+    messageId: top.id,
+  };
+  await h.session.unread.markUnreadLocal(marked);
+  expect(h.journal()?.localUnread[`msg:${top.id}`]).toBeDefined();
+  lease = h.session.unread.reading("room");
+  await lease.observe([top.id]);
+  lease.dispose();
+  expect(h.journal()?.localUnread[`msg:${top.id}`]).toBeUndefined();
+});
+
+it("channel catch-up stops at the newest top-level post, never a broadcast reply", async () => {
+  const h = setup();
+  h.grant("room");
+  const top = message(h.alice, "room", "top", 10);
+  const other = message(h.alice, "room", "other root", 9);
+  const unseen = message(h.alice, "room", "unseen mention", 20, [
+    ["e", other.id, "", "reply"],
+    ["p", h.viewer.pubkey],
+  ]);
+  const broadcast = message(h.alice, "room", "broadcast", 30, [
+    ["e", top.id, "", "reply"],
+    ["broadcast", "1"],
+  ]);
+  h.emit([channelMetadata(h, "stream"), other, top, unseen, broadcast]);
+  const lease = h.session.unread.reading("room");
+  await lease.catchUp(broadcast.id);
+  expect(h.journal()?.state.frontiers.room).toBeUndefined();
+  await lease.catchUp(top.id);
+  expect(h.journal()?.state.frontiers.room).toBe(10);
+  expect(h.session.unread.attention("room", unseen.id).unread).toBe(true);
+  lease.dispose();
 });

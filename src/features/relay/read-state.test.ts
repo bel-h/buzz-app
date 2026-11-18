@@ -2621,6 +2621,26 @@ describe("expiring unread (version 2)", () => {
     });
   });
 
+  it("a captured read fence refuses a synced mark unread another window saved after the cut", async () => {
+    const f = fixture(T);
+    const owner = await started(f);
+    const second = await started(f);
+    const fence = owner.captureLocalUnread(["room"]);
+    await second.markLocalUnread("room", () => true);
+    const saved = f.journal();
+    expect(saved?.state.overrides.room?.set).toBe(T);
+    f.setNow(T + 1);
+    await expect(
+      owner.read("room", T + 1, () => true, true, ["room"], fence),
+    ).rejects.toThrow("Reading observation expired");
+    expect(f.journal()).toEqual(saved);
+    // A cut taken after the mark lets the same read through.
+    const later = owner.captureLocalUnread(["room"]);
+    await expect(
+      owner.read("room", T + 1, () => true, true, ["room"], later),
+    ).resolves.toMatchObject({ durability: "saved" });
+  });
+
   it("keeps a tombstone through the discard guard and drops it one second later, across restarts", async () => {
     const f = fixture(T);
     let owner = await started(f);

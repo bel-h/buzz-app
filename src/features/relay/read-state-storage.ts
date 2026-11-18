@@ -28,6 +28,10 @@ export type ReadJournal = Readonly<{
   state: ReadState;
   /** Explicitly local-only intent; the counter fences older reading handles. */
   localUnread: Readonly<Record<string, number>>;
+  /** What covered each local message or thread unread when it was marked:
+   * [its `localUnread` revision, the covering read mark, channel, root ("" for
+   * none)]. A later advance past it ends the mark, after a reload too. */
+  localCovers?: Readonly<Record<string, LocalCover>> | undefined;
   /** Local interaction order, bounded with retained frontier hints. */
   recent?: Readonly<Record<string, number>>;
   /** Local-only evicted receipts, deleted with this partition even by old builds. */
@@ -63,6 +67,7 @@ export type ReadJournal = Readonly<{
 /** One held-back incoming contribution: [S, C, B, F], F its paired frontier
  * (or this device's, if greater) at the time it was held. Never admitted, so
  * it gets the incoming cutoff, not the local discard guard, when it resolves. */
+export type LocalCover = readonly [number, number, string, string];
 export type HeldGroup = readonly [number, number, number, number];
 export type UnreadJournal = Readonly<{
   /** This installation's one version-2 coordinate. */
@@ -161,6 +166,30 @@ function readUnread(raw: unknown, slots: readonly string[]): UnreadJournal {
       : { blockedKeys: Object.freeze([...(raw.blockedKeys as string[])]) }),
     ...(raw.heldOverflow && { heldOverflow: true as const }),
   });
+}
+/** Keeps only the covers of marks still saved at the same revision. */
+function readLocalCovers(
+  raw: unknown,
+  localUnread: Readonly<Record<string, number>>,
+): Readonly<Record<string, LocalCover>> {
+  if (!record(raw) || Object.keys(raw).length > 10000)
+    throw new Error("Invalid saved local unread covers");
+  const covers: Record<string, LocalCover> = {};
+  for (const [key, value] of Object.entries(raw)) {
+    if (
+      !Array.isArray(value) ||
+      value.length !== 4 ||
+      !Number.isSafeInteger(value[0]) ||
+      !Number.isSafeInteger(value[1]) ||
+      (value[1] as number) < -1 ||
+      typeof value[2] !== "string" ||
+      typeof value[3] !== "string"
+    )
+      throw new Error("Invalid saved local unread covers");
+    if (localUnread[key] === value[0])
+      covers[key] = Object.freeze([...value]) as unknown as LocalCover;
+  }
+  return Object.freeze(covers);
 }
 /** Storage is untrusted. Corrupt intent is an error, never an empty journal to overwrite. */
 export function readJournal(raw: unknown, viewer: string): ReadJournal {
@@ -338,6 +367,12 @@ export function readJournal(raw: unknown, viewer: string): ReadJournal {
     localUnread: Object.freeze({ ...raw.localUnread }) as Readonly<
       Record<string, number>
     >,
+    ...(raw.localCovers !== undefined && {
+      localCovers: readLocalCovers(
+        raw.localCovers,
+        raw.localUnread as Record<string, number>,
+      ),
+    }),
     recent: Object.freeze({
       ...(raw.recent as Record<string, number> | undefined),
     }),
