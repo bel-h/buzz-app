@@ -936,6 +936,69 @@ it("keeps other turns alive when unsubscribe times out and confirms release befo
     vi.useRealTimers();
   }
 });
+it.each([
+  "unknown",
+  "refused",
+  "completed before the start reply",
+  "completed during unsubscribe",
+])(
+  "handles unsubscribe failure when the turn state is %s",
+  async (turnState) => {
+    vi.useFakeTimers();
+    const f = fixture();
+    const b = second(f);
+    const startReply = deferred<void>();
+    const unsubscribeReply = deferred<void>();
+    const refused = turnState === "refused";
+    try {
+      await f.runtime.run(b.delivery("other work"));
+      await vi.waitFor(() => expect(f.starts()).toHaveLength(1));
+      if (refused) f.failing.add("turn/start");
+      else f.held.set("turn/start", startReply.promise);
+      f.failing.add("thread/unsubscribe");
+      if (turnState === "completed during unsubscribe")
+        f.held.set("thread/unsubscribe", unsubscribeReply.promise);
+
+      await f.runtime.run(f.delivery("work"));
+      await vi.waitFor(() => expect(f.starts()).toHaveLength(2));
+      if (turnState === "completed before the start reply")
+        await f.complete(1, "");
+      if (!refused) await vi.advanceTimersByTimeAsync(30_000);
+      await vi.waitFor(() =>
+        expect(f.sent).toContainEqual(
+          expect.objectContaining({ method: "thread/unsubscribe" }),
+        ),
+      );
+      expect(contents(f.publish)).toEqual([
+        refused
+          ? "Codex could not finish: turn/start failed."
+          : "Codex could not finish: Codex turn/start timed out.",
+      ]);
+      if (turnState === "completed during unsubscribe") {
+        await f.complete(1, "");
+        f.held.delete("thread/unsubscribe");
+        unsubscribeReply.resolve();
+        await vi.advanceTimersByTimeAsync(0);
+      }
+      if (turnState !== "unknown") {
+        expect(f.process.end).not.toHaveBeenCalled();
+        f.failing.delete("thread/unsubscribe");
+        await f.complete(0, "OTHER FINISHED");
+        expect(contents(b.agent.publish as never)).toEqual(["OTHER FINISHED"]);
+      } else {
+        expect(f.process.end).toHaveBeenCalledTimes(1);
+        expect(contents(b.agent.publish as never)).toEqual([
+          "Codex could not finish: Buzz closed the Codex connection after thread unsubscribe failed.",
+        ]);
+      }
+    } finally {
+      startReply.resolve();
+      unsubscribeReply.resolve();
+      f.runtime.dispose();
+      vi.useRealTimers();
+    }
+  },
+);
 it("keeps an agent's two communities' threads apart, each under its membership's key", async () => {
   const f = fixture();
   const elsewhere = `${pubkey}@other.example`;

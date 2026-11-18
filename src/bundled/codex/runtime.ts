@@ -3640,6 +3640,7 @@ export class CodexRuntime {
     let hookBridge: Awaited<ReturnType<typeof openHookBridge>> | undefined;
     let explain: (() => string | undefined) | undefined;
     let turnFailed = false;
+    let turnMayBeRunning = adopted !== undefined;
     try {
       const rpc = await server.opening;
       signal.throwIfAborted();
@@ -3764,33 +3765,39 @@ export class CodexRuntime {
               .filter(Boolean)
               .join("\n\n") + "\n\n";
         active.threadId = threadId;
+        const turnParams = {
+          threadId: active.threadId,
+          input: input(
+            (standaloneText === undefined
+              ? undefined
+              : [
+                  `<context>\n${JSON.stringify({ agent: agent.key, session_scope: "community" })}\n</context>`,
+                  request.project,
+                  standaloneText,
+                  ownerInstructions(undefined, true),
+                ]
+                  .filter(Boolean)
+                  .join("\n\n")) ??
+              `${context}${request.project ?? ""}${turnInput(request.agent.key, request.event, request.conversation, text, false, noteOf(request), wake, this.reads(request.agent.key)?.authorNames?.(request.event.pubkey))}`,
+          ),
+          model,
+          effort,
+          ...summary,
+          // Application context is a developer message that updates on each turn.
+          additionalContext,
+        };
+        // A lost start reply can leave an accepted turn running without its ID.
+        turnMayBeRunning = true;
         const turn = await rpc
-          .request<{ turn: { id: string } }>("turn/start", {
-            threadId: active.threadId,
-            input: input(
-              (standaloneText === undefined
-                ? undefined
-                : [
-                    `<context>\n${JSON.stringify({ agent: agent.key, session_scope: "community" })}\n</context>`,
-                    request.project,
-                    standaloneText,
-                    ownerInstructions(undefined, true),
-                  ]
-                    .filter(Boolean)
-                    .join("\n\n")) ??
-                `${context}${request.project ?? ""}${turnInput(request.agent.key, request.event, request.conversation, text, false, noteOf(request), wake, this.reads(request.agent.key)?.authorNames?.(request.event.pubkey))}`,
-            ),
-            model,
-            effort,
-            ...summary,
-            // Application context is a developer message that updates on each turn.
-            additionalContext,
-          })
+          .request<{ turn: { id: string } }>("turn/start", turnParams)
           .catch(async (error: unknown) => {
-            if (this.target && !resuming && error instanceof Refused) {
-              const { [key]: _, ...kept } = entry.saved;
-              await this.storage.set(entry.storageKey, JSON.stringify(kept));
-              entry.saved = kept;
+            if (error instanceof Refused) {
+              if (!active.turnId) turnMayBeRunning = false;
+              if (this.target && !resuming) {
+                const { [key]: _, ...kept } = entry.saved;
+                await this.storage.set(entry.storageKey, JSON.stringify(kept));
+                entry.saved = kept;
+              }
             }
             throw error;
           });
@@ -3904,6 +3911,7 @@ export class CodexRuntime {
               threadId: active.threadId,
               turnId: active.turnId,
             });
+            turnMayBeRunning = false;
             await this.terminals(server.rpc, active.threadId);
           } catch {
             await server.rpc.close("turn interrupt");
@@ -3929,7 +3937,6 @@ export class CodexRuntime {
     } finally {
       for (const taken of active.requests)
         taken.failActivity("Codex ended without a final reply");
-      followed.stop();
       // A turn Codex took in has ended, however it ended.
       if (active.turnId && !entry.abort.signal.aborted)
         this.touch(request, entry, key);
@@ -3941,25 +3948,37 @@ export class CodexRuntime {
       )
         await lane.voice.restore().catch(() => {});
       turnAbort.abort(new Error("The Codex turn has ended"));
-      // Release the subscription before the next resume: loaded-thread rejoin
-      // ignores instruction/config overrides while a client is subscribed.
-      if (active.threadId && !lane.voice)
-        await server.rpc.releaseThread(active.threadId).catch((error) => {
-          if (
-            !turnFailed &&
-            (this.server === server ||
-              this.protectedServers.get(agent.key) === server)
-          )
-            this.status(agent.key, key, "Needs attention", message(error));
-        });
-      await hookBridge?.close();
-      if (active.voiceRetirement) await active.voiceRetirement.catch(() => {});
-      if (lane.active === active) {
-        delete lane.active;
-        if (request.unaddressed?.signal.aborted && !entry.abort.signal.aborted)
-          this.status(agent.key, key, "Stopped");
+      try {
+        // Loaded-thread rejoin ignores config overrides while subscribed.
+        if (active.threadId && !lane.voice)
+          await server.rpc.releaseThread(active.threadId).catch((error) => {
+            if (turnMayBeRunning && !followed.sawCompletion)
+              return server.rpc.close("thread unsubscribe");
+            if (
+              !turnFailed &&
+              (this.server === server ||
+                this.protectedServers.get(agent.key) === server)
+            )
+              this.status(agent.key, key, "Needs attention", message(error));
+          });
+      } finally {
+        followed.stop();
+        try {
+          await hookBridge?.close();
+          if (active.voiceRetirement)
+            await active.voiceRetirement.catch(() => {});
+        } finally {
+          if (lane.active === active) {
+            delete lane.active;
+            if (
+              request.unaddressed?.signal.aborted &&
+              !entry.abort.signal.aborted
+            )
+              this.status(agent.key, key, "Stopped");
+          }
+          release();
+        }
       }
-      release();
     }
   }
 }
@@ -3982,6 +4001,7 @@ function follow(
 ) {
   let finish!: (status: string) => void;
   let fail!: (error: Error) => void;
+  let sawCompletion = false;
   const completed = new Promise<string>((resolve, reject) => {
     finish = resolve;
     fail = reject;
@@ -4002,20 +4022,26 @@ function follow(
       fail(new Error(p?.message ?? "Codex connection closed"));
       return;
     }
-    if (!p || !turn.threadId || p.threadId !== turn.threadId || turn.finished)
-      return;
+    if (!p || !turn.threadId || p.threadId !== turn.threadId) return;
     if (p.turn && turn.turnId && p.turn.id !== turn.turnId) return;
+    const terminalTurn = wire.method === "turn/completed" ? p.turn : undefined;
+    // Local failure can settle the caller before Codex settles the turn.
+    if (terminalTurn) sawCompletion = true;
+    if (turn.finished) return;
     if (wire.method === "turn/started" && p.turn) turn.turnId = p.turn.id;
     if (p.item && wire.method) onItem?.(wire.method, p.item);
-    if (wire.method === "turn/completed" && p.turn) {
+    if (terminalTurn) {
       turn.finished = true;
-      if (p.turn.status === "failed")
-        fail(new Error(p.turn.error?.message ?? "Codex turn failed"));
-      else finish(p.turn.status);
+      if (terminalTurn.status === "failed")
+        fail(new Error(terminalTurn.error?.message ?? "Codex turn failed"));
+      else finish(terminalTurn.status);
     }
   });
   return {
     completed,
+    get sawCompletion() {
+      return sawCompletion;
+    },
     stop() {
       signal?.removeEventListener("abort", abort);
       off();
