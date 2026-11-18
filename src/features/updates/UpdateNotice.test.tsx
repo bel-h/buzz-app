@@ -9,6 +9,7 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
 import { ToastProvider } from "../../shared/design-system/ui/Toast";
 import { UpdateAction } from "./UpdateAction";
@@ -193,6 +194,14 @@ it("says how many agents Update interrupts, following the working count", async 
   ).toBeVisible();
   work.set(0);
   expect(screen.getByRole("button", { name: READY })).toBeVisible();
+});
+
+it("shows sighted users the interruption warning on hover of the split Update button", async () => {
+  const user = userEvent.setup();
+  const warning = "Update ready. Restarting Buzz now interrupts 2 agents";
+  await readyUpdate(agentWork(2), warning);
+  await user.hover(screen.getByRole("button", { name: warning }));
+  expect(await screen.findByRole("tooltip")).toHaveTextContent(warning);
 });
 
 it("schedules the update from the top bar, and cancels it or installs at once", async () => {

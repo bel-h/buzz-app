@@ -49,6 +49,7 @@ export function UpdateAction({ updates }: { updates: Updates }) {
       size="sm"
       variant="prominent"
       aria-label={label}
+      title={label}
       loading={state === "installing"}
       onClick={install}
       menuLabel="More update options"
