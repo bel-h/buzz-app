@@ -353,12 +353,13 @@ pairing; finish, then run the command again. Once allowed, the tool can post,
 read and use your sign-in through Buzz, and your key stays in Buzz. Before
 it edits your profile, deletes, joins or leaves, or manages members, agents,
 workflows or moderation, Buzz asks you. The request names the tool and the
-action, including any settings it changes. Select **Deny**, **Allow once**,
-or allow that action from that tool for 5 minutes. Deleting, adding or
-removing members, banning, leaving the community, and managing agents or
-workflow approvals are only ever allowed once. Buzz asks only while it is open
-and you are signed in. A request that waits 2 minutes with no answer is
-refused, and a tool you deny waits 30 seconds before it can ask again.
+action, including any settings it changes. Select **Deny**, **Allow once**, or
+allow that action from that tool for 5 minutes. Deleting, editing a channel,
+adding or removing members, banning or unbanning, leaving the community, and
+managing agents or workflow approvals are only ever allowed once. Buzz asks
+only while it is open and you are signed in. A request that waits 2 minutes
+with no answer is refused. A tool you deny, or that drops its request, waits
+30 seconds before it can ask again, and twice as long after each one in a row.
 Reloading Buzz or removing the community ends what you allowed. Agents that
 Buzz runs are never asked for these actions: do those in Buzz.
 **Settings → Security** lists paired tools and, under each one, the actions

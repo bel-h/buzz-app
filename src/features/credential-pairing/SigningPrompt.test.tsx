@@ -115,6 +115,9 @@ it("names the tool, the action and the community, with Deny focused", async () =
   expect(dialog).toHaveTextContent("buzz-cli wants to leave #general");
   expect(dialog).toHaveTextContent("wss://relay.example/");
   expect(dialog).toHaveTextContent("Expires in 120 s");
+  expect(dialog).toHaveTextContent(
+    "Allow for 5 min lets buzz-cli leave channels without asking again.",
+  );
   await vi.waitFor(() =>
     expect(screen.getByRole("button", { name: "Deny" })).toHaveFocus(),
   );
@@ -122,13 +125,13 @@ it("names the tool, the action and the community, with Deny focused", async () =
     screen
       .getAllByRole("button")
       .map((button) => button.getAttribute("aria-label") ?? button.textContent),
-  ).toEqual(["Close", "Deny", "Allow leaves for 5 min", "Allow once"]);
+  ).toEqual(["Close", "Deny", "Allow for 5 min", "Allow once"]);
 });
 
 it.each([
   { button: "Deny", answer: "deny" },
   { button: "Allow once", answer: "once" },
-  { button: "Allow leaves for 5 min", answer: "window" },
+  { button: "Allow for 5 min", answer: "window" },
 ])("answers $answer from $button and closes", async ({ button, answer }) => {
   render(<SigningPrompt relay={relay} />);
   await ask(request);
@@ -151,24 +154,27 @@ it("denies on Escape and on Close", async () => {
   expect(screen.queryByRole("alertdialog")).toBeNull();
 });
 
-it("names the window after the kind, and its length from the request", async () => {
+it("says what the window allows, and takes its length from the request", async () => {
   render(<SigningPrompt relay={relay} />);
-  await ask({ ...request, windowSeconds: 600, kind: 9002 });
+  await ask({ ...request, windowSeconds: 600, kind: 9021 });
+  expect(await screen.findByRole("alertdialog")).toHaveTextContent(
+    "Allow for 10 min lets buzz-cli join channels without asking again.",
+  );
   expect(
-    await screen.findByRole("button", {
-      name: "Allow channel edits for 10 min",
-    }),
+    screen.getByRole("button", { name: "Allow for 10 min" }),
   ).toBeInTheDocument();
   await ask({ ...request, id: "s2", windowSeconds: 45 });
   expect(
-    await screen.findByRole("button", { name: "Allow leaves for 45 s" }),
+    await screen.findByRole("button", { name: "Allow for 45 s" }),
   ).toBeInTheDocument();
 });
 
 it("offers only Allow once for a kind native code allows only once", async () => {
   render(<SigningPrompt relay={relay} />);
   await ask({ ...request, kind: 9008, windowSeconds: 0 });
-  await screen.findByRole("alertdialog");
+  expect(await screen.findByRole("alertdialog")).not.toHaveTextContent(
+    "without asking again",
+  );
   expect(
     screen
       .getAllByRole("button")

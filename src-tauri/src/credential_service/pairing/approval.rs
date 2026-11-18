@@ -22,8 +22,11 @@ const ASKS_PER_PAIRING: usize = 10;
 const ASK_WINDOW: Duration = Duration::from_secs(10 * 60);
 /// When a caller turned away by another open request retries.
 const BUSY_RETRY: u64 = 5;
-/// How long a tool that was declined, or not answered, waits to ask again.
+/// How long a tool waits to ask again after a request it made ends with no
+/// yes: declined, not answered, or dropped by the tool. Each such end after
+/// that doubles it, up to [`DOUBLINGS`] times, until the human allows one.
 const COOLDOWN: Duration = Duration::from_secs(30);
+const DOUBLINGS: u32 = 4;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -175,13 +178,8 @@ impl Pairings {
             (answer, state.sign_epoch)
         };
         // Whatever ends the wait, even the caller hanging up, closes the prompt.
-        let _closing = SignClosing(self, id);
+        let _closing = SignClosing(self, id, record.id.clone());
         let answer = tokio::time::timeout(APPROVAL, answer).await;
-        let cool = || {
-            self.state()
-                .sign_cooldowns
-                .insert(record.id.clone(), Instant::now() + COOLDOWN);
-        };
         match answer {
             Ok(Ok(Answer::Window)) if windowable(kind) => {
                 let until = unix_now()? + WINDOW;
@@ -194,6 +192,7 @@ impl Pairings {
                 if state.owed || state.generation != generation {
                     return Err(Failure::revoked());
                 }
+                state.sign_strikes.remove(&record.id);
                 // Signed once all the same: only the window is the page's to end.
                 let current = state.sign_epoch == epoch
                     && communities
@@ -215,28 +214,26 @@ impl Pairings {
                 Ok(())
             }
             Ok(Ok(Answer::Once | Answer::Window)) => {
-                let state = self.state();
+                let mut state = self.state();
                 if state.owed || state.generation != generation {
                     return Err(Failure::revoked());
                 }
+                state.sign_strikes.remove(&record.id);
                 Ok(())
             }
             Ok(Ok(Answer::Revoked)) => Err(Failure::revoked()),
             Ok(Ok(Answer::Deny)) => {
-                cool();
+                cool(&mut self.state(), &record.id);
                 Err(Failure::new("denied", "Declined in Buzz"))
             }
             Ok(Err(_)) => Err(Failure::new(
                 "denied",
                 "Buzz closed this request before anyone answered",
             )),
-            Err(_) => {
-                cool();
-                Err(Failure::new(
-                    "approval_required",
-                    "Nobody approved this in Buzz in time",
-                ))
-            }
+            Err(_) => Err(Failure::new(
+                "approval_required",
+                "Nobody approved this in Buzz in time",
+            )),
         }
     }
 
@@ -285,8 +282,16 @@ impl Pairings {
         state.windows.retain(|window| window.pairing != id);
         state.sign_asked_by.remove(id);
         state.sign_cooldowns.remove(id);
+        state.sign_strikes.remove(id);
         if let Some(pending) = state.signing.take_if(|pending| pending.pairing == id) {
             let _ = pending.send.send(Answer::Revoked);
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn age_windows(&self, seconds: u64) {
+        for window in &mut self.state().windows {
+            window.until -= seconds;
         }
     }
 
@@ -303,21 +308,32 @@ impl Pairings {
     }
 }
 
-/// Ends signature request `.1` and closes its prompt.
-struct SignClosing<'a>(&'a Pairings, String);
+/// Ends signature request `.1` from pairing `.2` and closes its prompt.
+struct SignClosing<'a>(&'a Pairings, String, String);
 impl Drop for SignClosing<'_> {
     fn drop(&mut self) {
         let mut state = self.0.state();
+        // Still waiting: it timed out or the caller hung up.
         if state
             .signing
-            .as_ref()
-            .is_some_and(|pending| pending.id == self.1)
+            .take_if(|pending| pending.id == self.1)
+            .is_some()
         {
-            state.signing = None;
+            cool(&mut state, &self.2);
         }
         drop(state);
         (self.0.notify)(Notice::SignClosed(self.1.clone()));
     }
+}
+
+/// Makes `pairing` wait before it asks again, longer each time in a row.
+fn cool(state: &mut State, pairing: &str) {
+    let strikes = state.sign_strikes.entry(pairing.to_owned()).or_default();
+    let wait = COOLDOWN * 2u32.pow((*strikes).min(DOUBLINGS));
+    *strikes += 1;
+    state
+        .sign_cooldowns
+        .insert(pairing.to_owned(), Instant::now() + wait);
 }
 
 /// The removed community's error, as pairing gives it.

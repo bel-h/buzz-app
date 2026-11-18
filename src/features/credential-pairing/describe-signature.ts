@@ -10,15 +10,12 @@ export type SignatureLookup = {
 export type SignatureDescription = {
   /** What this one request does: "leave #general". */
   action: string;
-  /** The kind as a noun, to name what a remembered approval allows: "leaves". */
-  plural: string;
   /** The kind in general, after "Can": "leave channels". */
   ability: string;
 };
 
 type Tags = readonly (readonly string[])[];
 type Entry = {
-  plural: string;
   ability: string;
   action(tags: Tags, text: Text): string;
   /** The tags the words account for. Any other tag, when this is set, adds
@@ -166,14 +163,12 @@ const clip = (value: string) =>
 
 const fixed = (
   action: string,
-  plural: string,
   ability: string,
   extra?: Partial<Entry>,
-): Entry => ({ plural, ability, action: () => action, ...extra });
+): Entry => ({ ability, action: () => action, ...extra });
 const inChannel = (verb: string, text: Text) =>
   text.channel ? `${verb} in ${text.channel}` : verb;
 const admin: Entry = {
-  plural: "admin changes",
   ability: "change channel admin settings",
   action: (_tags, text) =>
     text.channel
@@ -182,16 +177,11 @@ const admin: Entry = {
 };
 
 const KINDS: Readonly<Record<number, Entry>> = {
-  0: fixed("change your profile", "profile changes", "change your profile"),
-  3: fixed(
-    "change your contact list",
-    "contact list changes",
-    "change your contact list",
-  ),
+  0: fixed("change your profile", "change your profile"),
+  3: fixed("change your contact list", "change your contact list"),
   // A target may be anything the person or their agents posted; `k` is only
   // its kind as the tool claims it, so it is not shown.
   5: {
-    plural: "deletions",
     ability: "delete what you or your agents posted",
     action: (tags) => {
       const targets = tags.filter((tag) => tag[0] === "e" || tag[0] === "a");
@@ -202,21 +192,18 @@ const KINDS: Readonly<Record<number, Entry>> = {
     tags: ["e", "a", "k", "h"],
   },
   9000: {
-    plural: "member additions",
     ability: "add channel members",
     action: (tags, text) =>
       `add ${text.people ?? "a member"} to ${text.channel ?? "a channel"}${roles(tags)}`,
     tags: ["h", "p", "role"],
   },
   9001: {
-    plural: "member removals",
     ability: "remove channel members",
     action: (_tags, text) =>
       `remove ${text.people ?? "a member"} from ${text.channel ?? "a channel"}`,
     tags: ["h", "p"],
   },
   9002: {
-    plural: "channel edits",
     ability: "edit channels",
     action: (tags, text) => {
       const target = text.channel ?? "a channel";
@@ -231,7 +218,6 @@ const KINDS: Readonly<Record<number, Entry>> = {
   9003: admin,
   9004: admin,
   9005: {
-    plural: "message deletions",
     ability: "delete messages",
     // Any moderation tag turns the author's own deletion into a moderator's.
     action: (tags, text) =>
@@ -247,7 +233,6 @@ const KINDS: Readonly<Record<number, Entry>> = {
   },
   9006: admin,
   9007: {
-    plural: "channel creations",
     ability: "create channels",
     action: (tags, text) => {
       const type = first(tags, "channel_type") ?? "stream";
@@ -283,53 +268,45 @@ const KINDS: Readonly<Record<number, Entry>> = {
     ],
   },
   9008: {
-    plural: "channel deletions",
     ability: "delete channels",
     action: (_tags, text) => `delete ${text.channel ?? "a channel"}`,
     tags: ["h"],
   },
   9009: admin,
   9021: {
-    plural: "joins",
     ability: "join channels",
     action: (_tags, text) => `join ${text.channel ?? "a channel"}`,
     tags: ["h"],
   },
   9022: {
-    plural: "leaves",
     ability: "leave channels",
     action: (_tags, text) => `leave ${text.channel ?? "a channel"}`,
     tags: ["h"],
   },
   // Moderation acts on the whole community; any `h` is not read.
   9040: {
-    plural: "bans",
     ability: "ban people from the community",
     action: (tags, text) =>
       `ban ${text.people ?? "someone"} from the community${until(tags, " permanently")}`,
     tags: ["p", "expiration", "reason", "h"],
   },
   9041: {
-    plural: "unbans",
     ability: "unban people from the community",
     action: (_tags, text) => `unban ${text.people ?? "someone"}`,
     tags: ["p", "h"],
   },
   9042: {
-    plural: "timeouts",
     ability: "time out people in the community",
     action: (tags, text) =>
       `time out ${text.people ?? "someone"}${until(tags, "")}`,
     tags: ["p", "expiration", "reason", "h"],
   },
   9043: {
-    plural: "timeout removals",
     ability: "end timeouts in the community",
     action: (_tags, text) => `end the timeout for ${text.people ?? "someone"}`,
     tags: ["p", "h"],
   },
   9044: {
-    plural: "report resolutions",
     ability: "resolve reports",
     action: (tags) => {
       const action = first(tags, "action");
@@ -342,59 +319,26 @@ const KINDS: Readonly<Record<number, Entry>> = {
     },
     tags: ["report", "status", "action", "reason", "h"],
   },
-  10002: fixed(
-    "change your relay list",
-    "relay list changes",
-    "change your relay list",
-  ),
-  10100: fixed(
-    "change your agent profile",
-    "agent profile changes",
-    "change your agent profile",
-  ),
-  28936: fixed("leave the community", "community exits", "leave the community"),
-  30175: fixed("change a persona", "persona changes", "change personas"),
-  30176: fixed("change a team", "team changes", "change teams"),
-  30177: fixed(
-    "change a managed agent",
-    "managed agent changes",
-    "change managed agents",
-  ),
-  30179: fixed(
-    "change a managed agent",
-    "managed agent changes",
-    "change managed agents",
-  ),
-  30617: fixed(
-    "announce a repository",
-    "repository announcements",
-    "announce repositories",
-  ),
-  30618: fixed(
-    "update a repository’s state",
-    "repository updates",
-    "update repository state",
-  ),
-  30620: fixed("change a workflow", "workflow changes", "change workflows"),
-  30621: fixed("change a project", "project changes", "change projects"),
+  10002: fixed("change your relay list", "change your relay list"),
+  10100: fixed("change your agent profile", "change your agent profile"),
+  28936: fixed("leave the community", "leave the community"),
+  30175: fixed("change a persona", "change personas"),
+  30176: fixed("change a team", "change teams"),
+  30177: fixed("change a managed agent", "change managed agents"),
+  30179: fixed("change a managed agent", "change managed agents"),
+  30617: fixed("announce a repository", "announce repositories"),
+  30618: fixed("update a repository’s state", "update repository state"),
+  30620: fixed("change a workflow", "change workflows"),
+  30621: fixed("change a project", "change projects"),
   41011: {
-    plural: "DM additions",
     ability: "add people to DMs",
     action: (tags, text) =>
       `add ${text.people ?? "someone"} to a DM${first(tags, "history") === "include" ? " and show them its history" : ""}`,
     tags: ["h", "p", "history"],
   },
-  45011: fixed("remove an artifact", "artifact removals", "remove artifacts"),
-  46030: fixed(
-    "approve a workflow step",
-    "workflow approvals",
-    "approve workflow steps",
-  ),
-  46031: fixed(
-    "deny a workflow step",
-    "workflow denials",
-    "deny workflow steps",
-  ),
+  45011: fixed("remove an artifact", "remove artifacts"),
+  46030: fixed("approve a workflow step", "approve workflow steps"),
+  46031: fixed("deny a workflow step", "deny workflow steps"),
 };
 
 const channelLabel = (id: string, lookup: SignatureLookup) => {
@@ -436,7 +380,6 @@ export function describeSignature(
   if (!entry)
     return {
       action: `sign a kind ${kind} event`,
-      plural: `kind ${kind} events`,
       ability: `sign kind ${kind} events`,
     };
   const channelId = first(tags, "h");
@@ -456,7 +399,6 @@ export function describeSignature(
       other && !action.endsWith(" with other settings")
         ? `${action} with other settings`
         : action,
-    plural: entry.plural,
     ability: entry.ability,
   };
 }

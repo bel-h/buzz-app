@@ -277,21 +277,19 @@ it("marks a tag it does not put into words", () => {
   expect(describeSignature(0, [["x", "y"]]).action).toBe("change your profile");
 });
 
-it("describes every kind that can be asked, with a noun and a general ability", () => {
+it("describes every kind that can be asked, with a general ability", () => {
   const asked = [
     0, 3, 5, 9000, 9001, 9002, 9003, 9004, 9005, 9006, 9007, 9008, 9009, 9021,
     9022, 9040, 9041, 9042, 9043, 9044, 10002, 10100, 28936, 30175, 30176,
     30177, 30179, 30617, 30618, 30620, 30621, 41011, 45011, 46030, 46031,
   ];
   for (const kind of asked) {
-    const { action, plural, ability } = describeSignature(kind, []);
+    const { action, ability } = describeSignature(kind, []);
     expect(action, `${kind}`).not.toMatch(/kind/);
-    expect(plural, `${kind}`).not.toMatch(/kind/);
     expect(ability, `${kind}`).not.toMatch(/kind/);
   }
   expect(describeSignature(9022, [])).toEqual({
     action: "leave a channel",
-    plural: "leaves",
     ability: "leave channels",
   });
   expect(describeSignature(28936, []).action).toBe("leave the community");
@@ -306,7 +304,6 @@ it("describes every kind that can be asked, with a noun and a general ability", 
 it("falls back for a kind it does not know", () => {
   expect(describeSignature(31234, [["h", channel]], lookup)).toEqual({
     action: "sign a kind 31234 event",
-    plural: "kind 31234 events",
     ability: "sign kind 31234 events",
   });
 });

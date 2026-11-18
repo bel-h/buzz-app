@@ -159,7 +159,8 @@ function SigningDialog({
   onAnswer(answer: SignAnswer): void;
 }) {
   const deny = useRef<HTMLButtonElement>(null);
-  const { action, plural } = useDescription(relay, request);
+  const { action, ability } = useDescription(relay, request);
+  const span = duration(request.windowSeconds);
   return (
     <AlertDialog
       title={
@@ -170,6 +171,8 @@ function SigningDialog({
       description={
         <>
           Buzz signs this as you on <strong>{request.relay}</strong>.
+          {request.windowSeconds > 0 &&
+            ` Allow for ${span} lets ${request.client} ${ability} without asking again.`}
         </>
       }
       initialFocus={deny}
@@ -180,9 +183,7 @@ function SigningDialog({
             Deny
           </Button>
           {request.windowSeconds > 0 && (
-            <Button onClick={() => onAnswer("window")}>
-              Allow {plural} for {duration(request.windowSeconds)}
-            </Button>
+            <Button onClick={() => onAnswer("window")}>Allow for {span}</Button>
           )}
           <Button variant="prominent" onClick={() => onAnswer("once")}>
             Allow once

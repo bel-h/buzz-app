@@ -53,13 +53,13 @@ const SENSITIVE: &[u16] = &[
 /// grants privilege or is hard to undo, and names one target, so a window
 /// for the kind would allow far more than the target the human saw.
 /// Deletions (5, 9005), member additions and removals (9000, 9001), channel
-/// deletion (9008), bans and timeouts (9040, 9042), leaving the community
-/// (28936), agent and team management (30175–30177, 30179), workflow
+/// edits, which can open a private channel (9002), channel deletion (9008),
+/// bans, unbans and timeouts (9040–9042), leaving the community (28936), agent and team management (30175–30177, 30179), workflow
 /// authority and step decisions (30620, 46030, 46031), DM additions (41011)
 /// and artifact removal (45011).
 const ONCE_ONLY: &[u16] = &[
-    5, 9000, 9001, 9005, 9008, 9040, 9042, 28936, 30175, 30176, 30177, 30179, 30620, 41011, 45011,
-    46030, 46031,
+    5, 9000, 9001, 9002, 9005, 9008, 9040, 9041, 9042, 28936, 30175, 30176, 30177, 30179, 30620,
+    41011, 45011, 46030, 46031,
 ];
 
 /// Whether the human may allow a sensitive `kind` for a while, not just once.

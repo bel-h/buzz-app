@@ -526,9 +526,13 @@ async fn a_caller_that_hangs_up_closes_its_prompt() {
         tokio::time::sleep(Duration::from_millis(5)).await;
     }
     assert!(closed(&fixture, &request.id));
-    // Its slot is free: the same tool may ask again at once.
-    let pending = sign(&fixture, &token, leave());
+    // Hanging up is no way around the wait after a deny.
+    let again = ask(&fixture, &token, "sign_event", &[&leave()]).await;
+    assert_eq!(error(&again).1, "rate_limited");
+    let other = paired(&fixture).await;
+    let pending = sign(&fixture, &other, leave());
     let next = sign_asked(&fixture).await;
+    assert_ne!(next.id, request.id);
     answer(&fixture, &next.id, Answer::Deny);
     pending.await.unwrap();
 }
@@ -595,4 +599,46 @@ async fn a_declined_tool_may_ask_again_once_it_has_waited() {
     assert_ne!(next.id, request.id);
     answer(&fixture, &next.id, Answer::Once);
     signed(&pending.await.unwrap());
+}
+
+/// Asks from `token` and gives `reply`.
+async fn asked(fixture: &Fixture, token: &str, reply: Answer) -> (StatusCode, Value) {
+    let pending = sign(fixture, token, leave());
+    let request = sign_asked(fixture).await;
+    answer(fixture, &request.id, reply);
+    pending.await.unwrap()
+}
+
+#[tokio::test]
+async fn each_deny_in_a_row_makes_a_tool_wait_longer_until_one_is_allowed() {
+    let fixture = fixture();
+    let token = paired(&fixture).await;
+    tokio::time::pause();
+    let retry = || async {
+        let reply = ask(&fixture, &token, "sign_event", &[&leave()]).await;
+        assert_eq!(error(&reply).1, "rate_limited");
+        reply.1["retry_after"].as_u64().unwrap()
+    };
+    asked(&fixture, &token, Answer::Deny).await;
+    assert!((1..=30).contains(&retry().await));
+    tokio::time::advance(Duration::from_secs(31)).await;
+    asked(&fixture, &token, Answer::Deny).await;
+    assert!((31..=60).contains(&retry().await));
+    tokio::time::advance(Duration::from_secs(61)).await;
+    signed(&asked(&fixture, &token, Answer::Once).await);
+    asked(&fixture, &token, Answer::Deny).await;
+    assert!((1..=30).contains(&retry().await));
+}
+
+#[tokio::test]
+async fn a_window_that_has_lapsed_allows_nothing() {
+    let fixture = fixture();
+    let token = paired(&fixture).await;
+    window(&fixture, &token).await;
+    fixture.service.0.pairings.age_windows(300);
+    let pending = sign(&fixture, &token, leave());
+    let request = sign_asked(&fixture).await;
+    assert_eq!(sign_requests(&fixture).len(), 2);
+    answer(&fixture, &request.id, Answer::Deny);
+    assert_eq!(error(&pending.await.unwrap()).1, "denied");
 }
