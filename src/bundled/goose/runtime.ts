@@ -31,6 +31,11 @@ import {
 } from "../../features/agents/service";
 import { workflowOf } from "../../features/agents/owner-attestation";
 import {
+  agentFolders,
+  conversationFolder,
+  existingFolder,
+} from "../../features/agents/conversation-folders";
+import {
   ownerReads,
   readyOwnerReads,
   workflowMarked,
@@ -160,6 +165,9 @@ type Entry = {
   handle?: AgentHandle;
   /** Where each conversation's tools default to: its latest turn's thread. */
   contexts: Map<string, Context>;
+  /** The folder each conversation's latest session started in, when a
+   * plugin gave it one: its file reads use it while Buzz reconnects. */
+  folders: Map<string, string>;
   policies: Map<
     string,
     {
@@ -220,6 +228,22 @@ export class GooseRuntime {
   /** What each of the agent's sessions started with. */
   prompts(agent: AgentKey) {
     return sessionPrompts(this.agentStore, "goose", agent);
+  }
+
+  /** Every folder a plugin gave the agent's conversations, by conversation. */
+  folders(agent: AgentKey): ReadonlyMap<string, string> {
+    const scope = ownerReads(this.relay(agent), pubkeyOf(agent))?.scope;
+    return scope ? agentFolders(this.agentStore, scope, agent) : new Map();
+  }
+  /** The folder a plugin gave the conversation, if any; a one-off turn has
+   * none. */
+  private folder(agent: AgentKey, key: string | undefined) {
+    if (!key) return undefined;
+    const reads = ownerReads(this.relay(agent), pubkeyOf(agent));
+    if (!reads) throw new Error("Buzz is not connected");
+    return reads.scope
+      ? conversationFolder(this.agentStore, reads.scope, agent, key)
+      : undefined;
   }
 
   /** A file as the agent's sessions read one: in its saved workspace. */
@@ -325,6 +349,11 @@ export class GooseRuntime {
       this.views.set(agent, view);
     }
     return view;
+  }
+  /** Resolves once `sessions` lists each conversation whose session is
+   * opening now. */
+  async listed(agent: AgentKey) {
+    await this.agents.get(agent)?.sessions.opened();
   }
   /** A person's name in the agent's community, if known. */
   name(agent: AgentKey, pubkey: string) {
@@ -792,7 +821,11 @@ export class GooseRuntime {
                   session.channelWrites.startingCanvas(channelId),
                 )
             : undefined,
-          worksElsewhere(undefined, entry.handle?.promptSections?.(channelId)),
+          worksElsewhere(
+            // A Solo chat is one conversation.
+            session ? this.folder(agent.key, channelId) : undefined,
+            entry.handle?.promptSections?.(channelId),
+          ),
         )
       : Promise.resolve(undefined);
     const threadRead = (thread || (resumed && !dm)) && !topLevel;
@@ -885,6 +918,7 @@ export class GooseRuntime {
         () => entry.handle,
       ),
       contexts: new Map(),
+      folders: new Map(),
       policies: new Map(),
     };
     // Every session of the agent shares them, so they read the settings, the
@@ -925,16 +959,24 @@ export class GooseRuntime {
           relayAuthor: this.relay(agent)?.snapshot().session.relayAuthor,
           signingAuthority:
             this.relay(agent)?.snapshot().session.workflowAuthority,
-          read: (path) =>
-            handle.protection
+          read: (path) => {
+            // Relative to where the conversation's session runs. While Buzz
+            // reconnects, that is the folder its session started in.
+            const cwd =
+              (ownerReads(this.relay(agent), pubkeyOf(agent))
+                ? this.folder(agent, conversation)
+                : conversation && entry.folders.get(conversation)) ||
+              entry.config.workspace;
+            return handle.protection
               ? readFile(
                   this.desktop.spawn,
-                  entry.config.workspace,
+                  cwd,
                   path,
                   undefined,
                   handle.protection.processProtection,
                 )
-              : this.desktop.readFile(path, { cwd: entry.config.workspace }),
+              : this.desktop.readFile(path, { cwd });
+          },
           memories: (slug) => this.memories(agent, slug),
           remembered: () => this.forget(agent),
         });
@@ -1004,11 +1046,22 @@ export class GooseRuntime {
       launch: async (conversation) => {
         const { workspace, instructions, scope } = entry.config;
         const memory = await this.core(agent);
+        // A conversation given its own folder starts there, and the folder
+        // must still exist; the agent's workspace stays its home.
+        const assigned = this.folder(agent, conversation);
+        const { resolveDirectory } = this.desktop;
+        if (conversation && assigned) entry.folders.set(conversation, assigned);
+        const cwd = assigned
+          ? await existingFolder(resolveDirectory, assigned)
+          : workspace;
         return {
-          workspace,
+          workspace: cwd,
           systemPrompt: systemPrompt({
             scope,
-            cwd: workspace,
+            cwd,
+            ...(assigned
+              ? { workspace: await resolveDirectory(workspace) }
+              : {}),
             repositories: this.repositories(
               this.relay(agent)?.snapshot().scope,
             ),
