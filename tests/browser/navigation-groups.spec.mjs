@@ -1109,24 +1109,27 @@ scrollTest(
     const countStartup = (request) => {
       if (primaryDecoder(new URL(request.url()))) startupDecodes++;
     };
-    page.on("request", countStartup);
-    await open(page, app);
     const sidebar = page.getByRole("navigation", {
       name: "Subscribed channels",
     });
-    const workGroup = sidebar.locator("summary", { hasText: /^Work$/ });
-    // Open Secondary explicitly so its deferred startup cannot race the trap.
-    await selectCommunity(page, "Secondary");
-    await expect(workGroup).toBeVisible();
-    await selectCommunity(page, "Primary");
-    await expect(workGroup).toBeVisible();
-    await expect(
-      sidebar.locator("summary", { hasText: /Starred$/ }),
-    ).toBeVisible();
-    page.off("request", countStartup);
+    page.on("request", countStartup);
+    try {
+      await open(page, app);
+      const workGroup = sidebar.locator("summary", { hasText: /^Work$/ });
+      // Open Secondary explicitly so its deferred startup cannot race the trap.
+      await selectCommunity(page, "Secondary");
+      await expect(workGroup).toBeVisible();
+      await selectCommunity(page, "Primary");
+      await expect(workGroup).toBeVisible();
+      await expect(
+        sidebar.locator("summary", { hasText: /Starred$/ }),
+      ).toBeVisible();
+    } finally {
+      page.off("request", countStartup);
+    }
     expect(
       startupDecodes,
-      "Primary's saved groups came through the held decoder",
+      "primaryDecoder matched Primary's startup decode",
     ).toBeGreaterThan(0);
     await sidebar.locator('button[data-channel-id="beta"]').click();
     await expect(
@@ -1149,30 +1152,32 @@ scrollTest(
       release = resolve;
     });
     let decodes = 0;
-    await page.route(primaryDecoder, async (route) => {
-      decodes++;
-      await held;
-      await route.continue();
-    });
-    await page.evaluate(() => {
-      window.sidebarFrames = [];
-      window.captureSidebar = true;
-      const frame = () => {
-        const list = document.querySelector(
-          'nav[aria-label="Subscribed channels"]',
-        );
-        if (list?.checkVisibility())
-          window.sidebarFrames.push({
-            top: list.scrollTop,
-            groups: Array.from(list.querySelectorAll("summary"), (el) =>
-              el.textContent.replace("★", "").trim(),
-            ),
-          });
-        if (window.captureSidebar) requestAnimationFrame(frame);
-      };
-      requestAnimationFrame(frame);
-    });
     try {
+      // Held inside the try: if capture setup throws, finally still releases
+      // a held Primary decode instead of leaving its handler waiting forever.
+      await page.route(primaryDecoder, async (route) => {
+        decodes++;
+        await held;
+        await route.continue();
+      });
+      await page.evaluate(() => {
+        window.sidebarFrames = [];
+        window.captureSidebar = true;
+        const frame = () => {
+          const list = document.querySelector(
+            'nav[aria-label="Subscribed channels"]',
+          );
+          if (list?.checkVisibility())
+            window.sidebarFrames.push({
+              top: list.scrollTop,
+              groups: Array.from(list.querySelectorAll("summary"), (el) =>
+                el.textContent.replace("★", "").trim(),
+              ),
+            });
+          if (window.captureSidebar) requestAnimationFrame(frame);
+        };
+        requestAnimationFrame(frame);
+      });
       await openPage(page, "Messages");
       await expect(sidebar).toBeVisible();
       await expect(
