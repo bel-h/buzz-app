@@ -19,6 +19,7 @@ import {
   type PullData,
 } from "./pull";
 import { parseGitHubReference } from "./references";
+import type { RememberedStates } from "./remembered-states";
 
 /** How often shown pull requests that can change are read again. */
 export const PULL_REFRESH_MS = 60_000;
@@ -761,8 +762,15 @@ const allText: WantsText = () => true;
  *
  * A read asked for joins the next one, shown or not, unless what is held is
  * recent enough. What a level adds is held while someone asks for it; a pull
- * request nobody watches or asks for is forgotten after a while. */
-export function createPullStates(gh: GitHubCli | undefined): PullStates {
+ * request nobody watches or asks for is forgotten after a while.
+ *
+ * With `remembered`, a link shows what was last read of it, also in an
+ * earlier session, until it is read again; agents and the panel see only
+ * what this store read. */
+export function createPullStates(
+  gh: GitHubCli | undefined,
+  { remembered }: Readonly<{ remembered?: RememberedStates }> = {},
+): PullStates {
   const listeners = new Map<string, Set<Listener>>();
   const states = new Map<string, PullState | "failed">();
   /** Why each that could not be read last time could not. */
@@ -771,9 +779,20 @@ export function createPullStates(gh: GitHubCli | undefined): PullStates {
   const unreadable = new Set<string>();
   /** When each state held was read. */
   const readAt = new Map<string, number>();
+  /** What links show of `url`: what was read, or else what was remembered. */
+  const shown = (url: string) => states.get(url) ?? remembered?.get(url);
   /** When each was last polled, read or not, so it is due again its
    * readers' interval after, and a public poll takes the longest unpolled. */
   const polledAt = new Map<string, number>();
+  /** When `url` was polled, or else read before, when it was remembered:
+   * a merged one is then not read again, and one read a moment ago waits
+   * its turn. */
+  const lastPolled = (url: string) => {
+    const polled = polledAt.get(url);
+    if (polled !== undefined || states.has(url)) return polled;
+    const before = remembered?.readAt(url);
+    return before === undefined ? undefined : Math.min(before, Date.now());
+  };
   /** Not polled again before then: after GitHub answered for none, or while
    * a public read is not yet earned. */
   const notBefore = new Map<string, number>();
@@ -839,7 +858,7 @@ export function createPullStates(gh: GitHubCli | undefined): PullStates {
     );
   /** How often `url`'s readers want it read now: the most often any does. */
   const interval = (url: string) => {
-    const state = states.get(url);
+    const state = shown(url);
     const when = {
       hidden: document.visibilityState !== "visible",
       public: readsPublic(),
@@ -854,7 +873,7 @@ export function createPullStates(gh: GitHubCli | undefined): PullStates {
   /** When watched `url` is next due: at once when never polled or lacking a
    * level, else its readers' interval after it was last polled. */
   const dueAt = (url: string) => {
-    const polled = polledAt.get(url);
+    const polled = lastPolled(url);
     return Math.max(
       polled === undefined || needed.has(url) ? 0 : polled + interval(url),
       notBefore.get(url) ?? 0,
@@ -937,12 +956,13 @@ export function createPullStates(gh: GitHubCli | undefined): PullStates {
         }
     // A public poll reads only as many as it can spend: those asked for go
     // first, then the longest unpolled, so those that keep failing cannot
-    // keep one never read waiting.
+    // keep one never read waiting, and one remembered waits for those that
+    // show nothing yet.
     const due = [
       ...asked.keys(),
       ...[...listeners.keys()]
         .filter((url) => !asked.has(url) && dueAt(url) <= now)
-        .sort((a, b) => (polledAt.get(a) ?? 0) - (polledAt.get(b) ?? 0)),
+        .sort((a, b) => (lastPolled(a) ?? 0) - (lastPolled(b) ?? 0)),
     ];
     const at = (url: string, level: PullLevel) =>
       !!asked.get(url)?.levels.has(level) || watchedAt(url, level);
@@ -1009,6 +1029,8 @@ export function createPullStates(gh: GitHubCli | undefined): PullStates {
       if (current.signal.aborted) return;
       const changed: string[] = [];
       const failing: string[] = [];
+      const read: [string, PullState][] = [];
+      const lost: string[] = [];
       for (const [i, url] of reading.entries()) {
         // Those a public poll could not afford wait for the next read earned,
         // all together, so the longest unread of them takes it whenever each
@@ -1045,6 +1067,10 @@ export function createPullStates(gh: GitHubCli | undefined): PullStates {
           unreadable.delete(url);
         }
         if (error?.message !== failed) failing.push(url);
+        // GitHub answered for others but not this one, so it is gone or
+        // out of reach: links show it unavailable rather than as it was.
+        if (!error) read.push([url, state as PullState]);
+        else if (state === "failed") lost.push(url);
         const at = readAt.get(url) ?? now;
         for (const { resolve } of asked.get(url)?.waiting ?? [])
           resolve({ state, readAt: at, error });
@@ -1054,6 +1080,8 @@ export function createPullStates(gh: GitHubCli | undefined): PullStates {
         states.set(url, state);
         changed.push(url);
       }
+      remembered?.remember(read, now);
+      remembered?.forget(lost);
       notify(changed, failing);
       reason = new GitHubRateLimited(publicEarnedTo + PUBLIC_READ_EARNED_MS);
     } catch (error) {
@@ -1180,7 +1208,7 @@ export function createPullStates(gh: GitHubCli | undefined): PullStates {
       set.add(listener);
       // What was polled within its readers' interval is kept, unless it lacks
       // what this level adds.
-      if (!holds(states.get(url), level)) needed.add(url);
+      if (!holds(shown(url), level)) needed.add(url);
       if (dueAt(url) <= Date.now()) schedule();
       else if (!controller) later();
       return () => {
@@ -1207,7 +1235,7 @@ export function createPullStates(gh: GitHubCli | undefined): PullStates {
     },
     get(url) {
       const key = keyOf(url);
-      return key ? states.get(key) : "failed";
+      return key ? shown(key) : "failed";
     },
     readAt(url) {
       const key = keyOf(url);

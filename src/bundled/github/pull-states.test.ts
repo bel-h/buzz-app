@@ -13,6 +13,7 @@ import {
   PULL_SLOW_REFRESH_MS,
   PULLS_PER_READ,
 } from "./pull-states";
+import { createRememberedStates } from "./remembered-states";
 
 const pull = "https://github.com/block/buzz-app/pull/7";
 const second = "https://github.com/block/buzz/pull/9";
@@ -1998,4 +1999,81 @@ it("reads a pull request a panel and a watch share without gh once, not again an
   // The pull request and its two kinds of checks, once; public data has no
   // feedback to read again for.
   expect(fetch).toHaveBeenCalledTimes(3);
+});
+
+it("shows what was remembered of a link at once, reads it again in the background, and remembers that", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+  const remembered = createRememberedStates(null);
+  const now = Date.now();
+  remembered.remember(
+    [
+      [pull, { state: "open", title: "Old title" }],
+      [second, { state: "merged", title: "Shipped" }],
+    ],
+    now - PULL_REFRESH_MS * 10,
+  );
+  remembered.remember([[third, { state: "open", title: "Just read" }]], now);
+  const gh = mockGh(async () => ({
+    r0: rollup("OPEN", { title: "New title" }),
+  }));
+  const states = createPullStates(gh, { remembered });
+  const stop = [pull, second, third].map((url) => states.watch(url, () => {}));
+  try {
+    expect(states.get(pull)).toEqual({ state: "open", title: "Old title" });
+    expect(states.get(second)).toEqual({ state: "merged", title: "Shipped" });
+    // Agents and the panel see only what was read this session.
+    expect(states.readAt(pull)).toBeUndefined();
+    await vi.waitFor(() =>
+      expect(states.get(pull)).toMatchObject({ title: "New title" }),
+    );
+    // The merged one stays merged, and the one read a moment ago waits its
+    // turn.
+    expect(gh).toHaveBeenCalledOnce();
+    expect(gh.mock.calls[0]?.[1]).toEqual({
+      o0: "block",
+      n0: "buzz-app",
+      p0: 7,
+    });
+    expect(remembered.get(pull)).toMatchObject({ title: "New title" });
+    await vi.advanceTimersByTimeAsync(PULL_REFRESH_MS);
+    expect(gh).toHaveBeenCalledTimes(2);
+    expect(Object.values(gh.mock.calls[1]?.[1] as Variables)).toContain(
+      "goose",
+    );
+  } finally {
+    for (const unwatch of stop) unwatch();
+  }
+});
+
+it("keeps showing what was remembered while GitHub is out of reach, but not one GitHub can no longer read", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+  const remembered = createRememberedStates(null);
+  remembered.remember(
+    [
+      [pull, { state: "open", title: "Kept" }],
+      [second, { state: "open", title: "Gone" }],
+    ],
+    0,
+  );
+  let down = true;
+  const gh = mockGh(async () => {
+    if (down) throw new GitHubError("HTTP 502");
+    return { r0: rollup("OPEN", { title: "Kept" }), r1: null };
+  });
+  const states = createPullStates(gh, { remembered });
+  const stop = [pull, second].map((url) => states.watch(url, () => {}));
+  try {
+    // An agent asking is not given what was remembered as read.
+    await expect(states.read(pull, { maxAge: 0 })).rejects.toThrow("HTTP 502");
+    expect(states.get(pull)).toEqual({ state: "open", title: "Kept" });
+    expect(states.readAt(pull)?.readAt).toBeUndefined();
+
+    down = false;
+    await vi.advanceTimersByTimeAsync(PULL_SLOW_REFRESH_MS);
+    expect(states.get(pull)).toMatchObject({ state: "open", title: "Kept" });
+    expect(states.get(second)).toBe("failed");
+    expect(remembered.get(second)).toBeUndefined();
+  } finally {
+    for (const unwatch of stop) unwatch();
+  }
 });
