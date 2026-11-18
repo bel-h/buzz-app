@@ -105,11 +105,14 @@ it.each(["dismiss", "dispose"])(
     store.save([{ event, signed: event, delivery: "failed" }]);
     const reading = gate();
     const resume = gate();
+    // Holds only recovery's read; dismissal reads the journal too.
+    let held = false;
     const h = setup({
       ...store,
       async load(options) {
         const records = store.load();
-        if (options?.readOnly) {
+        if (options?.readOnly && !held) {
+          held = true;
           reading.release();
           await resume.promise;
         }

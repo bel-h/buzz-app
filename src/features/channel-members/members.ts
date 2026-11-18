@@ -291,6 +291,10 @@ async function addOneMember(
   ) {
     await outbox.dismiss(pending.event.id);
     check();
+    if (journal.snapshot().some((item) => item.event.id === pending.event.id))
+      throw new Error(
+        "This addition is still in progress. Try again when it finishes.",
+      );
     intent.dismissed = true;
     return addOneMember(
       session,

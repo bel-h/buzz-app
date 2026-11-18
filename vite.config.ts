@@ -203,6 +203,8 @@ export default defineConfig(async ({ command, mode }) => {
     resolve: { alias: [entityDecoderAlias] },
     define: {
       "import.meta.env.VITE_BUZZ_LIVE": JSON.stringify(live ? "1" : "0"),
+      // Only the browser test build opts in to Diagnostics.
+      "import.meta.env.VITE_BUZZ_TEST_DIAGNOSTICS": '"0"',
       "import.meta.env.VITE_BUZZ_NOTIFICATIONS_PAUSED": JSON.stringify(
         command === "serve" && env.BUZZ_DEV_NOTIFICATIONS === "0" ? "1" : "0",
       ),

@@ -314,6 +314,7 @@ export function ConversationComposer(props: Own<MessageComposerProps>) {
     <>
       {shared.session.outbox && !props.threadRootId && (
         <AdminSetupRecovery
+          key={shared.channelId}
           outbox={shared.session.outbox}
           channelId={shared.channelId}
         />

@@ -546,6 +546,45 @@ it.each(["parent", "child"] as const)(
     }
   },
 );
+it.each([false, true])(
+  "settles an expired unconfirmed invitation from the roster (applied: %s)",
+  async (applied) => {
+    const test = setup("private", "owner");
+    try {
+      await test.ready();
+      vi.spyOn(Date, "now").mockReturnValue(1_700_000_000_000);
+      const publishAgent = test.publish.getMockImplementation();
+      test.publish.mockImplementationOnce(async (event) => {
+        if (applied) await publishAgent?.(event);
+        throw new Error("Connection lost");
+      });
+      await expect(
+        test.owner.session.channelWrites.addAgents(test.parent, [test.agent]),
+      ).rejects.toThrow();
+      const original = test.publish.mock.calls[0]?.[0];
+      const outbox = test.owner.session.outbox;
+      expect(
+        outbox?.snapshot().find((item) => item.event.id === original?.id)
+          ?.delivery,
+      ).toBe("unknown");
+      vi.mocked(Date.now).mockReturnValue(1_700_000_901_000);
+      await test.owner.session.channelWrites.addAgents(test.parent, [
+        test.agent,
+      ]);
+      expect(test.publish).toHaveBeenCalledTimes(applied ? 1 : 2);
+      if (!applied)
+        expect(
+          outbox?.snapshot().some((item) => item.event.id === original?.id),
+        ).toBe(false);
+      expect(test.owner.session.channels.get?.(test.parent)?.members).toContain(
+        test.agent,
+      );
+    } finally {
+      vi.restoreAllMocks();
+      test.owner.dispose();
+    }
+  },
+);
 it("rechecks agent eligibility before replacing an expired failed invitation", async () => {
   const test = setup();
   try {

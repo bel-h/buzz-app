@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -9,7 +10,6 @@ import {
   within,
 } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
-import { ToastProvider } from "../../shared/design-system/ui/Toast";
 import type { Delivery, Outbox, OutgoingEvent } from "../relay/outbox";
 import { soloAdminRecovery } from "../relay/solo-admins";
 import { AdminSetupRecovery } from "./AdminSetupRecovery";
@@ -65,67 +65,61 @@ function show(
       for (const listener of listeners) listener();
     }),
   } as unknown as Outbox;
-  render(
-    <ToastProvider>
-      <AdminSetupRecovery outbox={outbox} channelId={chat} />
-    </ToastProvider>,
-  );
-  return outbox;
+  render(<AdminSetupRecovery outbox={outbox} channelId={chat} />);
+  return {
+    outbox,
+    update(next: OutgoingEvent[]) {
+      current = next;
+      act(() => {
+        for (const listener of listeners) listener();
+      });
+    },
+  };
 }
 
+const abandon = () =>
+  screen.queryByRole("button", { name: "Abandon admin setup" });
+
 it.each([
-  ["setup still sending", records("sending", "failed")],
-  ["opening message sent", records("accepted", "accepted")],
-  ["another chat's setup", records("accepted", "failed", "other")],
-])("offers no abandonment with %s", async (_, items) => {
+  [true, records("accepted", "failed")],
+  [true, records("seen", "unknown")],
+  [false, records("sending", "failed")],
+  [false, records("accepted", "sending")],
+  [false, records("accepted", "failed", "other")],
+])("shows only for this chat's blocked setup (%s)", (shown, items) => {
   show(items);
-  await new Promise((resolve) => setTimeout(resolve));
-  expect(
-    screen.queryByRole("button", { name: "Abandon admin setup" }),
-  ).not.toBeInTheDocument();
+  expect(!!abandon()).toBe(shown);
 });
 
-it.each(["failed", "unknown"] as const)(
-  "abandons a blocked setup from the chat when its opening message is %s",
-  async (opening) => {
-    const outbox = show(records("seen", opening));
-    fireEvent.click(
-      await screen.findByRole("button", { name: "Abandon admin setup" }),
-    );
-    const confirmation = screen.getByRole("alertdialog", {
-      name: "Abandon admin setup?",
-    });
-    fireEvent.click(
-      within(confirmation).getByRole("button", {
-        name: "Abandon admin setup",
-      }),
-    );
-    await waitFor(() =>
-      expect(
-        screen.queryByRole("button", { name: "Abandon admin setup" }),
-      ).not.toBeInTheDocument(),
-    );
-    expect(outbox.dismiss).toHaveBeenCalledWith("create", recovery);
-  },
-);
+it("keeps Abandon while a Retry of the opening message waits on setup", () => {
+  const view = show(records("accepted", "failed"));
+  view.update(records("accepted", "sending"));
+  expect(abandon()).toBeVisible();
+  view.update(records("accepted", "accepted").slice(1));
+  expect(abandon()).not.toBeInTheDocument();
+});
 
-it("keeps the setup and explains a failed abandonment", async () => {
-  show(
+it.each([
+  ["retires the setup", undefined],
+  ["keeps the setup and explains", "Storage unavailable"],
+])("abandoning %s", async (_, failure) => {
+  const { outbox } = show(
     records("accepted", "failed"),
     vi.fn<Outbox["dismiss"]>(async () => {
-      throw new Error("Storage unavailable");
+      if (failure) throw new Error(failure);
     }),
   );
-  fireEvent.click(
-    await screen.findByRole("button", { name: "Abandon admin setup" }),
-  );
+  fireEvent.click(abandon() as HTMLElement);
   const confirmation = screen.getByRole("alertdialog", {
     name: "Abandon admin setup?",
   });
   fireEvent.click(
     within(confirmation).getByRole("button", { name: "Abandon admin setup" }),
   );
-  expect(await within(confirmation).findByRole("alert")).toHaveTextContent(
-    "Storage unavailable",
-  );
+  expect(outbox.dismiss).toHaveBeenCalledWith("create", recovery);
+  if (failure)
+    expect(await within(confirmation).findByRole("alert")).toHaveTextContent(
+      failure,
+    );
+  else await waitFor(() => expect(abandon()).not.toBeInTheDocument());
 });

@@ -1549,3 +1549,41 @@ it("restores an entry saved before held sends existed and retries it as before",
   await flush();
   expect(h.publications.map(({ event }) => event.id)).toEqual([event.id]);
 });
+
+it("refuses to remove an unsent item another window has since delivered", async () => {
+  const viewer = keypair();
+  const event = signed(viewer, { kind: 9, tags: [["h", "c"]], content: "x" });
+  let records: OutgoingEvent[] = [{ event, signed: event, delivery: "failed" }];
+  const owner = createOutbox(
+    viewer.pubkey,
+    {
+      sign: async () => {
+        throw new Error("No sign expected");
+      },
+      publish: async () => {
+        throw new Error("No publish expected");
+      },
+    },
+    {
+      load: () => records,
+      save: (next) => {
+        records = [...next];
+      },
+    },
+  );
+  try {
+    await owner.ready;
+    records = [{ event, signed: event, delivery: "accepted" }];
+    await expect(owner.outbox.dismiss(event.id)).rejects.toThrow(
+      "changed in another window",
+    );
+    expect(records).toHaveLength(1);
+    expect(owner.outbox.snapshot()).toHaveLength(1);
+    records = [{ event, signed: event, delivery: "failed" }];
+    await owner.outbox.dismiss(event.id);
+    expect(records).toEqual([]);
+    expect(owner.outbox.snapshot()).toEqual([]);
+  } finally {
+    owner.dispose();
+  }
+});

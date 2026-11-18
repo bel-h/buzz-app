@@ -6,9 +6,9 @@ import {
 } from "react";
 import { AlertDialog } from "../../shared/design-system/ui/AlertDialog";
 import { Button } from "../../shared/design-system/ui/Button";
-import { ToastNotice } from "../../shared/design-system/ui/Toast";
 import type { Outbox, OutboxRecovery, OutgoingEvent } from "../relay/outbox";
 import { soloAdminSetup } from "../relay/solo-admins";
+import styles from "./AdminSetupRecovery.module.css";
 
 export type AbandonableSetup = { id: string; recovery: OutboxRecovery };
 
@@ -75,7 +75,8 @@ export function AbandonAdminSetupDialog({
 const channelOf = (item: OutgoingEvent) =>
   item.event.tags.find(([tag]) => tag === "h")?.[1];
 
-/** Offers abandonment in the chat whose opening message setup is blocking. */
+/** Offers abandonment in the chat whose opening message setup is blocking,
+ * including while a Retry of that message waits on setup. */
 export function AdminSetupRecovery({
   outbox,
   channelId,
@@ -89,7 +90,7 @@ export function AdminSetupRecovery({
     outbox.snapshot,
   ).filter((item) => channelOf(item) === channelId);
   const [abandoning, setAbandoning] = useState<AbandonableSetup>();
-  const opener = useRef<HTMLButtonElement>(null);
+  const [stalled, setStalled] = useState<string>();
   const setup = items.flatMap((item) => {
     const recovery = abandonableSetup(item);
     return recovery ? [{ id: item.event.id, recovery }] : [];
@@ -99,32 +100,34 @@ export function AdminSetupRecovery({
       item.event.kind === 9 &&
       (item.delivery === "failed" || item.delivery === "unknown"),
   );
-  if (!setup || !blocked) return null;
+  if (setup && blocked && stalled !== setup.id) setStalled(setup.id);
+  if (!setup || (!blocked && stalled !== setup.id)) return null;
   return (
-    <>
-      <ToastNotice
-        title="Chat admin setup didn’t finish"
-        description="Retry your opening message, or abandon setup to keep the chat’s current roles."
-      >
-        <Button
-          ref={opener}
-          type="button"
-          size="sm"
-          onClick={() => setAbandoning(setup)}
-        >
-          Abandon admin setup
-        </Button>
-      </ToastNotice>
+    <section
+      role="status"
+      aria-label="Chat admin setup didn’t finish"
+      className={styles.recovery}
+    >
+      <div className={styles.message}>
+        <p className="text-label-sm text-warning">
+          Chat admin setup didn’t finish
+        </p>
+        <p className="text-body-sm text-subtle">
+          Retry your opening message, or abandon setup to keep the chat’s
+          current roles.
+        </p>
+      </div>
+      <Button type="button" size="sm" onClick={() => setAbandoning(setup)}>
+        Abandon admin setup
+      </Button>
       {abandoning && (
         <AbandonAdminSetupDialog
           outbox={outbox}
           setup={abandoning}
-          finalFocus={() =>
-            opener.current?.isConnected ? opener.current : null
-          }
+          finalFocus
           onClose={() => setAbandoning(undefined)}
         />
       )}
-    </>
+    </section>
   );
 }

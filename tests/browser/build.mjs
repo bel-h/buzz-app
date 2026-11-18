@@ -24,6 +24,7 @@ export async function buildApp(
     localAgentActivity,
     pairingFixture,
     startupFailureFixture,
+    diagnostics,
   },
   use,
 ) {
@@ -99,7 +100,9 @@ export async function buildApp(
           : {}),
         ...(developmentReact ? { "import.meta.env.DEV": "true" } : {}),
         "import.meta.env.VITE_BUZZ_LIVE": '"1"',
-        "import.meta.env.VITE_BUZZ_TEST_DIAGNOSTICS": '"1"',
+        "import.meta.env.VITE_BUZZ_TEST_DIAGNOSTICS": diagnostics
+          ? '"1"'
+          : '"0"',
         "import.meta.env.VITE_BUZZ_TEST_RESUME_AGENTS": JSON.stringify(
           localAgentActivity === "resumable",
         ),

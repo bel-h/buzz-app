@@ -1221,7 +1221,25 @@ export function createOutbox(
               : "Confirm this message in New message before removing it",
           ),
         );
-      const remove = () => persist(id, "dismiss");
+      const remove = async () => {
+        // Another window may have retried what this one still shows as unsent.
+        if (item?.delivery === "failed" || item?.delivery === "unknown") {
+          await durable.catch(() => {});
+          const shared = (await storage.load({ readOnly: true })).find(
+            (stored) => stored.event.id === id,
+          );
+          // Stored delivery other than seen or failed restores as unknown.
+          const stored =
+            shared?.delivery === "seen" || shared?.delivery === "failed"
+              ? shared.delivery
+              : "unknown";
+          if (shared && stored !== item.delivery)
+            throw new Error(
+              "This item changed in another window. Check it again before removing it.",
+            );
+        }
+        return persist(id, "dismiss");
+      };
       const work = (
         owner ? withRecovery(id, owner, remove, true) : locked(id, remove)
       )
