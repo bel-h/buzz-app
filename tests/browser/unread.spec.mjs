@@ -301,7 +301,7 @@ test("focus cancellation and local manual-unread survive reload until explicit m
   await options(page);
   await page
     .getByRole("button", {
-      name: "Mark read through loaded messages",
+      name: "Mark as read through loaded messages",
       exact: true,
     })
     .click();
@@ -453,7 +453,7 @@ test.describe("explicit mark-through with membership activity", () => {
         const before = await journal(page);
         await page
           .getByRole("button", {
-            name: "Mark read through loaded messages",
+            name: "Mark as read through loaded messages",
             exact: true,
           })
           .click();

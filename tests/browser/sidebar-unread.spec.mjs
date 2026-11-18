@@ -516,7 +516,7 @@ test("resizing, collapsed groups and new unread evidence update only the display
   await page.getByText("Diagnostics", { exact: true }).click();
   await page
     .getByRole("button", {
-      name: "Mark read through loaded messages",
+      name: "Mark as read through loaded messages",
       exact: true,
     })
     .click();

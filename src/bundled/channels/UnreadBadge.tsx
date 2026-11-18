@@ -239,7 +239,7 @@ export function UnreadOptions({
             else setError("Load a verified message before marking through it.");
           }}
         >
-          Mark read through loaded messages
+          Mark as read through loaded messages
         </Button>
       )}
       {error && <p role="alert">{error}</p>}
