@@ -303,6 +303,19 @@ export function ChannelInventory({
       ),
     [queries, lifecycle],
   );
+  // A new message from someone else resurfaces a DM the viewer hid: the relay
+  // clears the hide before it fans the message out.
+  useEffect(
+    () =>
+      queries.subscribeIncoming((messages) => {
+        const { hidden } = lifecycle.snapshot();
+        if (messages.some((message) => hidden.includes(message.channelId)))
+          void lifecycle.refreshVisibility(visibilityRequest.current?.signal, {
+            trailing: true,
+          });
+      }),
+    [queries, lifecycle],
+  );
   const lifecycleFocus = useRef<string | undefined>(undefined);
   const lifecycleTrigger = useRef<HTMLElement | undefined>(undefined);
   const { channels, profiles: dmProfiles } = useChannelLabels(

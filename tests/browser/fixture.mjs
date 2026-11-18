@@ -3156,6 +3156,8 @@ export const test = base.extend({
             createdAt ?? (history.at(-1)?.created_at ?? 1700000900) + 1,
           );
           history.push(event);
+          // Like the relay, someone else's message unhides the viewer's DM.
+          if (!own && hiddenDmIds.delete(channel)) lifecycleTime++;
           if (relay && deliver) relay.publish(community, event);
           else if (relay) return event;
           else {
