@@ -26,7 +26,7 @@ import { useToastNotification } from "../../shared/design-system/ui/Toast";
 import { Accordion } from "../../shared/design-system/ui/Accordion";
 import { ModelPicker } from "../../features/agents/ModelPicker";
 import { AISettings, runsOnDetails } from "../../features/agents/AISettings";
-import { CompactionSelect } from "../../features/agents/Compaction";
+import { CompactionField } from "../../features/agents/Compaction";
 import { withCompactAt } from "../../features/agents/compact-at";
 import {
   candidatesFor,
@@ -1432,13 +1432,11 @@ export function createTabs({
                   {modelControl}
                 </>
               )}
-              <CompactionSelect
+              <CompactionField
                 value={agent.protection ? "" : draft.compactAt}
-                description={
-                  agent.protection
-                    ? "Protected agents never compact automatically."
-                    : "Claude compacts at this size, or at the model's context window if smaller."
-                }
+                {...(agent.protection && {
+                  description: "Protected agents never compact automatically.",
+                })}
                 disabled={saving || !!agent.protection}
                 onChange={(value) => setDraft(withCompactAt(draft, value))}
               />
