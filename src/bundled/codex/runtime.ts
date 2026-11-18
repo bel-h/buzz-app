@@ -21,6 +21,14 @@ import {
   wakeAnchor,
   wakeLands,
 } from "../../features/agent-harness/plugin-wake";
+import {
+  composeBase,
+  sectionsKey,
+  sectionUpdates,
+  startedSections,
+  type StartedSections,
+} from "../../features/agent-harness/sections/compose";
+import type { Facts } from "../../features/agent-harness/sections";
 import type { AgentKey } from "../../features/agents/membership";
 import { type AgentReads, workflowMarked } from "../../features/agents/reads";
 import {
@@ -51,7 +59,6 @@ import type { ChannelLabel } from "../../features/channels/channel-icon";
 import { appClient, readFile } from "../../buzz-mcp/app-client";
 import { readAuthorNames } from "../../features/agent-harness/author-names";
 import { project, readCanvas } from "../../features/agent-harness/project";
-import type { Facts } from "../../features/agent-harness/sections/index";
 import {
   referencedFolders,
   referencedSkills,
@@ -172,6 +179,10 @@ type Saved = {
   /** A lost first-turn response must not be treated as an empty session. */
   pending?: true;
   protection?: string;
+  /** The base sections the thread started with, which it keeps: a turn is
+   * sent the ones that differ now. `shown` is the `key` of the sections its
+   * saved prompt last showed. A thread from before they were kept has none. */
+  sections?: StartedSections & { shown?: string };
 };
 type Active = {
   /** The server this turn runs on; steering must reach the same process. */
@@ -272,6 +283,17 @@ const resumable = (
   saved: Saved | undefined,
   protection: Pick<AgentProtection, "stateKey"> | undefined,
 ) => (saved?.protection === protection?.stateKey ? saved : undefined);
+/** What picks a thread's base sections: `home` is the agent's workspace when
+ * the thread runs in a folder of the conversation's own. */
+const baseFacts = (
+  settings: Config,
+  home?: string,
+  place?: Facts["place"],
+): Facts => ({
+  scope: settings.scope,
+  ownFolder: home,
+  place,
+});
 const input = (text: string) => [{ type: "text", text, text_elements: [] }];
 /** Codex's own small model for titles, and its title rules. */
 const TITLE_MODEL = "gpt-5.6-luna";
@@ -1642,7 +1664,12 @@ export class CodexRuntime {
               {
                 type: "message",
                 role: "developer",
-                content: [{ type: "input_text", text: instructions }],
+                content: [
+                  {
+                    type: "input_text",
+                    text: `${instructions}${loaded.updates ? `\n\n${loaded.updates}` : ""}`,
+                  },
+                ],
               },
             ],
           });
@@ -1716,6 +1743,7 @@ export class CodexRuntime {
           ...(agent.protection
             ? { protection: agent.protection.stateKey }
             : {}),
+          ...(loaded.sections ? { sections: loaded.sections } : {}),
         });
         return { input: media.input, close };
       });
@@ -2828,15 +2856,11 @@ export class CodexRuntime {
       : undefined;
     // Codex sets it on this thread's commands only; app-server has none.
     const credential = await rpc.toolCredential(agent);
+    const base = composeBase(baseFacts(settings, home, place));
     const params = {
       model,
       cwd: workspace,
-      developerInstructions: developerInstructions(
-        agent,
-        settings.scope,
-        home,
-        place,
-      ),
+      developerInstructions: developerInstructions(agent, base.text),
       approvalPolicy: "never",
       // Matches Claude's bypassPermissions; only the owner's mentions and the
       // agent's own watches and timers start work.
@@ -2857,7 +2881,7 @@ export class CodexRuntime {
     const summary = normalized.config.model_reasoning_summary
       ? {}
       : { summary: "auto" };
-    return { params, model, effort, summary, bridge };
+    return { params, model, effort, summary, bridge, base };
   }
   /** Shared thread setup; a voice seat retains it between delegated turns. */
   async loadThread(
@@ -2881,7 +2905,7 @@ export class CodexRuntime {
     signal.throwIfAborted();
     const saved = entry.saved[key];
     const existing = resumable(saved, agent.protection);
-    const { params, model, effort, summary, bridge } = await this.prepare(
+    const { params, model, effort, summary, bridge, base } = await this.prepare(
       rpc,
       agent,
       settings,
@@ -2967,6 +2991,10 @@ export class CodexRuntime {
         threadId: threadId,
         name: sessionName(agent, request.conversation),
       });
+      // Only a thread started here has the current sections.
+      const sections: Saved["sections"] = fresh
+        ? startedSections(base.parts)
+        : existing?.sections;
       return {
         threadId,
         workspace,
@@ -2980,6 +3008,14 @@ export class CodexRuntime {
         existing,
         resuming,
         fresh,
+        base,
+        sections,
+        updates: fresh
+          ? ""
+          : sectionUpdates(
+              existing?.sections,
+              baseFacts(settings, home, sessionPlace(request.conversation)),
+            ),
       };
     } catch (error) {
       if (threadId)
@@ -3073,6 +3109,9 @@ export class CodexRuntime {
         saved,
         resuming,
         fresh,
+        base,
+        sections,
+        updates,
       } = loaded;
       active.threadId = threadId;
       // A refusal outside this turn does not explain how it ends.
@@ -3108,6 +3147,7 @@ export class CodexRuntime {
           request.team,
           memory,
           this.repositories(request.scope),
+          updates,
         );
         if (this.target && !resuming)
           await this.save(request, entry, key, {
@@ -3116,6 +3156,7 @@ export class CodexRuntime {
             workspace,
             at: Date.now(),
             ...(tools ? { tools } : {}),
+            ...(sections ? { sections } : {}),
           });
         if (signal.aborted || (request.current && !request.current())) {
           if (this.target && !resuming) {
@@ -3155,24 +3196,38 @@ export class CodexRuntime {
             throw error;
           });
         active.turnId = turn.turn.id;
+        const session = this.targetKey
+          ? JSON.stringify([this.targetKey, active.threadId])
+          : active.threadId;
+        // The saved prompt shows the sections again when they change. The
+        // binding has what it last showed: a seat's typed turns share one
+        // loaded thread.
+        const last = entry.saved[key]?.sections?.shown ?? sections?.shown;
+        const shown =
+          !fresh &&
+          sections &&
+          base.key !== (last ?? sectionsKey(sections.parts));
+        if (shown)
+          void this.prompts(agent.key).add(session, {
+            label: `base-section-updates ${new Date().toISOString()}`,
+            // Without the block's tag lines, so it is shown under the label.
+            text: updates
+              ? updates.split("\n").slice(1, -1).join("\n")
+              : "Every section is as the thread's base instructions give it.",
+          });
         if (fresh)
-          void this.prompts(agent.key).save(
-            this.targetKey
-              ? JSON.stringify([this.targetKey, active.threadId])
-              : active.threadId,
-            [
-              {
-                label: "base",
-                text: params.developerInstructions,
-              },
-              {
-                label: EACH_TURN,
-                text: Object.values(additionalContext)
-                  .map(({ value }) => value)
-                  .join(""),
-              },
-            ],
-          );
+          void this.prompts(agent.key).save(session, [
+            {
+              label: "base",
+              text: params.developerInstructions,
+            },
+            {
+              label: EACH_TURN,
+              text: Object.values(additionalContext)
+                .map(({ value }) => value)
+                .join(""),
+            },
+          ]);
         this.acknowledgeActivity(active, request);
         // A conversation new to this agent: name its Solo chat meanwhile.
         if (request.named && !saved && !server.protection)
@@ -3194,6 +3249,18 @@ export class CodexRuntime {
           ...(tools ? { tools } : {}),
           ...(agent.protection
             ? { protection: agent.protection.stateKey }
+            : {}),
+          ...(sections
+            ? {
+                sections: {
+                  ...sections,
+                  ...(shown
+                    ? { shown: base.key }
+                    : last
+                      ? { shown: last }
+                      : {}),
+                },
+              }
             : {}),
         });
         ready();
