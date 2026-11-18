@@ -824,7 +824,7 @@ export function ChannelInventory({
     surface?: ChannelMenuSurface,
   ) => {
     const actions: ReactNode[] = [];
-    if (placementWritable && channel.channelType !== "forum") {
+    if (placementWritable) {
       const currentSectionId = sectionKey.startsWith("group:")
         ? sectionKey.slice("group:".length)
         : undefined;

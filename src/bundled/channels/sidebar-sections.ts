@@ -77,10 +77,8 @@ export function sidebarSections<T extends ChannelSummary>(
     (channel) =>
       !channel.archived && (!channel.hidden || channel.channelType === "dm"),
   );
-  const streams = active.filter(
-    (channel) =>
-      channel.channelType !== "dm" && channel.channelType !== "forum",
-  );
+  // Forums list, star and move like any other channel.
+  const streams = active.filter((channel) => channel.channelType !== "dm");
   const dms = active.filter(
     (channel) => channel.channelType === "dm" && !hiddenDms.has(channel.id),
   );
@@ -125,15 +123,6 @@ export function sidebarSections<T extends ChannelSummary>(
             !stars.has(channel.id) && !ids.has(assignment(channel.id) ?? ""),
         ),
         "channels",
-      ),
-    },
-    {
-      key: "forums",
-      title: "Forums",
-      icon: undefined,
-      rows: sort(
-        active.filter((channel) => channel.channelType === "forum"),
-        "forums",
       ),
     },
     {
