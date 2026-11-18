@@ -1,10 +1,11 @@
-import { assert, afterEach, expect, it, vi } from "vitest";
+import { assert, afterEach, expect, it, onTestFinished, vi } from "vitest";
 import { createRelaySession } from "./session";
 import {
   HELD_RETRY_REFUSED,
   PublishNotSent,
   PublishRejected,
   createOutbox,
+  type Delivery,
   type OutboxStorage,
   type OutgoingEvent,
 } from "./outbox";
@@ -1588,63 +1589,155 @@ it("refuses to remove an unsent item another window has since delivered", async 
   }
 });
 
-it("waits for another window's retry before removing the item it retried", async () => {
+function deferred() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
+/** Windows sharing one journal and per-event lock, with held publishers. */
+function sharedWindows(delivery: Delivery, timeouts: number[]) {
   const viewer = keypair();
   const event = signed(viewer, { kind: 9, tags: [["h", "c"]], content: "x" });
-  let records: OutgoingEvent[] = [
-    { event, signed: event, delivery: "sending" },
-  ];
+  let records: OutgoingEvent[] = [{ event, signed: event, delivery }];
+  let held: Promise<void> | undefined;
+  const requested: number[] = [];
+  const entered: number[] = [];
   const tails = new Map<string, Promise<unknown>>();
-  const storage: OutboxStorage = {
-    load: () => records,
-    save: (next) => {
-      records = [...next];
-    },
-    lock(id, run) {
-      const work = (tails.get(id) ?? Promise.resolve()).then(run);
-      tails.set(
-        id,
-        work.catch(() => {}),
-      );
-      return work;
-    },
-  };
-  let publish = () => {};
-  const window = () =>
-    createOutbox(
+  const published: number[] = [];
+  const windows = timeouts.map((timeoutMs, index) => {
+    const publishing = deferred(),
+      release = deferred();
+    const window = createOutbox(
       viewer.pubkey,
       {
         sign: async () => {
           throw new Error("No sign expected");
         },
-        publish: () =>
-          new Promise<void>((resolve) => {
-            publish = resolve;
-          }),
+        publish: () => {
+          published.push(index);
+          publishing.resolve();
+          return release.promise;
+        },
       },
-      storage,
+      {
+        load: () => records,
+        save: async (next) => {
+          await held;
+          records = [...next];
+        },
+        lock(id, run) {
+          requested.push(index);
+          const work = (tails.get(id) ?? Promise.resolve()).then(() => {
+            entered.push(index);
+            return run();
+          });
+          tails.set(
+            id,
+            work.catch(() => {}),
+          );
+          return work;
+        },
+      },
+      { timeoutMs },
     );
-  const a = window(),
-    b = window();
-  try {
-    await Promise.all([a.ready, b.ready]);
-    expect(a.outbox.snapshot()[0]?.delivery).toBe("unknown");
-    b.outbox.retry(event.id);
-    await vi.waitFor(() => expect(records[0]?.delivery).toBe("sending"));
-    let settled = false;
-    const removal = a.outbox.dismiss(event.id).finally(() => {
-      settled = true;
-    });
-    removal.catch(() => {});
-    await new Promise((resolve) => setTimeout(resolve, 10));
-    expect(settled).toBe(false);
-    publish();
-    await expect(removal).rejects.toThrow("changed in another window");
-    expect(records).toEqual([
+    return {
+      outbox: window.outbox,
+      ready: window.ready,
+      publishing: publishing.promise,
+      release: release.resolve,
+      dispose: window.dispose,
+    };
+  });
+  onTestFinished(() => {
+    for (const window of windows) window.dispose();
+  });
+  return {
+    event,
+    windows,
+    published,
+    requested,
+    entered,
+    records: () => records,
+    hold(gate: Promise<void>) {
+      held = gate;
+    },
+  };
+}
+
+it("waits for another window's retry before removing the item it retried", async () => {
+  const shared = sharedWindows("unknown", [10_000, 10_000]);
+  const [a, b] = shared.windows;
+  assert.exists(a);
+  assert.exists(b);
+  await Promise.all([a.ready, b.ready]);
+  b.outbox.retry(shared.event.id);
+  await b.publishing;
+  const removal = a.outbox.dismiss(shared.event.id);
+  removal.catch(() => {});
+  await vi.waitFor(() => expect(shared.requested).toEqual([1, 0]));
+  expect(shared.entered).toEqual([1]);
+  expect(shared.records()[0]?.delivery).toBe("sending");
+  b.release();
+  await expect(removal).rejects.toThrow("changed in another window");
+  expect(shared.records()).toEqual([
+    expect.objectContaining({ delivery: "accepted" }),
+  ]);
+  expect(shared.published).toEqual([1]);
+});
+
+it("stops retries queued behind another window's removal", async () => {
+  const shared = sharedWindows("unknown", [10_000, 10_000, 10_000]);
+  const [a, b, c] = shared.windows;
+  assert.exists(a);
+  assert.exists(b);
+  assert.exists(c);
+  await Promise.all(shared.windows.map((window) => window.ready));
+  const deletion = deferred();
+  shared.hold(deletion.promise);
+  const removal = a.outbox.dismiss(shared.event.id);
+  await vi.waitFor(() => expect(shared.entered).toEqual([0]));
+  b.outbox.retry(shared.event.id);
+  c.outbox.retry(shared.event.id);
+  await vi.waitFor(() => expect(shared.requested).toEqual([0, 1, 2]));
+  deletion.resolve();
+  await removal;
+  await vi.waitFor(() => expect(shared.entered).toEqual([0, 1, 2]));
+  await vi.waitFor(() => {
+    expect(b.outbox.snapshot()).toEqual([]);
+    expect(c.outbox.snapshot()).toEqual([]);
+  });
+  expect(shared.records()).toEqual([]);
+  expect(shared.published).toEqual([]);
+});
+
+it("keeps a queued retry's timeout local until it owns the row", async () => {
+  vi.useFakeTimers();
+  const shared = sharedWindows("unknown", [10_000, 100]);
+  const [b, a] = shared.windows;
+  assert.exists(a);
+  assert.exists(b);
+  await Promise.all([a.ready, b.ready]);
+  b.outbox.retry(shared.event.id);
+  await b.publishing;
+  a.outbox.retry(shared.event.id);
+  await vi.advanceTimersByTimeAsync(0);
+  expect(shared.requested).toEqual([0, 1]);
+  await vi.advanceTimersByTimeAsync(101);
+  expect(shared.entered).toEqual([0]);
+  expect(shared.records()[0]?.delivery).toBe("sending");
+  b.release();
+  await vi.waitFor(() => expect(shared.entered).toEqual([0, 1]));
+  await vi.waitFor(() =>
+    expect(shared.records()).toEqual([
       expect.objectContaining({ delivery: "accepted" }),
-    ]);
-  } finally {
-    a.dispose();
-    b.dispose();
-  }
+    ]),
+  );
+  await vi.waitFor(() =>
+    expect(a.outbox.snapshot()[0]?.delivery).toBe("unknown"),
+  );
+  expect(shared.records()[0]?.delivery).toBe("accepted");
+  expect(shared.published).toEqual([0]);
 });

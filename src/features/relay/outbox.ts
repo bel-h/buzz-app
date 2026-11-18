@@ -644,8 +644,38 @@ export function createOutbox(
       ),
     );
     const owned = attempt.retried && storage.lock ? own(id) : undefined;
+    let owns = !owned;
     try {
-      if (owned) await Promise.race([owned, aborted]);
+      if (owned) {
+        // Another window's retry owns the saved row until this one gets the lock.
+        clearTimeout(attempt.timer);
+        await Promise.race([owned, aborted]);
+        owns = true;
+        await durable.catch(() => {});
+        const shared = (
+          await Promise.race([storage.load({ readOnly: true }), aborted])
+        ).find((stored) => stored.event.id === id);
+        const last = journaled.get(id);
+        if (
+          last &&
+          shared?.delivery !== last &&
+          shared?.delivery !== "sending"
+        ) {
+          // Removed or delivered by another window while this retry waited.
+          if (shared) replace(decode(shared));
+          else {
+            storage.forget?.(id);
+            restoredReceipts.delete(id);
+            snapshot = Object.freeze(
+              snapshot.filter((item) => item.event.id !== id),
+            );
+            notify();
+          }
+          return;
+        }
+        attempt.expiresAt = Date.now() + timeoutMs;
+        attempt.timer = setTimeout(() => expire(id), timeoutMs);
+      }
       await Promise.race([
         attempt.intent ??
           ready.then(() => {
@@ -746,7 +776,7 @@ export function createOutbox(
               ? "unknown"
               : failedDelivery(attempt));
       if (latest && delivery)
-        saveStatus({
+        (owns ? saveStatus : replace)({
           ...latest,
           delivery,
           refused:
