@@ -16,6 +16,7 @@ import type { ConversationExtensions } from "../../features/conversation/contrac
 import { setThreadPlacementPreference } from "../../features/messages/thread-preferences";
 import type { RelaySession } from "../../features/relay/session";
 import { createNavigationController } from "../../features/navigation/controller";
+import { createBrowserHistory } from "../../features/navigation/browser-history";
 import {
   createMemoryHistory,
   type NavigationHistory,
@@ -699,31 +700,59 @@ const hidePane = () => {
     if (button.getAttribute("aria-expanded") === "true")
       fireEvent.click(button);
 };
-// Browser history retires visits at once but lands its one return a task
-// later, past every visit retired meanwhile.
+// The production browser driver over a window whose traversals land when
+// the test lets them, as a native history.go() lands a task later.
 function deferredReturns() {
-  const memory = createMemoryHistory(switchboard);
-  const pending: Parameters<NavigationHistory["dismiss"]>[] = [];
-  const driver: NavigationHistory = {
-    ...memory,
-    dismiss: (...dismissal) => {
-      pending.push(dismissal);
-    },
+  const events = new EventTarget();
+  const pending: number[] = [];
+  const start = `#buzz=${encodeURIComponent(JSON.stringify(switchboard))}`;
+  const location = { pathname: "/", search: "", hash: start };
+  let entries = [{ state: null as unknown, hash: start }];
+  let index = 0;
+  const storage = new Map<string, string>();
+  const traverse = (delta: number) => {
+    if (!entries[index + delta]) return;
+    index += delta;
+    location.hash = entries[index]?.hash ?? "";
+    events.dispatchEvent(new Event("popstate"));
+    events.dispatchEvent(new Event("hashchange"));
   };
+  const host = {
+    location,
+    history: {
+      get state() {
+        return entries[index]?.state;
+      },
+      replaceState(state: unknown, _title: string, url?: string) {
+        if (url) location.hash = new URL(url, "https://app.example").hash;
+        entries[index] = { state, hash: location.hash };
+      },
+      pushState(state: unknown, _title: string, url: string) {
+        entries = entries.slice(0, index + 1);
+        location.hash = new URL(url, "https://app.example").hash;
+        entries.push({ state, hash: location.hash });
+        index++;
+      },
+      back: () => pending.push(-1),
+      forward: () => pending.push(1),
+      go: (delta: number) => pending.push(delta),
+    },
+    sessionStorage: {
+      getItem: (key: string) => storage.get(key) ?? null,
+      setItem: (key: string, value: string) => storage.set(key, value),
+    },
+    addEventListener: events.addEventListener.bind(events),
+    removeEventListener: events.removeEventListener.bind(events),
+  } as unknown as Window;
+  // Land every traversal, including any a landing starts.
   const land = () =>
     act(async () => {
-      const retired = pending.map(([visits]) => visits);
-      memory.dismiss(
-        (visit) =>
-          retired.some((visits) =>
-            typeof visits === "function" ? visits(visit) : false,
-          ),
-        pending.at(-1)?.[1] ?? switchboard,
-      );
-      pending.length = 0;
-      await Promise.resolve();
+      for (let turn = 0; pending.length && turn < 10; turn++) {
+        for (const delta of pending.splice(0)) traverse(delta);
+        await Promise.resolve();
+      }
     });
-  return { driver, pending, land };
+  return { driver: createBrowserHistory(host), pending, land };
 }
 
 it("gives an opening made before a close's return lands its visit after it", async () => {
@@ -735,8 +764,8 @@ it("gives an opening made before a close's return lands its visit after it", asy
   page.close({ channelId: "beta" });
   page.open({ channelId: "dm" }, { keep: true });
   page.close({ channelId: "alpha", threadId: "root" });
-  expect(returns.pending).toHaveLength(2);
-  // The opening waits for the return rather than pushing past it.
+  // The opening, and the second close, wait for the return in flight.
+  expect(returns.pending).toHaveLength(1);
   expect(page.navigation.snapshot().entry).toBe(closing);
   await returns.land();
   expect(page.navigation.snapshot().entry.target).toEqual({
@@ -744,7 +773,8 @@ it("gives an opening made before a close's return lands its visit after it", asy
     route: { version: 1, params: { tab: "conversation:dm" } },
   });
   expect(screen.getByText("conversation in Alice")).toBeVisible();
-  traverse(page, "back");
+  act(() => page.navigation.back());
+  await returns.land();
   expect(page.navigation.snapshot().entry.target).toEqual(switchboard);
 });
 
@@ -761,7 +791,8 @@ it("visits an opening made while a close returns once the return lands", async (
     route: { version: 1, params: { tab: "conversation:dm" } },
   });
   expect(screen.getByText("conversation in Alice")).toBeVisible();
-  traverse(page, "back");
+  act(() => page.navigation.back());
+  await returns.land();
   expect(page.navigation.snapshot().entry.target).toEqual({
     ...switchboard,
     route: { version: 1, params: { tab: "thread:alpha:root" } },
@@ -799,6 +830,28 @@ it("leaves a hidden tab pane hidden when a close's return lands", async () => {
     route: { version: 1, params: { tab: "conversation:alpha" } },
   });
   expect(paneShown()).toBe(false);
+});
+
+it("retires a closed tab's visits only in the scope that closed it", () => {
+  const scoped = (communityOrigin: string): OpenTarget => ({
+    ...switchboard,
+    scope: { viewer: "a".repeat(64), communityOrigin },
+  });
+  const page = fixture(undefined, "tabs", scoped("https://a.example"));
+  page.open({ channelId: "alpha", threadId: "root" });
+  act(() => {
+    void page.navigation.open(scoped("https://b.example"));
+  });
+  page.open({ channelId: "alpha", threadId: "root" });
+  expect(page.close({ channelId: "alpha", threadId: "root" })).toBe(true);
+  expect(page.navigation.snapshot().entry.target).toEqual(
+    scoped("https://b.example"),
+  );
+  traverse(page, "back");
+  expect(page.navigation.snapshot().entry.target).toEqual({
+    ...scoped("https://a.example"),
+    route: { version: 1, params: { tab: "thread:alpha:root" } },
+  });
 });
 
 it("reopens a tab with Back without taking focus to its composer", () => {
