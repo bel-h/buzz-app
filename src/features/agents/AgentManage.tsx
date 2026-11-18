@@ -117,7 +117,7 @@ export function AgentDelete({
         }
         description={
           elsewhere
-            ? "It is archived and removed from your agent list here. Buzz also tries to remove its channel memberships. The other device keeps its key, files and running process, and may list it again. Other communities are unchanged."
+            ? "It is archived and removed from your agent list here. Buzz also tries to remove its channel memberships. The other device keeps its key, files and running process. If that device is online, it lists the agent again right away, so remove it there instead. Other communities are unchanged."
             : agent.place === "hosted"
               ? "Its provider deletes it and its key, then it leaves every channel and is archived so it no longer appears in member lists or mention suggestions. It can't be undone."
               : several

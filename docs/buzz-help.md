@@ -1502,7 +1502,8 @@ available rather than silently discarding it.
   and be able to verify your ownership. A failed removal stays available to
   retry. This does not erase the other device's key or files, stop its process,
   or remove the agent from other communities. Archiving affects discovery,
-  not the agent's permission to publish; the other device may list it again.
+  not the agent's permission to publish. If the other device is online, it
+  lists the agent again right away, so remove it on that device instead.
 - **Settings → Agent setup → Harness defaults** is where supported agent types
   offer installation, sign-in, and default-model controls. Available controls
   depend on the type. Do not assume a provider is configured or signed in.

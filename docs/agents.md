@@ -1396,7 +1396,11 @@ tries to leave its channels through the existing relay-removal helper. Failures
 before listing deletion leave it available to retry. Agent choices and the
 community's Bestie selection are refreshed before deleting the listing. No key, files or process on
 another device are deleted, and other communities are untouched. The archive
-controls discovery, not publishing authority; a returning device may relist it.
+controls discovery, not publishing authority: the owning device republishes its
+listing whenever its own listing read finds it missing, so an online device
+lists the agent again right away, and a returning one does so when it
+reconnects. It stays archived, so it shows as on another device again, with
+Remove offered again.
 
 An agent in several communities leaves each of them this way, one at a time,
 and its key is erased once none is left. Delete marks every row `deleting` with

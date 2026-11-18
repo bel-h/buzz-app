@@ -100,7 +100,7 @@ it("explains another device's removal limits, preserves a failure and retries af
     name: "Remove Ada from this community?",
   });
   expect(dialog).toHaveTextContent(
-    "The other device keeps its key, files and running process, and may list it again",
+    "If that device is online, it lists the agent again right away, so remove it there instead.",
   );
   expect(remove).not.toHaveBeenCalled();
   await waitFor(() =>

@@ -61,10 +61,16 @@ import { AgentConfigStore, type Subject } from "./agent-config";
 import type { Mode } from "./agent-start";
 import { channelTemplates } from "../channel-templates/local";
 import { eventDto, type ReadFilter, type RelayEvent } from "../relay/events";
-import { keypair, message, signed } from "../relay/testing";
+import {
+  archiveRelay,
+  keypair,
+  message,
+  ownedProfile,
+  signed,
+} from "../relay/testing";
 import { createRelayReader } from "../relay/reader";
 import type { LiveBatch } from "../relay/incoming";
-import type { RelaySession } from "../relay/session";
+import { createRelaySession, type RelaySession } from "../relay/session";
 import { huddleDescription } from "../huddle/lifecycle";
 import type { AgentIdentity } from "./native";
 import {
@@ -12190,6 +12196,67 @@ it("retries removal on another device after a record failure without archiving t
   await service.remove(sibling);
   expect(service.find(sibling)).toBeUndefined();
   expect(archives.request).toHaveBeenCalledOnce();
+});
+
+it("refuses another device's agent whose profile names a different owner, even for a relay admin", async () => {
+  // The real archive module over a relay that holds the agent's signed
+  // profile: its owner proof names a stranger, and the viewer is an admin, so
+  // the relay would accept an admin-signed archive.
+  const agent = keypair();
+  const stranger = keypair();
+  const relay = archiveRelay(
+    { pubkey: viewer, secret: keypair().secret },
+    keypair(),
+    [await ownedProfile(agent, stranger, "Far")],
+    { [viewer]: "admin" },
+  );
+  const real = createRelaySession(relay.transport);
+  try {
+    const { service, session } = await setup({
+      listed: [record(agent.pubkey)],
+    });
+    await vi.waitFor(() =>
+      expect(service.find(agent.pubkey)?.place).toBe("elsewhere"),
+    );
+    Object.assign(session, { archives: real.session.archives });
+    expect(
+      await real.session.archives.consent(
+        agent.pubkey,
+        new AbortController().signal,
+      ),
+    ).toEqual({ admin: true });
+    await expect(service.remove(agent.pubkey)).rejects.toThrow(
+      /must name you as its owner/,
+    );
+    expect(relay.published).toEqual([]);
+    expect(records.unshare).not.toHaveBeenCalled();
+    expect(records.removeAgent).not.toHaveBeenCalled();
+    expect(service.find(agent.pubkey)?.place).toBe("elsewhere");
+  } finally {
+    real.dispose();
+  }
+});
+
+it("lists a removed agent again when its device republishes the record, and removes it again without a second archive", async () => {
+  const { service, archives, connect } = await setup({
+    listed: [record(sibling)],
+  });
+  await vi.waitFor(() =>
+    expect(service.find(sibling)?.place).toBe("elsewhere"),
+  );
+  await service.remove(sibling);
+  expect(service.find(sibling)).toBeUndefined();
+  // The owning device is online and lists it again: the next read finds it.
+  connect(false);
+  connect(true);
+  await vi.waitFor(() =>
+    expect(service.find(sibling)?.place).toBe("elsewhere"),
+  );
+  expect(archives.archived.has(sibling)).toBe(true);
+  await service.remove(sibling);
+  expect(service.find(sibling)).toBeUndefined();
+  expect(archives.request).toHaveBeenCalledOnce();
+  expect(records.removeAgent).toHaveBeenCalledTimes(2);
 });
 
 it("does not remove an unlisted agent through another device's removal path", async () => {

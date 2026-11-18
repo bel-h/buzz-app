@@ -5864,21 +5864,28 @@ export class AgentsService extends Service implements Agents {
         (entry) => entry.pubkey === pubkey && entry.place === "elsewhere",
       );
       const binding = agent && this.bindingOf(agent);
-      if (!agent || !binding || agent.owner !== binding.viewer)
+      if (!agent || !binding)
         throw new Error("No owned agent in this community");
-      if (!binding.session.archives.supported)
+      const { archives } = binding.session;
+      if (!archives.supported)
         throw new Error(
           "This community cannot archive agents. Remove it on the device that runs it.",
         );
+      if (!archives.writable)
+        throw new Error("Archive is unavailable on this connection");
       const { signal } = binding.controller;
+      const unattested = new Error(
+        `${agent.name} wasn't removed: its profile must name you as its owner. Only the device holding its key can update that profile.`,
+      );
+      // The listing is the viewer's own record, so it proves nothing about
+      // ownership, and admin authority alone could archive anyone's agent.
+      // Require the profile's owner proof naming the viewer.
+      if (!(await archives.consent(pubkey, signal))?.auth) throw unattested;
       const owner = { issue: this.authorize };
       try {
         await archiveAgent(binding.session, pubkey, signal, owner);
       } catch (error) {
-        if (error instanceof UnattestedProfile)
-          throw new Error(
-            `${agent.name} wasn't removed: its profile must name you as its owner. Only the device holding its key can update that profile.`,
-          );
+        if (error instanceof UnattestedProfile) throw unattested;
         throw error;
       }
       await unshare(binding.session, binding.viewer, pubkey, signal);
