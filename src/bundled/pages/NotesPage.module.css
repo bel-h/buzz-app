@@ -114,6 +114,12 @@
   width: min(100%, 52rem);
   margin-inline: auto;
 }
+.document :is([role="textbox"], .markdown > *) > :is(p, ul, ol):has(+ p) {
+  margin-block-end: var(--space-3);
+}
+.document :is([role="textbox"], .markdown > *) > :is(p, ul, ol) + p {
+  margin-block-start: var(--space-3);
+}
 .document :is([role="textbox"], .markdown) h1 {
   @apply text-heading;
 }
