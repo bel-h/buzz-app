@@ -1098,6 +1098,18 @@ const scrollTest = test.extend({
 scrollTest(
   "Workflows → Messages keeps saved groups, selected channel, and a visible entry's scroll on every frame without re-decoding",
   async ({ page, app }) => {
+    // The other saved community warms in the background during this journey
+    // and decodes its own preferences, at a time that depends on runner load.
+    // Only Primary's decoder is under test. Its startup decode passes through
+    // the same predicate, so a changed decoder URL fails here instead of
+    // leaving the hold matching nothing.
+    const primaryDecoder = (url) =>
+      url.pathname.endsWith("/primary/sidebar-preferences");
+    let startupDecodes = 0;
+    const countStartup = (request) => {
+      if (primaryDecoder(new URL(request.url()))) startupDecodes++;
+    };
+    page.on("request", countStartup);
     await open(page, app);
     const sidebar = page.getByRole("navigation", {
       name: "Subscribed channels",
@@ -1111,6 +1123,11 @@ scrollTest(
     await expect(
       sidebar.locator("summary", { hasText: /Starred$/ }),
     ).toBeVisible();
+    page.off("request", countStartup);
+    expect(
+      startupDecodes,
+      "Primary's saved groups came through the held decoder",
+    ).toBeGreaterThan(0);
     await sidebar.locator('button[data-channel-id="beta"]').click();
     await expect(
       page.getByRole("textbox", { name: "Message #Beta", exact: true }),
@@ -1132,8 +1149,7 @@ scrollTest(
       release = resolve;
     });
     let decodes = 0;
-    // Other communities can warm in the background; this return reuses Primary.
-    await page.route("**/primary/sidebar-preferences", async (route) => {
+    await page.route(primaryDecoder, async (route) => {
       decodes++;
       await held;
       await route.continue();
