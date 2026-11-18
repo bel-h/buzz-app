@@ -20,13 +20,14 @@ pub(super) enum Verdict {
 /// 10001, 10003, 10030, 30000, 30003, 30030), canvases (40100), artifacts
 /// (45010), git patches, pull requests, issues and statuses (1617–1633), DM
 /// open and hide (41010, 41012), archive requests (9035, 9036), workflow
-/// triggers (46020), jobs (43001–43006), agent memory (30174) and observer
-/// frames (24200).
+/// triggers (46020), jobs (43001–43006), agent memory (30174), observer
+/// frames (24200) and reports to the community's moderators (1984), which the
+/// relay queues for moderators only and never acts on.
 const ORDINARY: &[u16] = &[
-    7, 9, 1617, 1618, 1619, 1621, 1630, 1631, 1632, 1633, 9035, 9036, 10000, 10001, 10003, 10030,
-    20001, 20002, 20003, 24200, 30000, 30003, 30023, 30030, 30078, 30174, 30315, 40002, 40003,
-    40004, 40005, 40006, 40007, 40008, 40100, 41010, 41012, 43001, 43002, 43003, 43004, 43005,
-    43006, 45001, 45002, 45003, 45010, 46020,
+    7, 9, 1617, 1618, 1619, 1621, 1630, 1631, 1632, 1633, 1984, 9035, 9036, 10000, 10001, 10003,
+    10030, 20001, 20002, 20003, 24200, 30000, 30003, 30023, 30030, 30078, 30174, 30315, 40002,
+    40003, 40004, 40005, 40006, 40007, 40008, 40100, 41010, 41012, 43001, 43002, 43003, 43004,
+    43005, 43006, 45001, 45002, 45003, 45010, 46020,
 ];
 
 /// Changes to who the identity is, what it controls or what others see about
