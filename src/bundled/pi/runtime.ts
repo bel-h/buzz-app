@@ -1292,6 +1292,7 @@ export class PiRuntime {
           : {}),
         instructions,
         team: entry.team,
+        sections: entry.handle?.promptSections?.(),
       }),
       ...(memory === undefined
         ? {}
