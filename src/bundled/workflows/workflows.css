@@ -257,6 +257,10 @@
 .workflow-step p {
   margin: 0;
 }
+.workflow-runs-end {
+  margin: 0;
+  padding-block: var(--space-4);
+}
 .workflow-key,
 .workflow-trace {
   overflow-wrap: anywhere;
@@ -694,6 +698,10 @@ html[data-keyboard-navigation]
   gap: var(--space-1);
   padding-block: var(--space-2);
   border-bottom: 0;
+  border-top: 1px solid var(--border-standard);
+}
+.workflow-detail .workflow-runs-end {
+  padding-block: var(--space-2);
   border-top: 1px solid var(--border-standard);
 }
 @media (max-width: 52rem) {

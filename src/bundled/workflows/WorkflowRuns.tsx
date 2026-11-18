@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import type {
   WorkflowCapability,
   WorkflowDefinition,
@@ -54,12 +54,32 @@ function RunList({
     newest: snapshot,
     refresh,
   });
-  if (!snapshot) return <p role="status">Reading runs…</p>;
-  const needsRefresh =
-    snapshot.status === "idle" || snapshot.status === "error";
+  const [refreshing, setRefreshing] = useState(false);
+  // A control that leaves while it has focus hands it to the end of the list
+  // when that is marked, and to the list otherwise: never to the document.
+  const oldest = useRef<HTMLParagraphElement>(null);
+  const left = useRef(false);
+  const handsFocus = useCallback((node: HTMLButtonElement | null) => {
+    if (!node) return;
+    return () => {
+      if (document.activeElement === node) left.current = true;
+    };
+  }, []);
+  useLayoutEffect(() => {
+    if (!left.current) return;
+    left.current = false;
+    (oldest.current ?? list.region)?.focus();
+  });
+  // A view replaced for the same workflow keeps the runs it had read.
+  if (!snapshot && !list.loaded) return <p role="status">Reading runs…</p>;
+  const status = snapshot?.status;
+  // A failure lasts until a read succeeds, so its line and its retry stay put
+  // while the list tries again by itself.
+  const needsRefresh = status === "idle" || list.failed || refreshing;
   return (
     <section
       ref={list.section}
+      tabIndex={-1}
       aria-label="Workflow runs"
       className="workflow-runs"
     >
@@ -68,31 +88,38 @@ function RunList({
           {heading && <h3 className="text-heading">Runs</h3>}
           {/* The list rereads itself; only these states wait for a person. */}
           {needsRefresh && (
-            <Button onClick={() => void refresh()}>Refresh runs</Button>
+            <Button
+              ref={handsFocus}
+              loading={refreshing}
+              onClick={() => {
+                setRefreshing(true);
+                void refresh().finally(() => setRefreshing(false));
+              }}
+            >
+              Refresh runs
+            </Button>
           )}
         </div>
       )}
-      {snapshot.status === "loading" && !list.loaded && (
+      {status === "loading" && !list.loaded && !list.failed && (
         <p role="status">Reading runs…</p>
       )}
-      {snapshot.status === "unavailable" && (
+      {status === "unavailable" && (
         <p role="status">
           Run history is unavailable. This does not mean the workflow was
           deleted.
         </p>
       )}
-      {snapshot.status === "idle" && (
+      {status === "idle" && (
         <p role="status">History cleared. Refresh to read it again.</p>
       )}
-      {snapshot.status === "error" && (
+      {list.failed && (
         <p role="alert" className="text-danger">
-          {snapshot.error ??
+          {list.error ??
             "Run history could not be read. Retry with Refresh runs."}
         </p>
       )}
-      {(snapshot.status === "ready" || snapshot.status === "loading") &&
-        list.loaded &&
-        !list.runs.length && <p>No runs yet.</p>}
+      {list.loaded && !list.failed && !list.runs.length && <p>No runs yet.</p>}
       {list.runs.map((run) => (
         <article key={run.id} className="workflow-step">
           <p className="text-body">
@@ -128,7 +155,14 @@ function RunList({
           </details>
         </article>
       ))}
-      {list.more && (
+      {/* Like LoadingRegion's line: mounted throughout, a status only when it
+          has something to say. */}
+      <p className="sr-only" role={list.added ? "status" : undefined}>
+        {list.added
+          ? `${list.added} older ${list.added === 1 ? "run" : "runs"} loaded.`
+          : ""}
+      </p>
+      {list.more ? (
         // Reaching this loads the next page; the button is the same action
         // for a keyboard or screen reader, and stays put while a page is read.
         <div ref={list.end}>
@@ -143,11 +177,21 @@ function RunList({
               ) : undefined
             }
           >
-            <Button onClick={() => void list.loadOlder()}>
+            <Button ref={handsFocus} onClick={() => void list.loadOlder()}>
               Load older runs
             </Button>
           </LoadingRegion>
         </div>
+      ) : (
+        list.ended && (
+          <p
+            ref={oldest}
+            tabIndex={-1}
+            className="workflow-runs-end text-body text-secondary"
+          >
+            No older runs.
+          </p>
+        )
       )}
     </section>
   );

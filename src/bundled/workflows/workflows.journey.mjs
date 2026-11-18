@@ -493,6 +493,7 @@ test("history stays lazy; an unknown run never repeats or locks", async ({
       before: "2026-09-12T12:00:00.123456Z",
       beforeId: "77777777-7777-4777-8777-777777777777",
     });
+  await expect(page.getByText("No older runs.")).toBeVisible();
   for (const name of [
     "Refresh runs",
     "Older runs",
@@ -535,8 +536,9 @@ test("history stays lazy; an unknown run never repeats or locks", async ({
 });
 
 // Browser-only: the end of the list is reached in the dialog's own scroll
-// container, a row keeps its place on screen while runs arrive above it, and
-// an open disclosure survives the list's rereads.
+// container and the rows a page adds move it out of reach again, a row keeps
+// its place on screen while runs arrive above it, and an open disclosure
+// survives the list's rereads.
 test("run history loads older runs at its end and keeps itself current", async ({
   page,
 }) => {
@@ -564,21 +566,40 @@ test("run history loads older runs at its end and keeps itself current", async (
         next: pages.newest.next,
       };
     }, added);
-  // A full newest page, and one older run behind its cursor.
+  // A full newest page and a full older page behind its cursor. The fixture
+  // answers every cursor with that page, like a relay whose cursor is stuck.
   await prepend(Array.from({ length: 19 }, (_, index) => [index, "completed"]));
   await page.evaluate(() => {
     const pages = window.workflowFixture.runPages;
+    const runs = Array.from({ length: 20 }, (_, index) => ({
+      ...pages.newest.runs[0],
+      id: `11111111-1111-4111-8111-${`${index}`.padStart(12, "0")}`,
+      status: "cancelled",
+    }));
     pages.older = {
-      runs: [
-        {
-          ...pages.newest.runs[0],
-          id: "11111111-1111-4111-8111-111111111111",
-          status: "cancelled",
-        },
-      ],
-      next: null,
+      runs,
+      next: { before: "2026-09-11T12:00:00.123456Z", beforeId: runs[19].id },
     };
   });
+  const reads = () =>
+    page.evaluate(() => window.workflowFixture.calls.runReads);
+  // Resolves after the browser has reported where the end of the list is now
+  // and the list has had its turn to act on that. Observers are told in the
+  // order they were made, and this one is made after the list's.
+  const endSeen = () =>
+    older.evaluate(
+      (button) =>
+        new Promise((resolve) => {
+          new IntersectionObserver((_, observer) => {
+            observer.disconnect();
+            let turns = 3;
+            const channel = new MessageChannel();
+            channel.port1.onmessage = () =>
+              turns-- ? channel.port2.postMessage(0) : resolve();
+            channel.port2.postMessage(0);
+          }).observe(button);
+        }),
+    );
   await editor.open("Message helper");
   await editor.tab("Runs").click();
   await expect(rows).toHaveCount(20);
@@ -588,11 +609,22 @@ test("run history loads older runs at its end and keeps itself current", async (
   expect(await page.evaluate(() => window.workflowFixture.runCursor())).toBe(
     undefined,
   );
-  // Scrolled into reach, the older page follows without a click.
+  // Scrolled into reach, one older page follows without a click. Only one:
+  // its rows put the end of the list back below the fold.
+  const before = await reads();
   await older.scrollIntoViewIfNeeded();
-  await expect(rows).toHaveCount(21);
+  await expect(rows).toHaveCount(40);
   await expect(statuses.last()).toHaveText("Cancelled");
+  await expect(older).not.toBeInViewport();
+  await endSeen();
+  expect(await reads()).toBe(before + 1);
+  // Reached again, the page read holds only runs already shown. That ends the
+  // list instead of following a cursor that leads back to the same page.
+  await older.scrollIntoViewIfNeeded();
+  await expect(page.getByText("No older runs.")).toBeVisible();
   await expect(older).toHaveCount(0);
+  await expect(rows).toHaveCount(40);
+  expect(await reads()).toBe(before + 2);
 
   // The reader is at the oldest run with its details open.
   const last = rows.last();
@@ -608,15 +640,15 @@ test("run history loads older runs at its end and keeps itself current", async (
     });
   expect(await scrolled()).toBeGreaterThan(0);
   const top = async () => (await last.boundingBox()).y;
-  const before = await top();
+  const place = await top();
 
   // A new run appears on top at the settled interval. The reader's row stays
   // where it is on screen and its details stay open.
   await prepend([[100, "running"]]);
   await page.clock.fastForward(34_000);
-  await expect(rows).toHaveCount(22);
+  await expect(rows).toHaveCount(41);
   await expect(statuses.first()).toHaveText("Running");
-  expect(Math.abs((await top()) - before)).toBeLessThan(1);
+  expect(Math.abs((await top()) - place)).toBeLessThan(1);
   await expect(details).toHaveAttribute("open", "");
 
   // An active run brings the next read sooner and changes in place.
@@ -630,14 +662,14 @@ test("run history loads older runs at its end and keeps itself current", async (
   });
   await page.clock.fastForward(6_000);
   await expect(statuses.first()).toHaveText("Failed");
-  await expect(rows).toHaveCount(22);
+  await expect(rows).toHaveCount(41);
 
   // A run started with the dialog's button shows at once: a read was just
   // made, so the next timed one is half a minute away.
   await prepend([[101, "pending"]]);
   await editor.run.click();
   await page.evaluate(() => window.workflowFixture.finish("succeeded"));
-  await expect(rows).toHaveCount(23);
+  await expect(rows).toHaveCount(42);
   await expect(statuses.first()).toHaveText("Pending");
   await expect(details).toHaveAttribute("open", "");
 });

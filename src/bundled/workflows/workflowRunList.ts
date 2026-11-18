@@ -46,6 +46,31 @@ function cursors(
   return after;
 }
 
+const sameCursor = (
+  a: WorkflowRunCursor | null | undefined,
+  b: WorkflowRunCursor | null | undefined,
+) => a?.before === b?.before && a?.beforeId === b?.beforeId;
+
+/** `next`, or `list` itself when a read changed nothing a reader can see. A
+ * run that reads the same keeps its object, so "nothing changed" is identity. */
+function settle(list: WorkflowRunList, next: WorkflowRunList): WorkflowRunList {
+  const shown = new Map(list.runs.map((run) => [run.id, run]));
+  const runs = next.runs.map((run) => {
+    const old = shown.get(run.id);
+    return old && JSON.stringify(old) === JSON.stringify(run) ? old : run;
+  });
+  return next.newest === list.newest &&
+    sameCursor(next.next, list.next) &&
+    runs.length === list.runs.length &&
+    runs.every((run, index) => run === list.runs[index]) &&
+    next.after.size === list.after.size &&
+    [...next.after].every(([id, cursor]) =>
+      sameCursor(cursor, list.after.get(id)),
+    )
+    ? list
+    : { ...next, runs };
+}
+
 /** A fresh newest page goes on top. Runs already shown below its last run stay.
  * When that run is not shown, more new runs arrived than one page holds (or the
  * shown ones are gone), so continuity is unknown and the page replaces the list. */
@@ -63,16 +88,18 @@ export function withNewest(
           ...page.runs,
           ...list.runs.slice(joined + 1).filter((run) => !fresh.has(run.id)),
         ];
-  return {
+  return settle(list, {
     runs,
     next: joined < 0 ? page.next : list.next,
     after: cursors(joined < 0 ? emptyRunList : list, runs, page),
     newest: page.runs.length,
-  };
+  });
 }
 
 /** The page `cursor` read goes on the end, unless the list has since moved on
- * from that cursor. A page with no runs ends the history whatever it claims. */
+ * from that cursor. A page that adds no run not already shown ends the history
+ * whatever it claims: its cursor did not advance, and following it would read
+ * the same page again. */
 export function withOlder(
   list: WorkflowRunList,
   cursor: WorkflowRunCursor,
@@ -80,10 +107,12 @@ export function withOlder(
 ): WorkflowRunList {
   if (list.next !== cursor) return list;
   const shown = new Set(list.runs.map((run) => run.id));
-  const runs = [...list.runs, ...page.runs.filter((run) => !shown.has(run.id))];
+  const added = page.runs.filter((run) => !shown.has(run.id));
+  if (!added.length) return { ...list, next: null };
+  const runs = [...list.runs, ...added];
   return {
     runs,
-    next: page.runs.length ? page.next : null,
+    next: page.next,
     after: cursors(list, runs, page),
     newest: list.newest,
   };
@@ -96,7 +125,7 @@ export function withPage(
 ): WorkflowRunList {
   const fresh = new Map(page.runs.map((run) => [run.id, run]));
   const runs = list.runs.map((run) => fresh.get(run.id) ?? run);
-  return { ...list, runs, after: cursors(list, runs, page) };
+  return settle(list, { ...list, runs, after: cursors(list, runs, page) });
 }
 
 /** Cursors of the pages below the newest one that hold a run still active.

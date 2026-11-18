@@ -23,7 +23,9 @@ import {
 import {
   RUNS_ACTIVE_POLL_MS,
   RUNS_FAILED_POLL_MS,
+  RUNS_QUIET_POLLS,
   RUNS_SETTLED_POLL_MS,
+  WorkflowRunsCovered,
 } from "./useWorkflowRunList";
 
 const run = (
@@ -47,12 +49,23 @@ function relayOf(runs: WorkflowRun[]) {
     fails: (_page: string) => false,
     /** Resolves when a read of this page may answer. */
     holds: (_page: string): Promise<void> | void => {},
+    /** A cursor that does not advance: an older read answers with the first
+     * page again. */
+    stuck: false,
+    /** This person's own Run now returns a run. */
+    start() {
+      act(() => {
+        fixture.capability.trigger(fixtureDefinition);
+        fixture.finish("succeeded");
+      });
+    },
     capability: fixture.capability,
   };
   const page = (cursor?: WorkflowRunCursor): WorkflowRunPage => {
-    const start = cursor
-      ? relay.runs.findIndex(({ id }) => id === cursor.beforeId) + 1
-      : 0;
+    const start =
+      cursor && !relay.stuck
+        ? relay.runs.findIndex(({ id }) => id === cursor.beforeId) + 1
+        : 0;
     const rows = relay.runs.slice(start, start + 2);
     const last = rows.at(-1);
     return {
@@ -75,10 +88,14 @@ function relayOf(runs: WorkflowRun[]) {
         // Like the session's views: data stays while loading, and a failed
         // read leaves none.
         async refresh() {
+          // A list that reads without end fails its test instead of hanging it.
+          if (relay.reads.length > 99) throw new Error("Runaway reads");
           relay.reads.push(name);
           owned.update({ ...owned.view.snapshot(), status: "loading" });
           await relay.holds(name);
-          if (owned.disposed()) return;
+          // A view disposed or cleared meanwhile has dropped this read.
+          if (owned.disposed() || owned.view.snapshot().status !== "loading")
+            return;
           owned.update(
             relay.fails(name)
               ? { status: "error", data: empty, error: "Read failed" }
@@ -108,6 +125,43 @@ const advance = (ms: number) =>
   });
 const olderButton = () =>
   screen.getByRole("button", { name: "Load older runs" });
+/** The element whose arrival on screen loads the next page. */
+const end = () =>
+  olderButton().closest(".buzz-loading-region")?.parentElement as HTMLElement;
+const region = () => screen.getByRole("region", { name: "Workflow runs" });
+/** Replaces the browser's observer with one the test reports through. Like the
+ * real one, a report reaches whichever observer watches the element now, so a
+ * list hears about its end again only if it is still, or again, watching it. */
+function observers() {
+  const watching = new Map<Element, IntersectionObserverCallback>();
+  vi.stubGlobal(
+    "IntersectionObserver",
+    class {
+      readonly #report: IntersectionObserverCallback;
+      constructor(report: IntersectionObserverCallback) {
+        this.#report = report;
+      }
+      observe(target: Element) {
+        watching.set(target, this.#report);
+      }
+      disconnect() {
+        for (const [target, report] of watching)
+          if (report === this.#report) watching.delete(target);
+      }
+    },
+  );
+  return async (target: Element, isIntersecting: boolean) => {
+    const report = watching.get(target);
+    if (!report) throw new Error("Nothing observes this element");
+    act(() =>
+      report(
+        [{ target, isIntersecting } as IntersectionObserverEntry],
+        {} as IntersectionObserver,
+      ),
+    );
+    await advance(0);
+  };
+}
 function setDocumentVisible(visible: boolean) {
   vi.spyOn(document, "visibilityState", "get").mockReturnValue(
     visible ? "visible" : "hidden",
@@ -179,7 +233,10 @@ it("appends older runs and updates an active run on a later page in place", asyn
   expect(screen.queryByText("Reading older runs…")).toBeNull();
   // The loading line waits a second, and the control keeps focus meanwhile.
   await advance(1);
-  expect(screen.getByRole("status")).toHaveTextContent("Reading older runs…");
+  expect(screen.getByText("Reading older runs…")).toHaveAttribute(
+    "role",
+    "status",
+  );
   expect(olderButton()).toHaveFocus();
   expect(rows()).toEqual(["Completed d", "Completed c"]);
   release();
@@ -191,9 +248,10 @@ it("appends older runs and updates an active run on a later page in place", asyn
     "Waiting for approval b",
     "Running a",
   ]);
-  // The oldest run is shown: no control and no end-of-list message.
+  // The oldest run is shown, so the control is gone and a line marks the end.
   expect(screen.queryByRole("button", { name: "Load older runs" })).toBeNull();
   expect(screen.queryByText("Reading older runs…")).toBeNull();
+  expect(screen.getByText("No older runs.")).toBeVisible();
   expect(relay.reads).toEqual([NEWEST, "c"]);
 
   relay.runs = [run("d"), run("c"), run("b", "running"), run("a", "completed")];
@@ -228,45 +286,28 @@ it("reads nothing while hidden and catches up at once when shown again", async (
   await advance(0);
   expect(relay.reads).toEqual([NEWEST, NEWEST]);
   expect(rows()).toEqual(["Completed c", "Completed b", "Completed a"]);
+
+  // A brief absence costs no read: the next one keeps its place in time.
+  await advance(10_000);
+  setDocumentVisible(false);
+  await advance(1_000);
+  setDocumentVisible(true);
+  await advance(RUNS_SETTLED_POLL_MS - 11_000 - 1);
+  expect(relay.reads).toHaveLength(2);
+  await advance(1);
+  expect(relay.reads).toHaveLength(3);
 });
 
 it("pauses for a list that is off screen and loads older runs when its end is reached", async () => {
-  let observe: IntersectionObserverCallback = () => {};
-  const observed = new Set<Element>();
-  vi.stubGlobal(
-    "IntersectionObserver",
-    class {
-      constructor(callback: IntersectionObserverCallback) {
-        observe = callback;
-      }
-      observe(target: Element) {
-        observed.add(target);
-      }
-      disconnect() {
-        observed.clear();
-      }
-    },
-  );
-  const intersect = async (target: Element, isIntersecting: boolean) => {
-    expect(observed).toContain(target);
-    act(() =>
-      observe(
-        [{ target, isIntersecting } as IntersectionObserverEntry],
-        {} as IntersectionObserver,
-      ),
-    );
-    await advance(0);
-  };
+  const intersect = observers();
   const relay = relayOf(
     ["g", "f", "e", "d", "c", "b", "a"].map((name) => run(name)),
   );
   show(relay);
   await advance(0);
-  const list = screen.getByRole("region", { name: "Workflow runs" });
-  const end = () =>
-    olderButton().closest(".buzz-loading-region")?.parentElement as HTMLElement;
+  const list = region();
 
-  // A covered pane or a list scrolled away is not intersecting.
+  // A list scrolled away is not intersecting.
   await intersect(list, false);
   await advance(RUNS_SETTLED_POLL_MS);
   await intersect(end(), true);
@@ -287,11 +328,125 @@ it("pauses for a list that is off screen and loads older runs when its end is re
   await advance(0);
   expect(rows()).toHaveLength(4);
   expect(relay.reads).toEqual([NEWEST, "f", NEWEST]);
+});
 
-  // Reached again, pages follow for as long as the end stays in reach.
+it("reads one older page each time the end of the list is reached", async () => {
+  const intersect = observers();
+  const relay = relayOf(
+    ["g", "f", "e", "d", "c", "b", "a"].map((name) => run(name)),
+  );
+  show(relay);
+  await advance(0);
+  await intersect(end(), true);
+  // The rows that page added moved the end, so where it was says nothing of
+  // where it is. Nothing more is read until it is seen in reach again.
+  expect(rows()).toHaveLength(4);
+  expect(relay.reads).toEqual([NEWEST, "f"]);
+
+  // Still in reach, as in a tall pane: one more page, and again only one.
+  await intersect(end(), true);
+  expect(rows()).toHaveLength(6);
+  expect(relay.reads).toEqual([NEWEST, "f", "d"]);
+  await intersect(end(), false);
+  expect(relay.reads).toHaveLength(3);
+
   await intersect(end(), true);
   expect(rows()).toHaveLength(7);
-  expect(relay.reads).toEqual([NEWEST, "f", NEWEST, "d", "b"]);
+  expect(relay.reads).toEqual([NEWEST, "f", "d", "b"]);
+  // Scrolling took no control from under the reader, so focus is not moved.
+  expect(screen.getByText("No older runs.")).toBeVisible();
+  expect(document.body).toHaveFocus();
+});
+
+it("ends the history when an older page holds only runs already shown", async () => {
+  const intersect = observers();
+  const relay = relayOf([run("c"), run("b"), run("a")]);
+  show(relay);
+  await advance(0);
+  relay.stuck = true;
+  await intersect(end(), true);
+  // Following that page's cursor would read it again, and again.
+  expect(relay.reads).toEqual([NEWEST, "b"]);
+  expect(rows()).toEqual(["Completed c", "Completed b"]);
+  expect(screen.queryByRole("button", { name: "Load older runs" })).toBeNull();
+  expect(screen.getByText("No older runs.")).toBeVisible();
+});
+
+it("tells a keyboard user what each load added and where the list ends", async () => {
+  const relay = relayOf(["e", "d", "c", "b", "a"].map((name) => run(name)));
+  show(relay);
+  await advance(0);
+  const button = olderButton();
+  button.focus();
+  fireEvent.click(button);
+  await advance(0);
+  // More remain: the control stays, focused, below the rows it added.
+  expect(rows()).toHaveLength(4);
+  expect(olderButton()).toBe(button);
+  expect(button).toHaveFocus();
+  const loaded = screen.getByText("2 older runs loaded.");
+  expect(loaded).toHaveAttribute("role", "status");
+  expect(screen.queryByText("No older runs.")).toBeNull();
+
+  let release = () => {};
+  relay.holds = () => new Promise<void>((resolve) => (release = resolve));
+  fireEvent.click(button);
+  await advance(0);
+  // Cleared while reading, so a page of the same size is announced again.
+  expect(loaded).toBeEmptyDOMElement();
+  release();
+  await advance(0);
+  // The last page: the control leaves, and its focus goes to the line that
+  // marks the end of the list rather than to the document.
+  expect(rows()).toHaveLength(5);
+  expect(button).not.toBeInTheDocument();
+  expect(loaded).toHaveTextContent("1 older run loaded.");
+  expect(screen.getByText("No older runs.")).toHaveFocus();
+});
+
+it("starts over from the newest page when more runs arrived than it holds", async () => {
+  const relay = relayOf(["e", "d", "c", "b", "a"].map((name) => run(name)));
+  show(relay);
+  await advance(0);
+  const button = olderButton();
+  button.focus();
+  fireEvent.click(button);
+  await advance(0);
+  expect(rows()).toHaveLength(4);
+  (screen.getAllByRole("group")[3] as HTMLDetailsElement).open = true;
+
+  // The page after "b" is being read when three runs arrive, one more than a
+  // page. "e" is no longer on the newest page, so what lies between is unknown.
+  let release = () => {};
+  relay.holds = (page) =>
+    page === "b"
+      ? new Promise<void>((resolve) => (release = resolve))
+      : undefined;
+  fireEvent.click(button);
+  relay.runs = [run("h"), run("g"), run("f"), ...relay.runs];
+  await advance(RUNS_SETTLED_POLL_MS);
+  // Known limit: the older pages, and an open run's details with them, go.
+  expect(rows()).toEqual(["Completed h", "Completed g"]);
+  release();
+  relay.holds = () => {};
+  await advance(0);
+  // The read that was under way belongs to the list that was replaced.
+  expect(rows()).toEqual(["Completed h", "Completed g"]);
+  expect(relay.reads).toEqual([NEWEST, "d", "b", NEWEST]);
+  expect(screen.queryByText("No older runs.")).toBeNull();
+  // The control stayed, with focus, and reads on from the new end.
+  expect(olderButton()).toBe(button);
+  expect(button).toHaveFocus();
+  expect(button).toBeEnabled();
+  fireEvent.click(button);
+  await advance(0);
+  expect(rows()).toEqual([
+    "Completed h",
+    "Completed g",
+    "Completed f",
+    "Completed e",
+  ]);
+  expect(relay.reads.at(-1)).toBe("g");
 });
 
 it("keeps the runs shown when an older page fails, and retries on request", async () => {
@@ -335,6 +490,158 @@ it("keeps the runs shown when a reread fails, backs off, and recovers", async ()
   expect(rows()).toEqual(["Completed b", "Completed a"]);
   expect(screen.queryByRole("alert")).toBeNull();
   expect(screen.queryByRole("button", { name: "Refresh runs" })).toBeNull();
+});
+
+it("keeps the error line and Refresh runs in place, focus and all, while a failing read is retried", async () => {
+  const relay = relayOf([run("b"), run("a")]);
+  show(relay);
+  await advance(0);
+  relay.fails = () => true;
+  await advance(RUNS_SETTLED_POLL_MS);
+  const alert = screen.getByRole("alert");
+  const refresh = screen.getByRole("button", { name: "Refresh runs" });
+  refresh.focus();
+
+  // The retry is under way: the view is loading and holds no error.
+  let release = () => {};
+  relay.holds = () => new Promise<void>((resolve) => (release = resolve));
+  await advance(RUNS_FAILED_POLL_MS);
+  expect(relay.reads).toHaveLength(3);
+  const unmoved = () => {
+    expect(screen.getByRole("alert")).toBe(alert);
+    expect(alert).toHaveTextContent("Read failed");
+    expect(screen.getByRole("button", { name: "Refresh runs" })).toBe(refresh);
+    expect(refresh).toHaveFocus();
+    expect(refresh).toBeEnabled();
+    expect(rows()).toEqual(["Completed b", "Completed a"]);
+  };
+  unmoved();
+  // It fails again, and nothing has moved.
+  release();
+  await advance(0);
+  unmoved();
+
+  // Asked for, a retry shows on the control, which stays focused meanwhile.
+  relay.fails = () => false;
+  fireEvent.click(refresh);
+  await advance(0);
+  expect(relay.reads).toHaveLength(4);
+  expect(refresh).toHaveAttribute("aria-busy", "true");
+  expect(refresh).toHaveFocus();
+  expect(screen.getByRole("alert")).toBe(alert);
+  // A read that succeeds retires both. The control's focus goes to the list
+  // rather than to the document.
+  release();
+  await advance(0);
+  expect(screen.queryByRole("alert")).toBeNull();
+  expect(refresh).not.toBeInTheDocument();
+  expect(region()).toHaveFocus();
+});
+
+it("slows its rereads of an active run that stays the same, until a change or the person's own run", async () => {
+  const relay = relayOf([run("b", "waiting_approval"), run("a")]);
+  show(relay);
+  await advance(0);
+  const reads = () => relay.reads.length;
+  /** Rereads at the active interval until that many have changed nothing. */
+  const quiet = async () => {
+    for (let poll = 1; poll <= RUNS_QUIET_POLLS; poll++) {
+      const before = reads();
+      await advance(RUNS_ACTIVE_POLL_MS - 1);
+      expect(reads()).toBe(before);
+      await advance(1);
+      expect(reads()).toBe(before + 1);
+    }
+  };
+  await quiet();
+  // Each further wait doubles, as far as the settled interval.
+  for (const wait of [
+    2 * RUNS_ACTIVE_POLL_MS,
+    4 * RUNS_ACTIVE_POLL_MS,
+    RUNS_SETTLED_POLL_MS,
+    RUNS_SETTLED_POLL_MS,
+  ]) {
+    const before = reads();
+    await advance(wait - 1);
+    expect(reads()).toBe(before);
+    await advance(1);
+    expect(reads()).toBe(before + 1);
+  }
+
+  // A run that changed is watched closely again.
+  relay.runs = [run("b", "running"), run("a")];
+  await advance(RUNS_SETTLED_POLL_MS);
+  expect(rows()).toEqual(["Running b", "Completed a"]);
+  await quiet();
+  const slowed = reads();
+  await advance(RUNS_ACTIVE_POLL_MS);
+  expect(reads()).toBe(slowed);
+
+  // So is one the person just started: read at once, then at the active pace.
+  relay.runs = [run("c", "pending"), ...relay.runs];
+  relay.start();
+  await advance(0);
+  expect(rows()[0]).toBe("Pending c");
+  expect(reads()).toBe(slowed + 1);
+  await advance(RUNS_ACTIVE_POLL_MS);
+  expect(reads()).toBe(slowed + 2);
+});
+
+it("stops polling under a dialog its host has open and catches up when uncovered", async () => {
+  const relay = relayOf([run("b", "running"), run("a")]);
+  const under = (covered: boolean) => (
+    <WorkflowRunsCovered.Provider value={covered}>
+      <WorkflowRuns
+        capability={relay.capability}
+        workflow={fixtureDefinition}
+      />
+    </WorkflowRunsCovered.Provider>
+  );
+  const view = render(under(false));
+  await advance(0);
+  view.rerender(under(true));
+  await advance(10 * RUNS_SETTLED_POLL_MS);
+  expect(relay.reads).toEqual([NEWEST]);
+  view.rerender(under(false));
+  await advance(0);
+  expect(relay.reads).toEqual([NEWEST, NEWEST]);
+
+  // A run the person starts from that dialog shows as soon as it closes,
+  // however recently the list last read.
+  view.rerender(under(true));
+  relay.runs = [run("c", "pending"), ...relay.runs];
+  relay.start();
+  await advance(0);
+  expect(relay.reads).toHaveLength(2);
+  view.rerender(under(false));
+  await advance(0);
+  expect(rows()[0]).toBe("Pending c");
+  expect(relay.reads).toHaveLength(3);
+});
+
+it("keeps the list, open details and all, when its view is replaced for the same workflow", async () => {
+  const relay = relayOf([run("b"), run("a")]);
+  const view = show(relay);
+  await advance(0);
+  const list = region();
+  const details = screen.getAllByRole("group")[0] as HTMLDetailsElement;
+  details.open = true;
+  // As when the editor's save readback hands the list a new definition.
+  view.rerender(
+    <WorkflowRuns
+      capability={relay.capability}
+      workflow={{ ...fixtureDefinition }}
+    />,
+  );
+  // The new view has read nothing yet.
+  expect(screen.queryByText("Reading runs…")).toBeNull();
+  expect(region()).toBe(list);
+  await advance(0);
+  expect(region()).toBe(list);
+  expect(screen.getAllByRole("group")[0]).toBe(details);
+  expect(details.open).toBe(true);
+  expect(rows()).toEqual(["Completed b", "Completed a"]);
+  expect(relay.views.map((owned) => owned.disposed())).toEqual([true, false]);
 });
 
 it("says a workflow has no runs yet without flickering on each reread", async () => {
@@ -392,4 +699,25 @@ it("drops the runs the session cleared and waits for a refresh", async () => {
   expect(rows()).toEqual(["Running b", "Completed a"]);
   await advance(RUNS_ACTIVE_POLL_MS);
   expect(relay.reads).toEqual([NEWEST, NEWEST, NEWEST]);
+});
+
+it("does not reread history the session cleared while a read for the person's own run was queued", async () => {
+  const relay = relayOf([run("b", "running"), run("a")]);
+  show(relay);
+  await advance(0);
+  let release = () => {};
+  relay.holds = () => new Promise<void>((resolve) => (release = resolve));
+  await advance(RUNS_ACTIVE_POLL_MS);
+  expect(relay.reads).toHaveLength(2);
+  // Run now returns a run while that read is under way, which queues another.
+  relay.start();
+  act(() =>
+    relay.views[0]?.update({ status: "idle", data: { runs: [], next: null } }),
+  );
+  release();
+  await advance(0);
+  expect(relay.reads).toHaveLength(2);
+  expect(
+    screen.getByText("History cleared. Refresh to read it again."),
+  ).toBeVisible();
 });

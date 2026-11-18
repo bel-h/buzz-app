@@ -85,6 +85,12 @@ it("appends an older page only for the cursor the list still ends on", () => {
   expect(withOlder(first, older, { runs: [], next: cursor("x") }).next).toBe(
     null,
   );
+  // So does a page of runs already shown: its cursor did not advance, and
+  // following it would read that page again.
+  const stuck = withOlder(first, older, page([run("c"), run("b")]));
+  expect(ids(stuck)).toEqual(["c", "b"]);
+  expect(stuck.next).toBeNull();
+  expect(stuck.after).toBe(first.after);
   // A run both pages hold is shown once.
   expect(
     ids(withOlder(first, older, page([run("b"), run("a")], false))),
@@ -99,6 +105,26 @@ it("updates a re-read page's runs where they are shown", () => {
   const next = withPage(shown, page([run("a", "failed"), run("gone")], false));
   expect(ids(next)).toEqual(["c", "b", "a"]);
   expect(next.runs.at(-1)?.status).toBe("failed");
+});
+
+it("is the same list after a read that changed nothing", () => {
+  const first = withNewest(emptyRunList, page([run("c", "running"), run("b")]));
+  const older = first.next;
+  if (!older) throw new Error("expected an older page");
+  const shown = withOlder(first, older, page([run("a", "running")], false));
+  // Every read parses new objects, so only what they say can be compared.
+  expect(withNewest(shown, page([run("c", "running"), run("b")]))).toBe(shown);
+  expect(withPage(shown, page([run("a", "running")], false))).toBe(shown);
+
+  // A run that did change is replaced, and the others keep their objects.
+  const next = withNewest(shown, page([run("c", "completed"), run("b")]));
+  expect(next).not.toBe(shown);
+  expect(next.runs[0]?.status).toBe("completed");
+  expect(next.runs.slice(1)).toEqual(shown.runs.slice(1));
+  expect(next.runs[1]).toBe(shown.runs[1]);
+  expect(next.runs[2]).toBe(shown.runs[2]);
+  // The list keeps its end, so a read of the next page still belongs to it.
+  expect(next.next).toBe(shown.next);
 });
 
 it("names the page to re-read for an active run below the newest page", () => {
