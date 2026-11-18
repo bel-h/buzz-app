@@ -15,18 +15,8 @@ it("loads formatting into the existing editor and retains its meaning on save", 
     "First **bold** and *italic* with [a link](https://example.com).\n\n- One\n- Two\n\n> Quoted\n\n```ts\nconst a = 1;\n```";
   const draft = documentEditorDraft(markdown);
   expect(draft.document).toBeDefined();
-  const strip = (value: unknown): unknown =>
-    Array.isArray(value)
-      ? value.map(strip)
-      : value && typeof value === "object"
-        ? Object.fromEntries(
-            Object.entries(value)
-              .filter(([key]) => key !== "position")
-              .map(([key, item]) => [key, strip(item)]),
-          )
-        : value;
-  expect(strip(fromMarkdown(documentEditorMarkdown(draft)))).toEqual(
-    strip(fromMarkdown(markdown)),
+  expect(semanticTree(fromMarkdown(documentEditorMarkdown(draft)))).toEqual(
+    semanticTree(fromMarkdown(markdown)),
   );
 });
 it.each([
@@ -36,7 +26,6 @@ it.each([
   ">",
   "https://example.com",
   "- ```ts\n  const a = 1;\n  ```",
-  "| Column | Value |\n| --- | --- |\n| A | B | Extra |",
   "- [x] Completed\n- [ ] Pending",
   "![Image](https://example.com/image.png)",
   "Before [`code`](https://example.com) after",

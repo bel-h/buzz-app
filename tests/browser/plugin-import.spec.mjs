@@ -2467,29 +2467,42 @@ test("installed documents reuse host Markdown, workspace tabs and persisted spli
     field.setSelectionRange(field.value.length, field.value.length);
   });
   await richEditor.press("!");
+  const copied = await richEditor.evaluate((field) => {
+    field.focus();
+    field.setSelectionRange(0, field.value.length);
+    const data = new DataTransfer();
+    field.dispatchEvent(
+      new ClipboardEvent("copy", {
+        bubbles: true,
+        cancelable: true,
+        clipboardData: data,
+      }),
+    );
+    return {
+      text: data.getData("text/plain"),
+      html: data.getData("text/html"),
+    };
+  });
+  expect(copied.html).toContain('data-buzz-copy="document"');
   for (const rich of [true, false]) {
-    await richEditor.evaluate((field, rich) => {
-      field.focus();
-      field.setSelectionRange(0, field.value.length);
-      const copied = new DataTransfer();
-      field.dispatchEvent(
-        new ClipboardEvent("copy", {
-          bubbles: true,
-          cancelable: true,
-          clipboardData: copied,
-        }),
-      );
-      const pasted = new DataTransfer();
-      pasted.setData("text/plain", copied.getData("text/plain"));
-      if (rich) pasted.setData("text/html", copied.getData("text/html"));
-      field.dispatchEvent(
-        new ClipboardEvent("paste", {
-          bubbles: true,
-          cancelable: true,
-          clipboardData: pasted,
-        }),
-      );
-    }, rich);
+    await richEditor.fill("Paste here");
+    await richEditor.evaluate(
+      (field, { copied, rich }) => {
+        field.focus();
+        field.setSelectionRange(0, field.value.length);
+        const data = new DataTransfer();
+        data.setData("text/plain", copied.text);
+        if (rich) data.setData("text/html", copied.html);
+        field.dispatchEvent(
+          new ClipboardEvent("paste", {
+            bubbles: true,
+            cancelable: true,
+            clipboardData: data,
+          }),
+        );
+      },
+      { copied, rich },
+    );
     await reader
       .getByRole("button", { name: "Read Guide", exact: true })
       .click();
@@ -2511,25 +2524,6 @@ test("installed documents reuse host Markdown, workspace tabs and persisted spli
   await reader
     .getByRole("button", { name: "Markdown source", exact: true })
     .click();
-  await markdownSource.fill("**Hello**");
-  await reader.getByRole("button", { name: "Rich text", exact: true }).click();
-  await richEditor.evaluate((field) => {
-    field.focus();
-    field.setSelectionRange(field.value.length, field.value.length);
-    const data = new DataTransfer();
-    data.setData("text/plain", " next");
-    field.dispatchEvent(
-      new ClipboardEvent("paste", {
-        bubbles: true,
-        cancelable: true,
-        clipboardData: data,
-      }),
-    );
-  });
-  await reader
-    .getByRole("button", { name: "Markdown source", exact: true })
-    .click();
-  await expect(markdownSource).toHaveValue("**Hello next**");
   await markdownSource.fill("");
   await reader.getByRole("button", { name: "Rich text", exact: true }).click();
   await richEditor.pressSequentially("C:" + "\\");

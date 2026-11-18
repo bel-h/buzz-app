@@ -344,7 +344,7 @@ it.each(["*italic*", "__bold__", "+ item", "1) item"])(
   },
 );
 
-it("keeps save shortcuts and selection restoration at the controlled editor boundary", () => {
+it("restores and reports rich selections through the editor handle", () => {
   const h = mount();
   const input = screen.getByRole("textbox", {
     name: "Document body",
@@ -362,14 +362,6 @@ it("keeps save shortcuts and selection restoration at the controlled editor boun
     end: 5,
     source: false,
   });
-  fireEvent.keyDown(input, { key: "Enter", ctrlKey: true });
-  expect(h.save).toHaveBeenCalledTimes(1);
-  h.rerender({ source: true });
-  fireEvent.keyDown(screen.getByRole("textbox", { name: "Markdown" }), {
-    key: "Enter",
-    metaKey: true,
-  });
-  expect(h.save).toHaveBeenCalledTimes(2);
 });
 
 it.each([false, true])(
@@ -391,7 +383,7 @@ it.each([false, true])(
     fireEvent.keyDown(input, { key: "Enter", ctrlKey: true });
     expect(h.save).toHaveBeenCalledTimes(1);
     h.rerender({ source, disabled: false, editing: true });
-    fireEvent.keyDown(input, { key: "Enter", ctrlKey: true });
+    fireEvent.keyDown(input, { key: "Enter", metaKey: true });
     expect(h.save).toHaveBeenCalledTimes(2);
   },
 );
@@ -494,6 +486,60 @@ it("keeps Shift+Enter after a typed backslash as a hard break", async () => {
   });
 });
 
+function richInput() {
+  return screen.getByRole("textbox", {
+    name: "Document body",
+  }) as ComposerInputElement;
+}
+
+function selectText(
+  input: ComposerInputElement,
+  start = 0,
+  end = input.value.length,
+) {
+  act(() => {
+    input.focus();
+    input.setSelectionRange(start, end);
+  });
+}
+
+function copySelection(
+  input: ComposerInputElement,
+  start?: number,
+  end?: number,
+) {
+  selectText(input, start, end);
+  const values = new Map<string, string>();
+  fireEvent.copy(input, {
+    clipboardData: {
+      setData: (type: string, value: string) => values.set(type, value),
+    },
+  });
+  const html = values.get("text/html") ?? "";
+  expect(html).toContain('data-buzz-copy="document"');
+  return { text: values.get("text/plain") ?? "", html };
+}
+
+function pasteDocument(input: HTMLElement, text: string, html = "") {
+  fireEvent.paste(input, {
+    clipboardData: {
+      items: [],
+      types: html ? ["text/plain", "text/html"] : ["text/plain"],
+      getData: (type: string) =>
+        type === "text/plain" ? text : type === "text/html" ? html : "",
+    },
+  });
+}
+
+function replaceMarkdown(h: ReturnType<typeof mount>, value: string) {
+  h.rerender({ source: true });
+  fireEvent.change(screen.getByRole("textbox", { name: "Markdown" }), {
+    target: { value },
+  });
+  h.rerender({ source: false });
+  return richInput();
+}
+
 const clipboardTree = (value: unknown): unknown =>
   Array.isArray(value)
     ? value.map(clipboardTree)
@@ -518,32 +564,13 @@ it.each(
   "preserves document clipboard structure (rich=$rich): $initialValue",
   ({ initialValue, rich }) => {
     const h = mount({}, { initialValue });
-    const input = screen.getByRole("textbox", {
-      name: "Document body",
-    }) as ComposerInputElement;
-    act(() => {
-      input.focus();
-      input.setSelectionRange(0, input.value.length);
-    });
-    const values = new Map<string, string>();
-    fireEvent.copy(input, {
-      clipboardData: {
-        setData: (type: string, value: string) => values.set(type, value),
-      },
-    });
+    const copied = copySelection(richInput());
     const expected = clipboardTree(fromMarkdown(initialValue));
     if (!rich)
-      expect(
-        clipboardTree(fromMarkdown(values.get("text/plain") ?? "")),
-      ).toEqual(expected);
-    fireEvent.paste(input, {
-      clipboardData: {
-        items: [],
-        types: rich ? ["text/plain", "text/html"] : ["text/plain"],
-        getData: (type: string) =>
-          !rich && type === "text/html" ? "" : (values.get(type) ?? ""),
-      },
-    });
+      expect(clipboardTree(fromMarkdown(copied.text))).toEqual(expected);
+    const destination = replaceMarkdown(h, "Paste here");
+    selectText(destination);
+    pasteDocument(destination, copied.text, rich ? copied.html : "");
     h.rerender({ source: true });
     const saved = (
       screen.getByRole("textbox", { name: "Markdown" }) as HTMLTextAreaElement
@@ -554,41 +581,18 @@ it.each(
 
 it("budgets plain document pastes using document serialization", () => {
   const h = mount({ maxLength: 12 }, { initialValue: "Start" });
-  const input = screen.getByRole("textbox", {
-    name: "Document body",
-  }) as ComposerInputElement;
-  act(() => {
-    input.focus();
-    input.setSelectionRange(0, input.value.length);
-  });
-  fireEvent.paste(input, {
-    clipboardData: {
-      items: [],
-      types: ["text/plain"],
-      getData: (type: string) =>
-        type === "text/plain" ? "First\n\nSecond" : "",
-    },
-  });
+  const input = richInput();
+  selectText(input);
+  pasteDocument(input, "First\n\nSecond");
   expect(h.change).not.toHaveBeenCalled();
   expect(input.value).toBe("Start");
 });
 
 it("keeps the caret's formatting for plain prose pasted in a document", () => {
   const h = mount({}, { initialValue: "**Hello**" });
-  const input = screen.getByRole("textbox", {
-    name: "Document body",
-  }) as ComposerInputElement;
-  act(() => {
-    input.focus();
-    input.setSelectionRange(input.value.length, input.value.length);
-  });
-  fireEvent.paste(input, {
-    clipboardData: {
-      items: [],
-      types: ["text/plain"],
-      getData: (type: string) => (type === "text/plain" ? " next" : ""),
-    },
-  });
+  const input = richInput();
+  selectText(input, input.value.length);
+  pasteDocument(input, " next");
   expect(h.change).toHaveBeenLastCalledWith("**Hello next**");
 });
 
@@ -614,28 +618,11 @@ it.each(
   "preserves $name through the document clipboard (rich=$rich)",
   ({ source, expected, rich }) => {
     const h = mount({}, { initialValue: source });
-    const input = screen.getByRole("textbox", {
-      name: "Document body",
-    }) as ComposerInputElement;
-    act(() => {
-      input.focus();
-      input.setSelectionRange(0, input.value.length);
-    });
-    const values = new Map<string, string>();
-    fireEvent.copy(input, {
-      clipboardData: {
-        setData: (type: string, value: string) => values.set(type, value),
-      },
-    });
-    expect(values.get("text/plain")).toBe(expected);
-    fireEvent.paste(input, {
-      clipboardData: {
-        items: [],
-        types: rich ? ["text/plain", "text/html"] : ["text/plain"],
-        getData: (type: string) =>
-          !rich && type === "text/html" ? "" : (values.get(type) ?? ""),
-      },
-    });
+    const copied = copySelection(richInput());
+    expect(copied.text).toBe(expected);
+    const destination = replaceMarkdown(h, "Paste here");
+    selectText(destination);
+    pasteDocument(destination, copied.text, rich ? copied.html : "");
     h.rerender({ source: true });
     expect(screen.getByRole("textbox", { name: "Markdown" })).toHaveValue(
       expected,
@@ -661,29 +648,17 @@ it.each(
   "preserves a partial $name selection through the document clipboard (rich=$rich)",
   ({ source, selection, rich }) => {
     const h = mount({}, { initialValue: source });
-    const input = screen.getByRole("textbox", {
-      name: "Document body",
-    }) as ComposerInputElement;
     const start = source.indexOf(selection);
-    act(() => {
-      input.focus();
-      input.setSelectionRange(start, start + selection.length);
-    });
-    const values = new Map<string, string>();
-    fireEvent.copy(input, {
-      clipboardData: {
-        setData: (type: string, value: string) => values.set(type, value),
-      },
-    });
-    expect(values.get("text/plain")).toBe(selection);
-    fireEvent.paste(input, {
-      clipboardData: {
-        items: [],
-        types: rich ? ["text/plain", "text/html"] : ["text/plain"],
-        getData: (type: string) =>
-          !rich && type === "text/html" ? "" : (values.get(type) ?? ""),
-      },
-    });
+    const end = start + selection.length;
+    const copied = copySelection(richInput(), start, end);
+    expect(copied.text).toBe(selection);
+    const changed = selection.replace(/[a-z]/i, "X");
+    const destination = replaceMarkdown(
+      h,
+      source.slice(0, start) + changed + source.slice(end),
+    );
+    selectText(destination, start, end);
+    pasteDocument(destination, copied.text, rich ? copied.html : "");
     h.rerender({ source: true });
     expect(screen.getByRole("textbox", { name: "Markdown" })).toHaveValue(
       source,
@@ -699,34 +674,15 @@ it.each(
   "pastes structured blocks into supported prose (hardBreak=$hardBreak, rich=$rich)",
   ({ hardBreak, rich }) => {
     const h = mount({}, { initialValue: "- one\n- two" });
-    const copiedInput = screen.getByRole("textbox", {
-      name: "Document body",
-    }) as ComposerInputElement;
-    act(() => {
-      copiedInput.focus();
-      copiedInput.setSelectionRange(0, copiedInput.value.length);
-    });
-    const values = new Map<string, string>();
-    fireEvent.copy(copiedInput, {
-      clipboardData: {
-        setData: (type: string, value: string) => values.set(type, value),
-      },
-    });
+    const copied = copySelection(richInput());
     const destination = hardBreak ? "First\\\nSecond" : "First Second";
-    h.rerender({ source: true });
-    fireEvent.change(screen.getByRole("textbox", { name: "Markdown" }), {
-      target: { value: destination },
-    });
-    h.rerender({ source: false });
+    const input = replaceMarkdown(h, destination);
     act(() => h.ref.current?.focusEnd());
-    fireEvent.paste(screen.getByRole("textbox", { name: "Document body" }), {
-      clipboardData: {
-        items: [],
-        types: rich ? ["text/plain", "text/html"] : ["text/plain"],
-        getData: (type: string) =>
-          !rich && type === "text/html" ? "" : (values.get(type) ?? ""),
-      },
-    });
+    pasteDocument(
+      input,
+      rich ? "Plain fallback" : copied.text,
+      rich ? copied.html : "",
+    );
     h.rerender({ source: true });
     expect(screen.getByRole("textbox", { name: "Markdown" })).toHaveValue(
       `${destination}\n\n- one\n- two`,
@@ -743,27 +699,11 @@ it.each(
   ({ hardBreak, rich }) => {
     const prefix = hardBreak ? "First\\\n" : "First ";
     const h = mount({}, { initialValue: `${prefix}Second` });
-    const input = screen.getByRole("textbox", {
-      name: "Document body",
-    }) as ComposerInputElement;
+    const input = richInput();
     const start = input.value.indexOf("Second");
-    act(() => {
-      input.focus();
-      input.setSelectionRange(start, start + "Second".length);
-    });
+    selectText(input, start, start + "Second".length);
     const url = "https://example.org/page";
-    fireEvent.paste(input, {
-      clipboardData: {
-        items: [],
-        types: rich ? ["text/plain", "text/html"] : ["text/plain"],
-        getData: (type: string) =>
-          type === "text/plain"
-            ? url
-            : rich
-              ? `<a href="${url}">${url}</a>`
-              : "",
-      },
-    });
+    pasteDocument(input, url, rich ? `<a href="${url}">${url}</a>` : "");
     h.rerender({ source: true });
     expect(screen.getByRole("textbox", { name: "Markdown" })).toHaveValue(
       `${prefix}[Second](${url})`,
