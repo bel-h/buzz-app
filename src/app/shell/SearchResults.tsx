@@ -958,19 +958,15 @@ export function SearchResults({
           .map(({ pubkey, profile, label, verified }) => {
             const agent = selectableAgents.get(pubkey);
             const isAgent = !!agent || !!profile.isAgent;
+            // The name the label is not: a verified person's other verified
+            // name, else a handle that differs from the profile name.
+            const detail = verified
+              ? otherVerifiedName(verifiedLabel(verified, preference), verified)
+              : profile.username && `@${profile.username}`;
             return {
               key: `author:${pubkey}`,
               label,
-              detail: [
-                verified &&
-                  otherVerifiedName(
-                    verifiedLabel(verified, preference),
-                    verified,
-                  ),
-                pubkey.slice(0, 12),
-              ]
-                .filter(Boolean)
-                .join(" · "),
+              ...(detail ? { detail } : {}),
               icon: ChatCircleIcon,
               avatar: {
                 src: avatarMedia(

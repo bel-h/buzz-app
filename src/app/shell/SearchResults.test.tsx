@@ -4649,7 +4649,7 @@ it.each(
       expect(reads).toEqual([]);
       fireEvent.click(
         screen.getByRole("option", {
-          name: new RegExp(person.pubkey.slice(0, 12)),
+          name: /Robinexample/,
         }),
       );
       expect(change).toHaveBeenCalledWith(`from:${person.pubkey} deploy`);
@@ -4823,7 +4823,7 @@ it.each([
         expect(reads).toEqual([]);
         fireEvent.click(
           screen.getByRole("option", {
-            name: new RegExp(person.pubkey.slice(0, 12)),
+            name: /Robinexample/,
           }),
         );
         expect(change).toHaveBeenCalledWith(`from:${person.pubkey} deploy`);
@@ -4945,7 +4945,7 @@ it("offers every scoped alias match when completion is ambiguous", async () => {
     expect(reads).toEqual([]);
     fireEvent.click(
       screen.getByRole("option", {
-        name: new RegExp(person.pubkey.slice(0, 12)),
+        name: /Robinexample/,
       }),
     );
     expect(change).toHaveBeenCalledWith(`from:${person.pubkey} deploy`);
@@ -5049,6 +5049,8 @@ it.each(
       namesake ? { namesakeName: alias } : {},
     );
     const change = vi.fn();
+    // The person's row shows both verified names; a namesake has only `alias`.
+    const personRow = alias === "robinz" ? /Robinexample/ : /robinz/;
     const props = {
       session: owner.session,
       onQueryChange: change,
@@ -5070,9 +5072,7 @@ it.each(
       );
       await settle();
       if (alias === "robinz") {
-        screen.getByRole("option", {
-          name: new RegExp(person.pubkey.slice(0, 12)),
-        });
+        screen.getByRole("option", { name: personRow });
         mounted.rerender(<SearchResults {...props} query={completed} />);
         await settle();
       }
@@ -5083,11 +5083,7 @@ it.each(
           ),
         ).toHaveLength(2);
         expect(reads).toEqual([]);
-        fireEvent.click(
-          screen.getByRole("option", {
-            name: new RegExp(person.pubkey.slice(0, 12)),
-          }),
-        );
+        fireEvent.click(screen.getByRole("option", { name: personRow }));
         expect(change).toHaveBeenCalledWith(`from:${person.pubkey} deploy`);
       } else {
         expect(reads).toContainEqual(
@@ -5423,7 +5419,7 @@ const alexSession = (
     query(filters) {
       if (filters.some((filter) => filter.kinds?.includes(0)))
         return Promise.resolve([
-          profile(exact, { display_name: "Alex" }),
+          profile(exact, { display_name: "Alex", name: "alexk" }),
           ...page,
         ]);
       if (filters.some((filter) => filter.kinds?.includes(9)))
@@ -5463,11 +5459,7 @@ it.each([
       expect(await people.findAllByRole("option")).toHaveLength(shown);
       // The picker follows the resolver's completed lookup.
       expect(reads).toEqual([]);
-      fireEvent.click(
-        people.getByRole("option", {
-          name: new RegExp(exact.pubkey.slice(0, 12)),
-        }),
-      );
+      fireEvent.click(people.getByRole("option", { name: /@alexk/ }));
       expect(change).toHaveBeenCalledWith(`from:${exact.pubkey} `);
       mounted.rerender(
         <SearchResults {...props} query={`from:${exact.pubkey} `} />,
@@ -5870,8 +5862,8 @@ it("keeps both exact authors selectable ahead of a crowded prefix page", async (
           ...prefixes.map((person, index) =>
             profile(person, { display_name: `Samantha ${index}` }),
           ),
-          profile(first, { display_name: "Sam" }),
-          profile(second, { display_name: "Sam" }),
+          profile(first, { display_name: "Sam", name: "samira" }),
+          profile(second, { display_name: "Sam", name: "samuel" }),
         ]);
       return Promise.resolve([]);
     },
@@ -5891,17 +5883,10 @@ it("keeps both exact authors selectable ahead of a crowded prefix page", async (
     );
     const people = within(await screen.findByRole("group", { name: "People" }));
     await waitFor(() => expect(people.getAllByRole("option")).toHaveLength(12));
-    for (const pubkey of [first.pubkey, second.pubkey]) {
-      expect(
-        people.getByRole("option", { name: new RegExp(pubkey.slice(0, 12)) }),
-      ).toBeVisible();
-    }
+    for (const handle of [/@samira/, /@samuel/])
+      expect(people.getByRole("option", { name: handle })).toBeVisible();
     expect(reads).toHaveLength(0);
-    fireEvent.click(
-      people.getByRole("option", {
-        name: new RegExp(second.pubkey.slice(0, 12)),
-      }),
-    );
+    fireEvent.click(people.getByRole("option", { name: /@samuel/ }));
     expect(change).toHaveBeenCalledExactlyOnceWith(
       `from:${second.pubkey} deploy`,
     );
@@ -5910,6 +5895,67 @@ it("keeps both exact authors selectable ahead of a crowded prefix page", async (
     owner.dispose();
   }
 });
+
+it.each(["from:@sam", "in:@sam"])(
+  "shows a handle under a different profile name for %s, never a key",
+  async (query) => {
+    const relay = keypair(),
+      viewer = keypair();
+    const found = [
+      { display_name: "Sam Reader", name: "sreader" },
+      // No profile name: the handle is the title and is not repeated.
+      { name: "samwise" },
+      { display_name: "samantha", name: "samantha" },
+      // Namesakes are told apart by their handles.
+      { display_name: "Sam", name: "samira" },
+      { display_name: "Sam", name: "samuel" },
+    ].map((content) => profile(keypair(), content));
+    const owner = createRelaySession({
+      ...scriptedTransport(viewer.pubkey, relay.pubkey).transport,
+      query: (filters) =>
+        Promise.resolve(
+          filters.some((filter) => filter.kinds?.includes(0)) ? found : [],
+        ),
+    });
+    try {
+      render(
+        <SearchResults
+          session={owner.session}
+          query={query}
+          onQueryChange={() => {}}
+          input={createRef()}
+          pages={[]}
+          openNewMessage={() => {}}
+          openConversation={() => {}}
+        />,
+      );
+      const people = within(
+        await screen.findByRole("group", { name: "People" }),
+      );
+      await waitFor(() =>
+        expect(
+          people
+            .getAllByRole("option")
+            .map((row) =>
+              [...row.querySelectorAll("span.block")]
+                .map((line) => line.textContent)
+                .join(" | "),
+            )
+            .sort(),
+        ).toEqual([
+          "Sam Reader | @sreader",
+          "Sam | @samira",
+          "Sam | @samuel",
+          "samantha",
+          "samwise",
+        ]),
+      );
+    } finally {
+      cleanup();
+      owner.dispose();
+    }
+  },
+);
 
 it("keeps a person visible when agent candidates exceed the picker cap", async () => {
   const relay = keypair(),
