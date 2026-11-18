@@ -966,15 +966,13 @@ fn classes_of(kind: u16) -> Vec<&'static str> {
         .collect()
 }
 
-fn buzz_kinds() -> Vec<(u16, &'static str)> {
-    include_str!("buzz_kinds.txt")
-        .lines()
-        .filter(|line| !line.starts_with('#') && !line.is_empty())
-        .map(|line| {
-            let (kind, name) = line.split_once(' ').unwrap();
-            (kind.parse().unwrap(), name)
-        })
-        .collect()
+/// Every kind block/buzz defines; `KIND_AUTH` is signed but not in `ALL_KINDS`.
+fn buzz_kinds() -> impl Iterator<Item = u16> {
+    use buzz_core::kind::{ALL_KINDS, KIND_AUTH};
+    ALL_KINDS
+        .iter()
+        .chain([&KIND_AUTH])
+        .map(|&kind| u16::try_from(kind).unwrap())
 }
 
 #[test]
@@ -992,11 +990,11 @@ fn signing_classes_are_disjoint() {
 
 #[test]
 fn every_buzz_kind_has_one_signing_class() {
-    for (kind, name) in buzz_kinds() {
+    for kind in buzz_kinds() {
         let classes = classes_of(kind);
         assert!(
             classes.len() == 1,
-            "Kind {kind} ({name}) from block/buzz is listed {classes:?} in policy.rs; add it to exactly one of ORDINARY, SENSITIVE or REFUSED. To pick up new block/buzz kinds, run `node scripts/sync-buzz-kinds.mjs`"
+            "Kind {kind} from block/buzz `buzz_core::kind::ALL_KINDS` is listed {classes:?} in policy.rs; add it to exactly one of ORDINARY, SENSITIVE or REFUSED"
         );
     }
 }
