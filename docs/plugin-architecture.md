@@ -3563,7 +3563,7 @@ export function apply(ctx: Context) {
       // request is already checked and has its timeoutMs; signal aborts at it.
       return { outcome: "answered", model: "example-1", answers: {} };
     },
-    Settings: ({ active }) => null, // shown while this provider is selected
+    Settings: ({ active }) => null, // shown under the provider in Settings
   });
 }
 ```
@@ -3575,26 +3575,29 @@ the reply. An answer of the wrong type, an unknown choice, a value outside 0 to
 1 or a missing answer makes the call `invalid_response`; answers to questions
 that were not asked are dropped.
 
-The user chooses the provider in Settings > Decisions API, and the choice is
-kept on this device. Until they choose, the first default provider that is on
-and can answer (`ready` or `unconfirmed`) does: Builderlab
+Settings > Decisions API shows every provider once, with its settings and the
+communities where its `status(community)` can answer, and the user chooses a
+provider for each joined community. Choices are kept on this device, by the
+community's relay host. Each request is routed in its `community`. Until the
+user chooses for that community, the first default provider that is on and can
+answer there (`ready` or `unconfirmed`) does: Builderlab
 (`block.builderlab/builderlab`), then TypeSafe (`buzz.typesafe/typesafe`).
 When none can, TypeSafe is the provider, and the status is `checking` while
 another default is still finding out whether it can answer. The same holds
-while a chosen default is not on. Each request is routed in its `community`:
-a provider answers there only if its `status(community)` can, and where a
-chosen Builderlab cannot, TypeSafe, the user's own key, answers instead.
-Decision text can include private messages, so no other provider gets it
-without that choice: while a chosen provider that is not a default is not on,
-decisions are `unavailable` and are not sent to another provider. `ctx.decisions.backend(community?)`
-is the key (`<plugin id>/<provider id>`) of the provider that answers in that
-community, or undefined when none is on, and `ctx.decisions.status(community?)`
-its status. Without a community, a choice is its own answer. `Decisions` exposes
-no way to choose the provider. `state` and every question go to the provider,
-so send only what the decision needs.
+while a chosen default is not on. Where a chosen Builderlab cannot answer,
+TypeSafe, the user's own key, answers instead. A request without a community
+uses a provider chosen before per-community choices, if any, or the defaults;
+Builderlab never answers it. Decision text can include private messages, so no
+other provider gets it without that choice: while a chosen provider that is
+not a default is not on, decisions there are `unavailable` and are not sent to
+another provider. `ctx.decisions.backend(community?)` is the key
+(`<plugin id>/<provider id>`) of the provider that answers in that community,
+or undefined when none is on, and `ctx.decisions.status(community?)` its
+status. `Decisions` exposes no way to choose the provider. `state` and every
+question go to the provider, so send only what the decision needs.
 
-`ctx.decisions.retireProvider(id)` clears a saved choice for a retired provider
-from the calling plugin. Pass the local provider ID, without a plugin prefix.
+`ctx.decisions.retireProvider(id)` clears saved choices for a retired provider
+from the calling plugin, in every community. Pass the local provider ID, without a plugin prefix.
 The host then uses its default providers. Choices for other providers stay in
 effect. The method throws if the saved change fails or the caller has no plugin
 scope. It does not register a provider or let a plugin select another provider.

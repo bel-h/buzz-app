@@ -1784,16 +1784,17 @@ tab, asks **Discard changes?** first; **Keep editing** keeps them.
   its settings: sections it adds, such as GitHub comment authors, and Decisions
   API for a decision provider, such as TypeSafe. Only sections the Settings
   sidebar currently shows are linked. Back from one returns to those details.
-- When Builderlab and TypeSafe are available in **Settings → Decisions API**,
-  the **Decision provider** dropdown chooses Builderlab or TypeSafe. Each choice
-  uses that provider for requests. Choosing TypeSafe without a key opens
-  **Connect TypeSafe**, with a link to create a key in the TypeSafe console.
-  Saving the key completes the switch; closing setup keeps the current provider.
-  Builderlab answers in each community whose Builderlab sign-in offers your
-  account decisions; elsewhere your TypeSafe key answers. With Builderlab
-  selected, **Communities** lists which provider answers in each community. If
-  none of your communities offer Builderlab decisions to your account, the pane
-  says so and suggests contacting your account administrator.
+- **Settings → Decisions API** has two parts. **Providers** shows each decision
+  provider once, with its settings (TypeSafe's API key, Builderlab's sign-in)
+  and the communities where it can answer. **Communities** has a provider menu
+  for each community you joined. A menu offers only the providers that can
+  answer in that community: Builderlab where that community's Builderlab
+  sign-in offers your account decisions, TypeSafe once its key is saved. Until
+  you choose, a community uses Builderlab where it can and TypeSafe elsewhere.
+  If a chosen Builderlab stops answering in a community, your TypeSafe key
+  answers there. If none of your communities offer Builderlab decisions to your
+  account, Providers says so and suggests contacting your account
+  administrator.
 - In **Settings → Decisions API**, TypeSafe’s saved API key stays masked. Its
   chevron menu offers **Replace / Remove**. Replacement starts blank and masked,
   with inline **Cancel / Save** controls. **Save** stays disabled until you enter
