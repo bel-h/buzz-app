@@ -98,7 +98,8 @@ export function documentEditorDraft(markdown: string) {
       node.children.every(
         (item) =>
           item.checked == null &&
-          item.children[0]?.type === "paragraph" &&
+          (item.children.length === 0 ||
+            item.children[0]?.type === "paragraph") &&
           item.children.every(supportedBlock),
       ) &&
       !/^\s*[-*+]\s+\[[ xX]\]/m.test(raw(node)));
@@ -129,7 +130,9 @@ export function documentEditorDraft(markdown: string) {
         node.children.map((item) =>
           schema.nodes.list_item.create(
             { spread: item.spread },
-            item.children.map(block),
+            item.children.length
+              ? item.children.map(block)
+              : schema.nodes.paragraph.create(),
           ),
         ),
       );

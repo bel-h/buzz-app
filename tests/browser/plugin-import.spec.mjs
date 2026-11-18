@@ -2714,6 +2714,47 @@ async function openTableEditor(page, app) {
   };
 }
 
+test("document lists reopen with empty items ready for typing", async ({
+  page,
+  app,
+}) => {
+  const { reader, rich, source, markdown, formatted } = await openTableEditor(
+    page,
+    app,
+  );
+  const read = reader.getByRole("button", { name: "Read Guide", exact: true });
+  const edit = reader.getByRole("button", { name: "Edit Guide", exact: true });
+  for (const nested of [false, true]) {
+    await markdown.click();
+    await source.fill("");
+    await formatted.click();
+    await rich.focus();
+    await page.keyboard.type("- First");
+    await page.keyboard.press("Enter");
+    if (nested) await page.keyboard.press("Tab");
+
+    await rich.press("ControlOrMeta+Enter");
+    await expect(reader.getByRole("status")).toHaveText(
+      `Saved ${nested ? 2 : 1}`,
+    );
+    await read.click();
+    await edit.click();
+
+    const items = rich.locator(nested ? "ul ul > li" : "ul > li");
+    await expect(items).toHaveText(nested ? [""] : ["First", ""]);
+    await items
+      .last()
+      .locator("p")
+      .click({ position: { x: 2, y: 4 } });
+    await page.keyboard.type("Continued");
+    await expect(items).toHaveText(
+      nested ? ["Continued"] : ["First", "Continued"],
+    );
+    if (nested)
+      await expect(rich.locator("ul > li > p").first()).toHaveText("First");
+  }
+});
+
 async function tableClipboard(rich, type, payload = {}) {
   return rich.evaluate(
     (field, { type, text, html, placement }) => {

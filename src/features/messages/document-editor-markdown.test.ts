@@ -19,6 +19,28 @@ it("loads formatting into the existing editor and retains its meaning on save", 
     semanticTree(fromMarkdown(markdown)),
   );
 });
+
+it.each([
+  ["-", "bullet_list"],
+  ["- First\n-", "bullet_list"],
+  ["1. First\n2.", "ordered_list"],
+] as const)(
+  "loads a trailing empty list item as an editable paragraph: %s",
+  (markdown, listType) => {
+    const draft = documentEditorDraft(markdown);
+    const doc = readComposerSnapshot(draft.document, "document");
+    expect(doc?.firstChild?.type.name).toBe(listType);
+    expect(
+      doc?.firstChild?.lastChild?.firstChild?.eq(
+        schema.nodes.paragraph.create(),
+      ),
+    ).toBe(true);
+    expect(semanticTree(fromMarkdown(documentEditorMarkdown(draft)))).toEqual(
+      semanticTree(fromMarkdown(markdown)),
+    );
+  },
+);
+
 it.each([
   "# Heading\n\nParagraph",
   "~~removed~~",

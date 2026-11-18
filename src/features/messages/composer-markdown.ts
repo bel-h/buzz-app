@@ -220,18 +220,26 @@ function blocksMarkdown(
       return;
     const paragraphs =
       previous?.type.name === "paragraph" && block.type.name === "paragraph";
+    const list =
+      block.type.name === "bullet_list" || block.type.name === "ordered_list";
     const tightItem =
       mode === "document" && doc.type.name === "list_item" && !doc.attrs.spread;
+    // An empty first item cannot interrupt a paragraph in CommonMark. A bare
+    // dash directly under that paragraph would be parsed as a heading underline.
+    const emptyNestedList =
+      list &&
+      previous?.type.name === "paragraph" &&
+      previous.content.size > 0 &&
+      block.firstChild?.firstChild?.content.size === 0;
     // Blank separation prevents lazy quote continuation and adjacent blocks
     // merging on send; ordinary authored paragraph newlines remain unchanged.
     if (previous)
       blocks.push(
-        (mode === "chat" && paragraphs) || (tightItem && !paragraphs)
+        (mode === "chat" && paragraphs) ||
+          (tightItem && !paragraphs && !emptyNestedList)
           ? "\n"
           : "\n\n",
       );
-    const list =
-      block.type.name === "bullet_list" || block.type.name === "ordered_list";
     if (list) alternate = lastList === block.type && !alternate;
     let output: string;
     if (block.type.name === "markdown_table") {
