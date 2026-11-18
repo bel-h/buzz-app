@@ -82,7 +82,7 @@ function prompt(
   at: number,
   raw: string,
   name?: Names,
-): TranscriptItem {
+): Extract<TranscriptItem, { type: "prompt" }> {
   let sections = promptSections(raw);
   const steer = sections.find((section) => section.tag === STEER);
   // An older steer wraps a whole turn.
@@ -101,8 +101,8 @@ function prompt(
   };
 }
 
-/** Transcript lines as turns, each opened by a prompt. Claude Code's own
- * entries (metadata, subagents, attachments) are left out. */
+/** Transcript lines as turns, each opened by a prompt. Claude Code records
+ * some Buzz steers as queued-command attachments within the active turn. */
 export function claudeTurns(
   file: string,
   conversation: Session,
@@ -146,22 +146,32 @@ export function claudeTurns(
       continue;
     }
     if (!entry || entry.isSidechain || entry.isMeta) continue;
-    const message = object(entry.message);
     const id = str(entry.uuid);
+    if (!id) continue;
     const at = Date.parse(str(entry.timestamp)) || last;
-    if (
-      !message ||
-      !id ||
-      (entry.type !== "user" && entry.type !== "assistant")
-    )
+    if (entry.type === "attachment") {
+      const attachment = object(entry.attachment);
+      if (attachment?.type !== "queued_command") continue;
+      const item = prompt(id, at, str(attachment.prompt), name);
+      if (
+        item.sections.some(
+          ({ tag, body }) => tag === STEER && readEventBody(body),
+        )
+      ) {
+        (turns.at(-1) ?? turn(id, at, true)).items.push(item);
+        last = at;
+      }
+      continue;
+    }
+    const message = object(entry.message);
+    if (!message || (entry.type !== "user" && entry.type !== "assistant"))
       continue;
     const results = blocks(message.content).filter(
       (block) => block.type === "tool_result",
     );
     if (entry.type === "user" && !results.length) {
       const item = prompt(id, at, text(message.content), name);
-      const current =
-        item.type === "prompt" && item.steer ? turns.at(-1) : undefined;
+      const current = item.steer ? turns.at(-1) : undefined;
       (current ?? turn(id, at, false)).items.push(item);
       last = at;
       continue;

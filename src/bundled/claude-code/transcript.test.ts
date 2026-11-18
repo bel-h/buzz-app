@@ -259,6 +259,40 @@ const turn = (content: string, context: readonly EventData[] = []) =>
     total: context.length + 1,
   });
 
+it("shows delivered steering attachments in the running turn", () => {
+  const attachment = (type: string, prompt: string, extra = {}) =>
+    line("attachment", undefined, {
+      attachment: { type, prompt },
+      ...extra,
+    });
+  const file = [
+    line("user", turn("fix the tests")),
+    line("assistant", [
+      { type: "tool_use", id: "t1", name: "Bash", input: { command: "test" } },
+    ]),
+    line("user", [{ type: "tool_result", tool_use_id: "t1", content: "ok" }]),
+    attachment("queued_command", steerPrompt(turn("also lint"))),
+    attachment("queued_command", steerPrompt(turn("check formatting"))),
+    attachment("queued_command", steerPrompt("A scheduled wake.")),
+    attachment("queued_command", turn("ordinary queued prompt")),
+    attachment("other", steerPrompt(turn("other attachment"))),
+    attachment("queued_command", steerPrompt(turn("from a subagent")), {
+      isSidechain: true,
+    }),
+    line("assistant", [{ type: "text", text: "Fixed." }]),
+  ].join("\n");
+  const name = (pubkey: string) => (pubkey === sam ? "Sam" : undefined);
+  const turns = claudeTurns(file, conversation, false, name);
+  expect(turns).toHaveLength(1);
+  expect(turns[0]?.items).toMatchObject([
+    { type: "prompt", text: "fix the tests", author: "Sam", steer: false },
+    { type: "tool", output: "ok", status: "completed" },
+    { type: "prompt", text: "also lint", author: "Sam", steer: true },
+    { type: "prompt", text: "check formatting", author: "Sam", steer: true },
+    { type: "message", text: "Fixed." },
+  ]);
+});
+
 it("reads a prompt and a steer sent as exact records, naming the sender", () => {
   clock = 0;
   const file = [
