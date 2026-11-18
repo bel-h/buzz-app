@@ -5293,6 +5293,7 @@ it("passes only explicit runtime settings through the owner review tool", async 
       agent: "Self",
       ...settings,
       model: "  ",
+      effort: " high ",
     }),
   ).resolves.toBe('{"requestId":"draft","saved":false}');
   expect(client.updateAgent).toHaveBeenCalledWith({ agent: "Self", settings });
