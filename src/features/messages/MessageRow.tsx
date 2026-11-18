@@ -507,10 +507,11 @@ function MessageRowContent({
   const timeReply =
     shown.diff || bodyContent != null
       ? undefined
-      : parseMediaTimeReply(shown.content);
-  const sourceRow = timeReply
-    ? { ...shown, content: timeReply.content }
-    : shown;
+      : parseMediaTimeReply(row.forward?.note ?? shown.content);
+  const sourceRow =
+    timeReply && !row.forward
+      ? { ...shown, content: timeReply.content }
+      : shown;
   const { caption: displayRow, cards: chatCards } = useMemo(
     () =>
       bodyContent != null
@@ -1007,11 +1008,12 @@ function MessageRowContent({
     [row.forward, row.attachments],
   );
   const { edited: _forwardEdited, ...forwardDisplayRow } = displayRow;
+  const forwardNote = timeReply?.content ?? row.forward?.note;
   const body =
     bodyContent ??
     (row.forward ? (
       <>
-        {row.forward.note && (
+        {forwardNote && (
           <MessageMarkdown
             directory={directory}
             session={references}
@@ -1019,7 +1021,7 @@ function MessageRowContent({
             row={{
               ...displayRow,
               content: projectMarkdownAttachments(
-                row.forward.note,
+                forwardNote,
                 new Set(row.attachments.map(({ url }) => url)),
               ).content,
               attachmentSeams: [],
@@ -1546,12 +1548,17 @@ function MessageRowContent({
                 !row.huddle &&
                 !renderMessage &&
                 messageActions()}
-              {/* Screen-reader text stays out of selections: the clipboard carries
-                what the reader saw, so a continuation copies without a byline. */}
+              {/* A selection holding the whole byline copies it as one line,
+                name then time (selection-copy.ts). A grouped row's byline is
+                otherwise screen-reader text that stays out of selections. */}
               <div
                 className={
                   stackPrevious ? "sr-only select-none" : styles.byline
                 }
+                data-copy-author={
+                  row.workflowOwnerId && workflowOwnerName ? "Workflow" : name
+                }
+                data-copy-time={showTime ? row.createdAt : undefined}
               >
                 {row.workflowOwnerId && workflowOwnerName ? (
                   <WorkflowByline
