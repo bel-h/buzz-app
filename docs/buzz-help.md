@@ -1708,12 +1708,14 @@ tab, asks **Discard changes?** first; **Keep editing** keeps them.
   folder. After that the agent can reload it from that folder. A reload that
   fails to start restores the previous version. Changed host access still needs
   the person's review through the plugin's **Update**.
-- With **Plugin development** on, `performance_snapshot` gives an agent a
-  bounded JSON report from this app. It samples for 1–10 seconds (default 5).
-  It reports visible page delay, client batch/read work, agent updates and plugin
-  MCP reply encoding. It excludes message text and credentials. No recorder runs
-  between calls. Unsupported engine measurements are listed explicitly. An
-  external agent needs the owner's existing full-agent approval.
+- **Performance diagnostics** starts off. Enable it in **Settings → Plugins →
+  Manage plugins** or approve an agent's enable request. Once enabled,
+  `performance_snapshot` gives an agent a bounded JSON report from this app.
+  It samples visible page delay, client batch and read work, agent updates and
+  plugin MCP reply encoding for 1–10 seconds (default 5). It reports aggregate
+  activity across retained communities and excludes message text and credentials.
+  It lists unsupported engine measurements. An external agent needs the owner's
+  existing full-agent approval.
 - In the desktop app, agents can list this device's plugins and disable one.
   Installing, updating, enabling or removing a plugin is a request: the agent's
   message in the conversation shows a card with **Review** and **Decline**, and the

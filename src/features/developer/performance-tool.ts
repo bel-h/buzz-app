@@ -11,7 +11,7 @@ export function registerPerformanceTool(
   agents.addTool({
     name: "performance_snapshot",
     description:
-      "Sample this Buzz page for 1–10 seconds (default 5) and return bounded JSON: visible main-thread delay, client batch/read totals, agent updates and plugin MCP reply serialization. No message text. Requires this device's Plugin development plugin.",
+      "Sample this Buzz page for 1–10 seconds (default 5) and return bounded JSON: visible main-thread delay, client batch/read totals, agent updates and plugin MCP reply serialization. No message text. Requires this device’s Performance diagnostics plugin.",
     inputSchema: {
       type: "object",
       properties: {

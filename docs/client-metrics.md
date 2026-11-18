@@ -2,10 +2,19 @@
 
 ## Agent snapshots in packaged apps
 
-With **Plugin development** enabled, an agent on this device can call
-`performance_snapshot({"duration_ms":5000})`. An external agent needs the owner's
-existing full-agent approval. This uses the shipped agent tool route. Native MCP
-and Developer mode are not required. Older apps do not offer this tool.
+The bundled **Performance diagnostics** plugin is off by default. Enable it on
+this device in **Settings → Plugins → Manage plugins**. An agent can ask the
+owner to enable it with
+`plugin_request({"action":"enable","id":"buzz.performance-diagnostics","reason":"Investigate Buzz performance"})`.
+The owner confirms the request in Buzz. Check `plugin_request_status` with the
+returned `requestId` and discover the tool after approval.
+
+Once enabled, an agent on this device can call
+`performance_snapshot({"duration_ms":5000})`. It samples aggregate activity
+across the communities this app retains. An external connection needs existing
+full-agent approval. Native MCP and Developer mode are unnecessary. Enabling
+the plugin changes the agent tool list on this device. Existing sessions that
+cannot accept a changed tool list may need to start a new session.
 
 The only argument is optional `duration_ms`: an integer from 1000 to 10000,
 default 5000. A second concurrent capture fails. The capture stops when the
