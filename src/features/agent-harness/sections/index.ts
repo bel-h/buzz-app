@@ -12,6 +12,10 @@ import mentions from "./mentions.md?raw";
 import posting from "./posting.md?raw";
 import repoConventions from "./repo-conventions.md?raw";
 import sessionModelChannel from "./session-model.channel.md?raw";
+import sessionModelInChannel from "./session-model.in-channel.md?raw";
+import sessionModelInConversation from "./session-model.in-conversation.md?raw";
+import sessionModelInThread from "./session-model.in-thread.md?raw";
+import sessionModelStandalone from "./session-model.standalone.md?raw";
 import sessionModelThread from "./session-model.thread.md?raw";
 import threading from "./threading.md?raw";
 import tools from "./tools.md?raw";
@@ -25,6 +29,11 @@ export type Facts = Readonly<{
   /** Whether each thread is a session of its own, or the whole channel is
    * one. */
   scope: "thread" | "channel";
+  /** What the session is, for a harness that states it: one thread, one
+   * whole conversation (a DM, a personal chat, a huddle or a channel's top
+   * level), or a watch's or timer's run that joins no conversation. Without
+   * it, the Session Model describes the scope alone. */
+  place?: "thread" | "conversation" | "standalone" | undefined;
   /** The agent's workspace, absolute, when the conversation works in a folder
    * of its own instead. */
   ownFolder?: string | undefined;
@@ -61,7 +70,17 @@ export const SECTIONS: readonly Section[] = [
   { id: "product-help", text: `## Product help\n\n${BUZZ_HELP_PROMPT}` },
   {
     id: "session-model",
-    text: ({ scope }) =>
-      scope === "thread" ? sessionModelThread : sessionModelChannel,
+    text: ({ scope, place }) =>
+      place === "standalone"
+        ? sessionModelStandalone
+        : !place
+          ? scope === "thread"
+            ? sessionModelThread
+            : sessionModelChannel
+          : scope === "channel"
+            ? sessionModelInChannel
+            : place === "thread"
+              ? sessionModelInThread
+              : sessionModelInConversation,
   },
 ];
