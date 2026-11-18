@@ -248,6 +248,21 @@ it("reads back expired delivery with strong consistency without re-signing or pu
   ).toBe(false);
 });
 it.each([
+  [undefined, undefined],
+  [["nip-cl"], undefined],
+  ["buzz-solo-member-role", undefined],
+  [["nip-cl", "buzz-solo-member-role"], true],
+])(
+  "requires an explicit NIP-11 advertisement for Solo role updates: %o",
+  async (supported_extensions, expected) => {
+    discovery = { supported_extensions };
+    expect(
+      (await connectNativeTransport(community)).memberAdministration
+        ?.soloMemberRoleUpdates,
+    ).toBe(expected);
+  },
+);
+it.each([
   {},
   { supported_extensions: null },
   { supported_extensions: [] },

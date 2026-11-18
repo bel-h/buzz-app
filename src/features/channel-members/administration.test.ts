@@ -46,7 +46,11 @@ function deferred() {
   });
   return { promise, resolve };
 }
-function harness(actor = "owner", role: string | undefined = "member") {
+function harness(
+  actor = "owner",
+  role: string | undefined = "member",
+  soloMemberRoleUpdates = false,
+) {
   let clock = 100;
   const record = (kind: number, tags: string[][]) =>
     finalizeEvent({ kind, tags, content: "", created_at: clock++ }, relayKey);
@@ -98,7 +102,11 @@ function harness(actor = "owner", role: string | undefined = "member") {
   const acceptDiscovery = vi.fn();
   const owner = createMemberAdministration({
     reader: { read },
-    writer: { sign, publish },
+    writer: {
+      sign,
+      publish,
+      ...(soloMemberRoleUpdates ? { soloMemberRoleUpdates: true } : {}),
+    },
     viewer,
     relayAuthor: author,
     canAccess: () => access,
@@ -938,8 +946,12 @@ function agentProfile(ownerKey = key, created_at = 200, valid = true) {
     new Uint8Array(32).fill(4),
   );
 }
-function ownedAgent(actor = "member", role = "bot") {
-  const h = harness(actor, role);
+function ownedAgent(
+  actor = "member",
+  role = "bot",
+  soloMemberRoleUpdates = false,
+) {
+  const h = harness(actor, role, soloMemberRoleUpdates);
   let profiles = [agentProfile()];
   h.read.mockImplementation(async (filters) =>
     filters.some((filter) => filter.kinds?.includes(0)) ? profiles : h.events(),
@@ -1180,8 +1192,14 @@ function transferHarness(
   h.setProfiles(profiles);
   return h;
 }
-function soloAgent(actor = "owner", role = "bot", profiles = [agentProfile()]) {
-  const h = transferHarness(actor, role, profiles);
+function soloAgent(
+  actor = "owner",
+  role = "bot",
+  profiles = [agentProfile()],
+  soloMemberRoleUpdates = true,
+) {
+  const h = ownedAgent(actor, role, soloMemberRoleUpdates);
+  h.setProfiles(profiles);
   h.setEvents([
     h.record(39000, [
       ["d", id],
@@ -1192,6 +1210,19 @@ function soloAgent(actor = "owner", role = "bot", profiles = [agentProfile()]) {
   ]);
   return h;
 }
+it("refuses a Solo role update before signing on an older relay and still allows removal", async () => {
+  const h = soloAgent("owner", "bot", [agentProfile()], false);
+  const capability = h.owner.capability;
+  await capability.refresh(id);
+  expect(capability.snapshot(id).authority.canManageSolo).toBe(false);
+  await capability.run(id, { ...change, expectedRole: "bot", role: "guest" });
+  expect(capability.snapshot(id).operation?.status).toBe("failed");
+  expect(h.sign).not.toHaveBeenCalled();
+  expect(h.publish).not.toHaveBeenCalled();
+  await capability.run(id, removeAgent);
+  expect(capability.snapshot(id).operation?.status).toBe("confirmed");
+  expect(h.publish.mock.calls[0]?.[0].kind).toBe(9001);
+});
 it.each([
   ["admin", "member", personProfile()],
   ["admin", "guest", personProfile()],

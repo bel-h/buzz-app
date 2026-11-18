@@ -21,6 +21,26 @@ async function capture(dialog, info, name) {
   await dialog.screenshot({ path: info.outputPath(name) });
 }
 
+async function openSoloAccess(page, app) {
+  await page.goto(app.origin);
+  await openPage(page, "Messages");
+  await page.evaluate(
+    ({ chat, viewer }) =>
+      window.fixtureNavigation.open({
+        version: 1,
+        kind: "conversation",
+        channelId: chat,
+        scope: { viewer, communityOrigin: "https://primary.example" },
+      }),
+    { chat, viewer: app.viewer },
+  );
+  await page.getByRole("button", { name: /^Share access to / }).click();
+  return page.getByRole("button", {
+    name: "Actions for Owner Agent",
+    exact: true,
+  });
+}
+
 // Browser-only: production app routing, portalled menu hit-testing, keyboard
 // selection and nested confirmation focus through the real broker signer/write.
 // Only upstream signed membership policy is modeled; role matrices live in Vitest.
@@ -62,23 +82,7 @@ test("the Solo owner changes an existing agent's access from its menu", async ({
     localStorage.setItem("buzz-appearance.v1", "dark");
     localStorage.setItem("buzz-accent.v1", "cobalt");
   });
-  await page.goto(app.origin);
-  await openPage(page, "Messages");
-  await page.evaluate(
-    ({ chat, viewer }) =>
-      window.fixtureNavigation.open({
-        version: 1,
-        kind: "conversation",
-        channelId: chat,
-        scope: { viewer, communityOrigin: "https://primary.example" },
-      }),
-    { chat, viewer: app.viewer },
-  );
-  await page.getByRole("button", { name: /^Share access to / }).click();
-  const actions = page.getByRole("button", {
-    name: "Actions for Owner Agent",
-    exact: true,
-  });
+  const actions = await openSoloAccess(page, app);
   await actions.click();
   const menu = page.getByRole("menu");
   await expect(menu).toBeVisible();
@@ -147,4 +151,24 @@ test("the Solo owner changes an existing agent's access from its menu", async ({
     }
   }
   expect(app.report.unexpected).toEqual([]);
+});
+
+test.describe("relay without Solo role update support", () => {
+  test.use({ memberRoleChanges: false, lifecycleOwnerAgent: true });
+
+  test("keeps existing member actions without offering role changes", async ({
+    page,
+    app,
+  }) => {
+    const agent = app.ownerAgent;
+    expect(agent).toBeDefined();
+    app.serveMembers(chat, [agent]);
+    await (await openSoloAccess(page, app)).click();
+    const menu = page.getByRole("menu");
+    await expect(
+      menu.getByRole("menuitem", { name: "Remove from chat" }),
+    ).toBeVisible();
+    await expect(menu.getByRole("menuitemradio")).toHaveCount(0);
+    expect(app.report.unexpected).toEqual([]);
+  });
 });

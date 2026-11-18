@@ -190,6 +190,9 @@ async function setup(
             memberAdministration: {
               sign: async (template) => signed(viewer, template),
               publish,
+              ...(visibility === "solo"
+                ? { soloMemberRoleUpdates: true as const }
+                : {}),
             },
           }
         : {}),

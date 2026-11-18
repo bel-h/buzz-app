@@ -1,7 +1,7 @@
 import { getEventHash } from "nostr-tools";
 import type { RelayReader } from "../relay/reader";
 import { retryRead } from "../relay/read-retry";
-import type { RelayWriter } from "../relay/transport";
+import type { ReadTransport } from "../relay/transport";
 import { newer, type RelayEvent } from "../relay/events";
 import { attestedOwner } from "../agents/owner-attestation";
 import { foldProfiles } from "../relay/profiles";
@@ -55,7 +55,7 @@ export function createMemberAdministration({
   acceptDiscovery,
 }: {
   reader?: RelayReader | undefined;
-  writer?: RelayWriter | undefined;
+  writer?: ReadTransport["memberAdministration"];
   viewer: string;
   relayAuthor: string;
   canAccess(id: string): boolean;
@@ -96,7 +96,13 @@ export function createMemberAdministration({
     assertAccess(id);
     return {
       events,
-      authority: memberAuthority(events, id, viewer, relayAuthor),
+      authority: memberAuthority(
+        events,
+        id,
+        viewer,
+        relayAuthor,
+        writer?.soloMemberRoleUpdates === true,
+      ),
     };
   }
   async function perform(

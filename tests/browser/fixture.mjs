@@ -2211,8 +2211,13 @@ export const test = base.extend({
           discovery: (community) => ({
             self: getPublicKey(relayKey),
             // Solo details publications below retain label changes as well as names.
-            ...(ownSoloChannels.length
-              ? { supported_extensions: ["nip-cl"] }
+            ...(ownSoloChannels.length || memberRoleChanges
+              ? {
+                  supported_extensions: [
+                    ...(ownSoloChannels.length ? ["nip-cl"] : []),
+                    ...(memberRoleChanges ? ["buzz-solo-member-role"] : []),
+                  ],
+                }
               : {}),
             ...(readState
               ? {
@@ -2525,7 +2530,7 @@ export const test = base.extend({
                   communityAliases: fixtureAliases,
                   identity: () => userKey.slice(),
                   agentLibrary: () => ({ definitions: [], identities: [] }),
-                  ...(readState || channelLifecycle
+                  ...(readState || channelLifecycle || memberRoleChanges
                     ? {}
                     : {
                         authority: async () => ({

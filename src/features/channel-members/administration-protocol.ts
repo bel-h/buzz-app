@@ -38,6 +38,7 @@ export function memberAuthority(
   channelId: string,
   viewer: string,
   relayAuthor: string,
+  soloMemberRoleUpdates = false,
 ): MemberAuthority {
   if (events.some((event) => ![39000, 39001, 39002].includes(event.kind)))
     throw new Error("Unexpected channel membership response");
@@ -103,6 +104,7 @@ export function memberAuthority(
     roles: Object.freeze(roles),
     canManage: activeChannel && !solo && elevated.has(viewer),
     canManageSolo:
+      soloMemberRoleUpdates &&
       type === "stream" &&
       activeChannel &&
       solo &&
