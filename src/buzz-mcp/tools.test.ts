@@ -958,6 +958,33 @@ it.each([
   },
 );
 
+it("shows a message's other tags in a read, but not its signatures", async () => {
+  const id = "4".repeat(64);
+  const shown = [
+    ["p", bob],
+    ["q", nested],
+    ["t", "release"],
+    ["imeta", "url https://relay.test/media/a.png", "m image/png"],
+    ["buzz:request", nested],
+    ["audience", "agents"],
+  ];
+  const auth = ["auth", bob, "kind=9", "8".repeat(128)];
+  const { client } = fake([
+    ...community,
+    event({
+      id,
+      content: "tagged",
+      tags: [["h", "chan"], auth, ["e", root, "", "root"], ...shown],
+    }),
+  ]);
+  const line = (await read(client, { channel: "chan" }))
+    .split("\n")
+    .find((line) => line.startsWith(id));
+  expect(line).toContain(`tags ${JSON.stringify(shown)} at `);
+  expect(line).not.toContain('"h"');
+  expect(line).not.toContain(auth[3]);
+});
+
 const reply = (id: string, created_at: number) =>
   event({
     id,

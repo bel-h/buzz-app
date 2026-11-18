@@ -555,3 +555,29 @@ it("tells a turn a mention starts what it owes the mention, and a wake's turn no
   expect(system).not.toContain("MUST publish");
   expect(system).not.toContain("belongs to a different session of you");
 });
+
+it("keeps each context message's tags but its channel and signatures", () => {
+  const tags = [
+    ["p", bob],
+    ["q", "1".repeat(64)],
+    ["buzz:request", "1".repeat(64)],
+  ];
+  const signature = "8".repeat(128);
+  const prompt = turnPrompt({
+    agent,
+    event: event("3", "now"),
+    channel: { id: "chan" },
+    scope: "channel",
+    topLevel: true,
+    context: [
+      event("2", "earlier", {
+        tags: [["h", "chan"], ["auth", bob, "kind=9", signature], ...tags],
+      }),
+    ],
+    total: 2,
+  });
+  expect(prompt).toContain(
+    `"content":"earlier","tags":${JSON.stringify(tags)}`,
+  );
+  expect(prompt).not.toContain(signature);
+});

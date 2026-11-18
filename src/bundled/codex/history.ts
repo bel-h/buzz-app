@@ -1,5 +1,9 @@
 import { readAuthorNames } from "../../features/agent-harness/author-names";
-import { quoted, withNames } from "../../features/agent-harness/turn-records";
+import {
+  quoted,
+  tagsField,
+  withNames,
+} from "../../features/agent-harness/turn-records";
 import { attestedOwner } from "../../features/agents/owner-attestation";
 import type { AgentReads } from "../../features/agents/reads";
 import { hasEventProof } from "../../features/relay/events";
@@ -81,6 +85,7 @@ export async function conversationHistory(
       }),
     );
   }
+  const raw = new Map(earlier.map((item) => [item.id, item]));
   const messages = foldMessages(channelId, "", [...earlier, ...changes], {
     includeReplies: true,
     signingAuthority,
@@ -103,6 +108,7 @@ export async function conversationHistory(
           pubkey: message.authorId,
           created_at: message.createdAt,
           content: (message.sourceContent ?? message.content).slice(0, 4000),
+          ...tagsField(raw.get(message.id)?.tags ?? []),
         },
         profiles?.authorNames?.(message.authorId),
       ),

@@ -40,6 +40,7 @@ import {
 import { imageType } from "../features/relay/attachment-limits";
 import { LIVE_CANVAS_BYTES } from "../features/channel-templates/model";
 import { threadReference } from "../features/relay/thread-reference";
+import { readableTags } from "../features/agent-harness/turn-records";
 import { parseBuzzLink } from "../features/navigation/buzz-links";
 import { soloChannelMetadata } from "../features/relay/discovery";
 import { channelLabelTags } from "../features/relay/channel-labels";
@@ -2523,7 +2524,8 @@ class Tools {
   }
 }
 
-/** A message's line in a read, omitting what `scope` names. */
+/** A message's line in a read, omitting what `scope` names, then its other
+ * tags. */
 function messageLine(
   event: BuzzEvent,
   name: string | undefined,
@@ -2533,6 +2535,11 @@ function messageLine(
   const owner = tag(event, "auth");
   const reference = threadReference(event);
   const thread = reference?.rootId;
+  // The rest, but for the thread markers the line already names.
+  const tags = readableTags(event.tags).filter(
+    ([name, , , marker]) =>
+      name !== "e" || (marker !== "root" && marker !== "reply"),
+  );
   return [
     event.id,
     `from ${event.pubkey}`,
@@ -2543,6 +2550,7 @@ function messageLine(
     reference &&
       reference.parentId !== thread &&
       `reply_to ${reference.parentId}`,
+    tags.length > 0 && `tags ${JSON.stringify(tags)}`,
     `at ${time(event.created_at)}: ${event.content}`,
   ]
     .filter(Boolean)

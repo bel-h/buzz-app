@@ -36,6 +36,17 @@ export function withNames<T extends { id: string; pubkey: string }>(
   };
 }
 
+/** A message's tags for an agent to read: all but its channel and its `auth`
+ * attestation, whose signature an agent never needs. */
+export const readableTags = (tags: readonly (readonly string[])[]) =>
+  tags.filter(([name]) => name !== "h" && name !== "auth");
+
+/** A context record's `tags`, when it has any to read. */
+export const tagsField = (tags: readonly (readonly string[])[]) => {
+  const readable = readableTags(tags);
+  return readable.length ? { tags: readable } : {};
+};
+
 /** The event a turn is for, then what it asks of the agent. */
 export const eventBody = (
   event: EventData,
