@@ -462,6 +462,12 @@ async fn a_request_closed_unanswered_says_so() {
         reply.1["message"],
         "Buzz closed this request before anyone answered"
     );
+    // Nobody said no: the tool may ask again at once.
+    fixture.service.0.pairings.sign_prompt(true);
+    let pending = sign(&fixture, &token, leave());
+    let next = sign_asked(&fixture).await;
+    answer(&fixture, &next.id, Answer::Once);
+    signed(&pending.await.unwrap());
 }
 
 #[tokio::test]
@@ -647,4 +653,69 @@ async fn a_window_that_has_lapsed_allows_nothing() {
     assert_eq!(sign_requests(&fixture).len(), 2);
     answer(&fixture, &request.id, Answer::Deny);
     assert_eq!(error(&pending.await.unwrap()).1, "denied");
+}
+
+#[tokio::test]
+async fn channel_edits_and_unbans_offer_no_window() {
+    let fixture = fixture();
+    let token = paired(&fixture).await;
+    let person = "ab".repeat(32);
+    for event in [
+        unsigned(9002, json!([["h", "channel"], ["name", "ops"]]), now()),
+        unsigned(9041, json!([["p", person]]), now()),
+    ] {
+        let pending = sign(&fixture, &token, event);
+        let request = sign_asked(&fixture).await;
+        assert_eq!(request.window_seconds, 0, "{}", request.kind);
+        answer(&fixture, &request.id, Answer::Once);
+        signed(&pending.await.unwrap());
+    }
+}
+
+/// Denies one ask from `token` and gives how long it must then wait.
+async fn denied_wait(fixture: &Fixture, token: &str) -> u64 {
+    asked(fixture, token, Answer::Deny).await;
+    let reply = ask(fixture, token, "sign_event", &[&leave()]).await;
+    assert_eq!(error(&reply).1, "rate_limited");
+    reply.1["retry_after"].as_u64().unwrap()
+}
+
+#[tokio::test]
+async fn the_wait_after_denies_stops_growing_at_eight_minutes() {
+    let fixture = fixture();
+    let token = paired(&fixture).await;
+    let mut waits = Vec::new();
+    for _ in 0..6 {
+        let wait = denied_wait(&fixture, &token).await;
+        waits.push(wait);
+        skip(wait + 1).await;
+    }
+    let ceilings = [30, 60, 120, 240, 480, 480];
+    for (wait, ceiling) in waits.iter().zip(ceilings) {
+        assert!(*wait > ceiling / 2 && *wait <= ceiling, "{waits:?}");
+    }
+}
+
+#[tokio::test]
+async fn the_wait_after_denies_starts_over_after_a_quiet_ten_minutes() {
+    let fixture = fixture();
+    let token = paired(&fixture).await;
+    denied_wait(&fixture, &token).await;
+    skip(31).await;
+    assert!(denied_wait(&fixture, &token).await > 30);
+    skip(600).await;
+    assert!(denied_wait(&fixture, &token).await <= 30);
+}
+
+#[tokio::test]
+async fn an_unanswered_request_counts_once_toward_the_wait() {
+    let fixture = fixture();
+    let token = paired(&fixture).await;
+    tokio::time::pause();
+    let reply = ask(&fixture, &token, "sign_event", &[&leave()]).await;
+    assert_eq!(error(&reply).1, "approval_required");
+    tokio::time::resume();
+    skip(31).await;
+    let wait = denied_wait(&fixture, &token).await;
+    assert!(wait > 30 && wait <= 60, "{wait}");
 }

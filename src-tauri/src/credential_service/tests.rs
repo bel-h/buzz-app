@@ -1,4 +1,6 @@
-use super::policy::{classify, Verdict, AUTH_PROOFS, ORDINARY, REFUSED, SENSITIVE};
+use super::policy::{
+    classify, windowable, Verdict, AUTH_PROOFS, ONCE_ONLY, ORDINARY, REFUSED, SENSITIVE,
+};
 use super::*;
 use crate::federated_identity::{agent::AgentTokens, FederatedIdentity};
 use buzz_agent_controller::{AppAgent, Secret};
@@ -997,6 +999,21 @@ fn every_buzz_kind_has_one_signing_class() {
             classes.len() == 1,
             "Kind {kind} from block/buzz `buzz_core::kind::ALL_KINDS` is listed {classes:?} in policy.rs; add it to exactly one of ORDINARY, SENSITIVE or REFUSED"
         );
+    }
+}
+
+#[test]
+fn only_sensitive_kinds_are_once_only() {
+    for &kind in ONCE_ONLY {
+        assert!(SENSITIVE.contains(&kind), "{kind}");
+    }
+    for kind in [
+        5, 9000, 9001, 9002, 9005, 9008, 9040, 9041, 9042, 9043, 9044, 28936, 41011,
+    ] {
+        assert!(!windowable(kind), "{kind}");
+    }
+    for kind in [0, 3, 9007, 9021, 9022, 10002, 30621] {
+        assert!(windowable(kind), "{kind}");
     }
 }
 

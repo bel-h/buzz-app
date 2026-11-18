@@ -24,7 +24,8 @@ const ASK_WINDOW: Duration = Duration::from_secs(10 * 60);
 const BUSY_RETRY: u64 = 5;
 /// How long a tool waits to ask again after a request it made ends with no
 /// yes: declined, not answered, or dropped by the tool. Each such end after
-/// that doubles it, up to [`DOUBLINGS`] times, until the human allows one.
+/// that doubles it, up to [`DOUBLINGS`] times, until the human allows one or
+/// none ends so for [`ASK_WINDOW`].
 const COOLDOWN: Duration = Duration::from_secs(30);
 const DOUBLINGS: u32 = 4;
 
@@ -328,12 +329,18 @@ impl Drop for SignClosing<'_> {
 
 /// Makes `pairing` wait before it asks again, longer each time in a row.
 fn cool(state: &mut State, pairing: &str) {
-    let strikes = state.sign_strikes.entry(pairing.to_owned()).or_default();
+    let now = Instant::now();
+    let (strikes, last) = state
+        .sign_strikes
+        .entry(pairing.to_owned())
+        .or_insert((0, now));
+    if now.duration_since(*last) >= ASK_WINDOW {
+        *strikes = 0;
+    }
     let wait = COOLDOWN * 2u32.pow((*strikes).min(DOUBLINGS));
     *strikes += 1;
-    state
-        .sign_cooldowns
-        .insert(pairing.to_owned(), Instant::now() + wait);
+    *last = now;
+    state.sign_cooldowns.insert(pairing.to_owned(), now + wait);
 }
 
 /// The removed community's error, as pairing gives it.

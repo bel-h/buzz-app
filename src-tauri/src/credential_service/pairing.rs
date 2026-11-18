@@ -139,8 +139,9 @@ struct State {
     sign_asked_by: HashMap<String, VecDeque<Instant>>,
     /// Until when a pairing that was declined, or not answered, may not ask.
     sign_cooldowns: HashMap<String, Instant>,
-    /// Requests from each pairing that ended with no yes since its last yes.
-    sign_strikes: HashMap<String, u32>,
+    /// Requests from each pairing that ended with no yes since its last yes,
+    /// and when the last one did.
+    sign_strikes: HashMap<String, (u32, Instant)>,
     /// The NIP-FI retirements already revoked for (see [`Pairings::follow`]).
     retirements: u64,
     /// Sign-outs and changes of account recorded but not yet over; see
