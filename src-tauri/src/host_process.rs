@@ -522,9 +522,14 @@ pub(crate) async fn plugin_host_process_spawn<R: tauri::Runtime>(
         process_command(&program, helper.as_deref(), None, &declared.args, &args)
     };
     let environment = env.unwrap_or_default();
+    let agent_env = app
+        .state::<crate::agent_env::AgentEnv>()
+        .for_process(&plugin, &declared.id, protected)
+        .await;
     set_environment(
         &mut command,
         login_shell_environment(),
+        &agent_env,
         &path,
         &environment,
         &app.package_info().version.to_string(),
@@ -611,13 +616,15 @@ pub(crate) async fn plugin_host_process_spawn<R: tauri::Runtime>(
 }
 
 /// Sets a process's environment: the app's own, less any AppImage bundle
-/// paths, plus the `login_shell` variables it forwards, less any Buzz identity
-/// either holds, plus the plugin's `environment` (`None` removes a variable).
+/// paths, plus the `login_shell` variables it forwards and then the device's
+/// `agent_env`, less any Buzz identity these hold, plus the plugin's
+/// `environment` (`None` removes a variable), which wins over `agent_env`.
 /// `BUZZ_VERSION` is always this app's version, so a command can tell it runs
 /// under Buzz.
 fn set_environment(
     command: &mut Command,
     login_shell: &[(std::ffi::OsString, std::ffi::OsString)],
+    agent_env: &[(std::ffi::OsString, std::ffi::OsString)],
     path: &OsStr,
     environment: &HashMap<String, Option<String>>,
     version: &str,
@@ -636,11 +643,13 @@ fn set_environment(
         }
     }
     command.envs(login_shell.iter().cloned());
+    command.envs(agent_env.iter().cloned());
     // Never pass on an identity the app was started with, even one the user
-    // asked their login shell to forward.
+    // asked their login shell or the agent list to forward.
     for name in std::env::vars_os()
         .map(|(name, _)| name)
         .chain(login_shell.iter().map(|(name, _)| name.clone()))
+        .chain(agent_env.iter().map(|(name, _)| name.clone()))
     {
         let text = name.to_string_lossy();
         if text.starts_with("BUZZ_") || text.starts_with("NOSTR_") {

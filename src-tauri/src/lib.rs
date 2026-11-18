@@ -58,6 +58,7 @@ use nsec_backup::{
     nsec_restore_install, nsec_restore_wait, NsecBackupHost,
 };
 use nsec_backup_choice::{nsec_backup_choice, nsec_backup_set_choice};
+mod agent_env;
 mod claude_key;
 #[cfg(unix)]
 mod cli_link;
@@ -899,6 +900,8 @@ fn commands<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         app_agents::app_agent_remember,
         app_agents::app_agent_claim,
         app_agents::app_agent_release,
+        agent_env::agent_env_status,
+        agent_env::agent_env_set,
         claude_key::claude_api_key_status,
         claude_key::claude_api_key_set,
         claude_key::claude_api_key_clear,
@@ -1266,6 +1269,7 @@ pub fn run() {
         .manage(identity)
         .manage(archive::ArchiveHost::default())
         .manage(jev::JevHost::new())
+        .manage(agent_env::AgentEnv::new())
         .manage(claude_key::ClaudeKey::new())
         .manage(decisions::DecisionsHost::new())
         .manage(pairing::Pairing::default())

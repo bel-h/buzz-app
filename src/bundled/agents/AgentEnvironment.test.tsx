@@ -1,0 +1,90 @@
+// @vitest-environment jsdom
+import "@testing-library/jest-dom/vitest";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { AgentEnvironment } from "./AgentEnvironment";
+
+const native = vi.hoisted(() => ({ invoke: vi.fn() }));
+vi.mock("@tauri-apps/api/core", () => ({
+  isTauri: () => true,
+  invoke: (...args: unknown[]) => native.invoke(...args),
+}));
+
+let names: string[];
+let saved: boolean;
+beforeEach(() => {
+  names = ["SAVED_KEY"];
+  saved = false;
+  native.invoke.mockReset().mockImplementation(async (command, args) => {
+    if (command === "agent_env_status") return { names, saved };
+    if (command === "agent_env_set") {
+      const rows = (args as { rows: { name: string }[] }).rows;
+      if (rows.some((row) => row.name === "GOOSE_MODEL"))
+        throw "GOOSE_MODEL chooses a model, provider or endpoint.";
+      names = rows.map((row) => row.name);
+      saved = true;
+    }
+    return undefined;
+  });
+});
+afterEach(cleanup);
+
+const calls = (command: string) =>
+  native.invoke.mock.calls.filter(([name]) => name === command);
+const newName = () =>
+  screen
+    .getAllByRole("textbox", { name: "Variable name" })
+    .at(-1) as HTMLElement;
+
+it("adding a row keeps the hidden saved values and shows the restart notice", async () => {
+  const user = userEvent.setup();
+  render(<AgentEnvironment />);
+  await user.click(await screen.findByRole("button", { name: "Add variable" }));
+  await user.type(newName(), "FOO");
+  await user.type(screen.getByLabelText("Value of FOO"), "bar");
+  await user.click(screen.getByRole("button", { name: "Save" }));
+  expect(calls("agent_env_set")[0]?.[1]).toEqual({
+    rows: [
+      { name: "SAVED_KEY", value: null },
+      { name: "FOO", value: "bar" },
+    ],
+  });
+  expect(
+    await screen.findByText("Agents already running still use the old list"),
+  ).toBeInTheDocument();
+});
+
+it("a rejected save shows why and no notice", async () => {
+  const user = userEvent.setup();
+  render(<AgentEnvironment />);
+  await user.click(await screen.findByRole("button", { name: "Add variable" }));
+  await user.type(newName(), "GOOSE_MODEL");
+  await user.click(screen.getByRole("button", { name: "Save" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("GOOSE_MODEL");
+  expect(
+    screen.queryByText("Agents already running still use the old list"),
+  ).toBeNull();
+});
+
+it("the notice stays after Settings reopens, and restarting asks first", async () => {
+  saved = true;
+  const user = userEvent.setup();
+  render(<AgentEnvironment />);
+  await user.click(await screen.findByRole("button", { name: "Restart Buzz" }));
+  await user.click(screen.getByRole("button", { name: "Cancel" }));
+  expect(calls("update_restart")).toHaveLength(0);
+  await user.click(screen.getByRole("button", { name: "Restart Buzz" }));
+  await user.click(screen.getByRole("button", { name: "Restart" }));
+  await waitFor(() => expect(calls("update_restart")).toHaveLength(1));
+});
+
+it("removing a saved row deletes it on save", async () => {
+  const user = userEvent.setup();
+  render(<AgentEnvironment />);
+  await user.click(
+    await screen.findByRole("button", { name: "Remove SAVED_KEY" }),
+  );
+  await user.click(screen.getByRole("button", { name: "Save" }));
+  expect(calls("agent_env_set")[0]?.[1]).toEqual({ rows: [] });
+});

@@ -1514,6 +1514,14 @@ available rather than silently discarding it.
 - **Settings → Agent setup → Harness defaults** is where supported agent types
   offer installation, sign-in, and default-model controls. Available controls
   depend on the type. Do not assume a provider is configured or signed in.
+  Below them, **Environment variables** sets variables every local agent on
+  this device starts with, such as API keys. They're kept in the OS credential
+  store, never synced, and values aren't shown again after saving. Protected
+  and hosted agents don't get them, and a harness's own variables win. Names
+  that choose a model, provider or endpoint, `PATH`, and `BUZZ_*`/`NOSTR_*`
+  are refused. A save applies to agent processes started afterward; agents
+  already running keep the old list until **Restart Buzz**, which the notice
+  after saving offers.
   Builderlab shows **Unavailable for this account** when signed in without
   remote-agent access. Manage its account in **Settings → Builderlab**.
   Builderlab permissions are re-read at most once a minute while the app uses
