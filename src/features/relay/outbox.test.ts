@@ -1587,3 +1587,64 @@ it("refuses to remove an unsent item another window has since delivered", async 
     owner.dispose();
   }
 });
+
+it("waits for another window's retry before removing the item it retried", async () => {
+  const viewer = keypair();
+  const event = signed(viewer, { kind: 9, tags: [["h", "c"]], content: "x" });
+  let records: OutgoingEvent[] = [
+    { event, signed: event, delivery: "sending" },
+  ];
+  const tails = new Map<string, Promise<unknown>>();
+  const storage: OutboxStorage = {
+    load: () => records,
+    save: (next) => {
+      records = [...next];
+    },
+    lock(id, run) {
+      const work = (tails.get(id) ?? Promise.resolve()).then(run);
+      tails.set(
+        id,
+        work.catch(() => {}),
+      );
+      return work;
+    },
+  };
+  let publish = () => {};
+  const window = () =>
+    createOutbox(
+      viewer.pubkey,
+      {
+        sign: async () => {
+          throw new Error("No sign expected");
+        },
+        publish: () =>
+          new Promise<void>((resolve) => {
+            publish = resolve;
+          }),
+      },
+      storage,
+    );
+  const a = window(),
+    b = window();
+  try {
+    await Promise.all([a.ready, b.ready]);
+    expect(a.outbox.snapshot()[0]?.delivery).toBe("unknown");
+    b.outbox.retry(event.id);
+    await vi.waitFor(() => expect(records[0]?.delivery).toBe("sending"));
+    let settled = false;
+    const removal = a.outbox.dismiss(event.id).finally(() => {
+      settled = true;
+    });
+    removal.catch(() => {});
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(settled).toBe(false);
+    publish();
+    await expect(removal).rejects.toThrow("changed in another window");
+    expect(records).toEqual([
+      expect.objectContaining({ delivery: "accepted" }),
+    ]);
+  } finally {
+    a.dispose();
+    b.dispose();
+  }
+});

@@ -236,6 +236,8 @@ export function createOutbox(
   let snapshot: readonly OutgoingEvent[] = Object.freeze([]);
   // Hydrated receipts are observations, not delivery owned by this window.
   const restoredReceipts = new Set<string>();
+  /** Saved delivery as this window last read or wrote it. */
+  const journaled = new Map<string, Delivery>();
   let visible: readonly OutgoingEvent[] = snapshot;
   let finalSnapshot: readonly OutgoingEvent[] | undefined;
   let finalVisible: readonly OutgoingEvent[] | undefined;
@@ -282,6 +284,8 @@ export function createOutbox(
     controller?: AbortController;
     /** Waiting on `holdPublish`, or for a slot after it, without using one. */
     held?: true;
+    /** A retry owns the event's cross-window lock until its result is saved. */
+    retried?: true;
   };
   const attempts = new Map<string, Attempt>();
   const dismissing = new Map<string, Promise<void>>();
@@ -359,6 +363,21 @@ export function createOutbox(
     );
     return work;
   }
+  /** Takes the event's cross-window lock until the returned release is called. */
+  function own(id: string): Promise<() => void> {
+    const lock = storage.lock;
+    if (!lock) return Promise.resolve(() => {});
+    return new Promise((acquired, rejected) => {
+      let release!: () => void;
+      const done = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      lock(id, async () => {
+        acquired(release);
+        await done;
+      }).catch(rejected);
+    });
+  }
   const notify = () => {
     visible = Object.freeze([
       ...completed.entries().map(([, item]) => item),
@@ -403,6 +422,8 @@ export function createOutbox(
         return profiling.measureAsync("outbox.persist", id, async () => {
           if (action === "recover") await storage.save(records, { force: id });
           else await storage.save(records);
+          for (const item of records)
+            journaled.set(item.event.id, item.delivery);
           // The replacement joins visible intent only with durable retirement.
           // Other queued saves must never observe two unresolved recovery keys.
           if (addition) snapshot = Object.freeze([...snapshot, addition]);
@@ -483,6 +504,7 @@ export function createOutbox(
       : item.event;
     if (!event || event.pubkey !== viewer || getEventHash(event) !== event.id)
       throw new Error("Saved outbox event is invalid");
+    journaled.set(event.id, item.delivery);
     return Object.freeze({
       event: Object.freeze({
         ...event,
@@ -589,6 +611,7 @@ export function createOutbox(
     id: string,
     intent?: Promise<void>,
     previousDelivery: Delivery = "failed",
+    retried = false,
   ) {
     if (closed || attempts.has(id)) return;
     attempts.set(id, {
@@ -596,6 +619,7 @@ export function createOutbox(
       previousDelivery,
       timer: setTimeout(() => expire(id), timeoutMs),
       ...(intent ? { intent } : {}),
+      ...(retried ? { retried: true as const } : {}),
     });
     void deliver(id);
   }
@@ -619,7 +643,9 @@ export function createOutbox(
         { once: true },
       ),
     );
+    const owned = attempt.retried && storage.lock ? own(id) : undefined;
     try {
+      if (owned) await Promise.race([owned, aborted]);
       await Promise.race([
         attempt.intent ??
           ready.then(() => {
@@ -774,6 +800,10 @@ export function createOutbox(
         notify();
         void persist(id).catch(() => {});
       }
+      void owned?.then(
+        (release) => durable.catch(() => {}).finally(release),
+        () => {},
+      );
       pumpDeliveries();
     }
   }
@@ -1194,7 +1224,7 @@ export function createOutbox(
           error: undefined,
           refused: undefined,
         });
-        schedule(id, undefined, item.delivery);
+        schedule(id, undefined, item.delivery, true);
       }
     },
     observeDismiss(listener: (item: OutgoingEvent) => void) {
@@ -1228,12 +1258,15 @@ export function createOutbox(
           const shared = (await storage.load({ readOnly: true })).find(
             (stored) => stored.event.id === id,
           );
-          // Stored delivery other than seen or failed restores as unknown.
-          const stored =
-            shared?.delivery === "seen" || shared?.delivery === "failed"
-              ? shared.delivery
-              : "unknown";
-          if (shared && stored !== item.delivery)
+          // A live retry holds this lock until it saves, so a saved send
+          // under the lock was left by a window that closed mid-delivery.
+          const last = journaled.get(id);
+          if (
+            shared &&
+            last &&
+            shared.delivery !== "sending" &&
+            shared.delivery !== last
+          )
             throw new Error(
               "This item changed in another window. Check it again before removing it.",
             );
