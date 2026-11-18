@@ -251,9 +251,15 @@ type Ticket = {
  * Available capacity dispatches immediately; only server cooldowns pause starts.
  * Cooldowns reject queued work rather than spending a read's 10s deadline. */
 export function createApiAdmission() {
+  const activeLimit = 6;
+  const backgroundActiveLimit = 4;
+  const queuedLimit = 128;
+  const backgroundQueuedLimit = 120;
   let pausedUntil = 0,
     active = 0,
+    activeBackground = 0,
     preparing = 0,
+    preparingBackground = 0,
     presenceBusy = false,
     presenceNext = 0;
   const queue: Ticket[] = [];
@@ -273,8 +279,10 @@ export function createApiAdmission() {
       }
       return;
     }
-    while (active < 6 && queue.length) {
-      const ticket = queue.find((t) => t.priority === "foreground") ?? queue[0];
+    while (active < activeLimit && queue.length) {
+      const ticket =
+        queue.find((entry) => entry.priority === "foreground") ??
+        (activeBackground < backgroundActiveLimit ? queue[0] : undefined);
       if (!ticket) return;
       remove(ticket);
       ticket.start();
@@ -298,14 +306,24 @@ export function createApiAdmission() {
     /** Retain bounded ownership across asynchronous auth and its final dispatch.
      * A cancelled unabortable signer keeps its slot until it settles: repeatedly
      * cancelling must not admit an unbounded number of outstanding sign prompts. */
-    async prepare<T>(work: () => Promise<T>): Promise<T> {
+    async prepare<T>(
+      work: () => Promise<T>,
+      priority: Ticket["priority"] = "foreground",
+    ): Promise<T> {
       if (performance.now() < pausedUntil) throw pauseError();
-      if (preparing >= 128) throw new ApiCapacity();
+      const background = priority === "background";
+      if (
+        preparing >= queuedLimit ||
+        (background && preparingBackground >= backgroundQueuedLimit)
+      )
+        throw new ApiCapacity();
       preparing++;
+      if (background) preparingBackground++;
       try {
         return await work();
       } finally {
         preparing--;
+        if (background) preparingBackground--;
       }
     },
     idle: () =>
@@ -329,15 +347,22 @@ export function createApiAdmission() {
     ): Promise<T> {
       if (signal?.aborted) return Promise.reject(signal.reason);
       if (performance.now() < pausedUntil) return Promise.reject(pauseError());
-      if (queue.length >= 128) return Promise.reject(new ApiCapacity());
+      const background = priority === "background";
+      if (
+        queue.length >= queuedLimit ||
+        (background && queue.length >= backgroundQueuedLimit)
+      )
+        return Promise.reject(new ApiCapacity());
       return new Promise((resolve, reject) => {
         const ticket: Ticket = {
           priority,
           signal,
           start() {
             active++;
+            if (background) activeBackground++;
             const finish = () => {
               active--;
+              if (background) activeBackground--;
               pump();
             };
             try {

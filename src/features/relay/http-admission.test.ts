@@ -38,6 +38,36 @@ it("starts six requests without advancing time and refills by foreground priorit
   expect(performance.now()).toBe(0);
   expect(vi.getTimerCount()).toBe(0);
 });
+it("keeps room for foreground requests during background saturation", async () => {
+  const lane = createApiAdmission();
+  const calls: number[] = [];
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const background = Array.from({ length: 124 }, (_, i) =>
+    lane.run(
+      async () => {
+        calls.push(i);
+        await held;
+      },
+      undefined,
+      "background",
+    ),
+  );
+  expect(calls).toEqual([0, 1, 2, 3]);
+  await expect(
+    lane.run(async () => {}, undefined, "background"),
+  ).rejects.toThrow(/capacity/i);
+  await lane.run(async () => calls.push(-1));
+  expect(calls).toEqual([0, 1, 2, 3, -1]);
+  release();
+  await Promise.all(background);
+  expect(calls.filter((i) => i >= 0)).toEqual(
+    Array.from({ length: 124 }, (_, i) => i),
+  );
+});
+
 it("pauses queued consumers, cancels before dispatch, and never retries admitted work", async () => {
   vi.useFakeTimers();
   const lane = createApiAdmission();
