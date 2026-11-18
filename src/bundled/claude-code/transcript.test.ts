@@ -273,6 +273,10 @@ it("shows delivered steering attachments in the running turn", () => {
     line("user", [{ type: "tool_result", tool_use_id: "t1", content: "ok" }]),
     attachment("queued_command", steerPrompt(turn("also lint"))),
     attachment("queued_command", steerPrompt(turn("check formatting"))),
+    attachment(
+      "queued_command",
+      `<new-message-arrived-while-you-were-working>\n${prompt("include legacy sessions")}\n</new-message-arrived-while-you-were-working>`,
+    ),
     attachment("queued_command", steerPrompt("A scheduled wake.")),
     attachment("queued_command", turn("ordinary queued prompt")),
     attachment("other", steerPrompt(turn("other attachment"))),
@@ -289,6 +293,12 @@ it("shows delivered steering attachments in the running turn", () => {
     { type: "tool", output: "ok", status: "completed" },
     { type: "prompt", text: "also lint", author: "Sam", steer: true },
     { type: "prompt", text: "check formatting", author: "Sam", steer: true },
+    {
+      type: "prompt",
+      text: "include legacy sessions",
+      author: "Sam",
+      steer: true,
+    },
     { type: "message", text: "Fixed." },
   ]);
 });

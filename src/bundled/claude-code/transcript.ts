@@ -82,7 +82,10 @@ function prompt(
   at: number,
   raw: string,
   name?: Names,
-): Extract<TranscriptItem, { type: "prompt" }> {
+): {
+  item: Extract<TranscriptItem, { type: "prompt" }>;
+  hasMessage: boolean;
+} {
   let sections = promptSections(raw);
   const steer = sections.find((section) => section.tag === STEER);
   // An older steer wraps a whole turn.
@@ -90,14 +93,17 @@ function prompt(
     sections = promptSections(steer.body);
   const { text, author, authorPubkey } = promptMessage(sections, name);
   return {
-    id,
-    at,
-    type: "prompt",
-    text: text || raw,
-    ...(author ? { author } : {}),
-    ...(authorPubkey ? { authorPubkey } : {}),
-    sections,
-    steer: !!steer,
+    item: {
+      id,
+      at,
+      type: "prompt",
+      text: text || raw,
+      ...(author ? { author } : {}),
+      ...(authorPubkey ? { authorPubkey } : {}),
+      sections,
+      steer: !!steer,
+    },
+    hasMessage: !!(text || author || authorPubkey),
   };
 }
 
@@ -152,12 +158,8 @@ export function claudeTurns(
     if (entry.type === "attachment") {
       const attachment = object(entry.attachment);
       if (attachment?.type !== "queued_command") continue;
-      const item = prompt(id, at, str(attachment.prompt), name);
-      if (
-        item.sections.some(
-          ({ tag, body }) => tag === STEER && readEventBody(body),
-        )
-      ) {
+      const { item, hasMessage } = prompt(id, at, str(attachment.prompt), name);
+      if (item.steer && hasMessage) {
         (turns.at(-1) ?? turn(id, at, true)).items.push(item);
         last = at;
       }
@@ -170,7 +172,7 @@ export function claudeTurns(
       (block) => block.type === "tool_result",
     );
     if (entry.type === "user" && !results.length) {
-      const item = prompt(id, at, text(message.content), name);
+      const { item } = prompt(id, at, text(message.content), name);
       const current = item.steer ? turns.at(-1) : undefined;
       (current ?? turn(id, at, false)).items.push(item);
       last = at;
