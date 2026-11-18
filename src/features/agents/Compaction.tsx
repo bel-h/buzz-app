@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Input } from "../../shared/design-system/ui/Input";
 import { InputGroup } from "../../shared/design-system/ui/InputGroup";
 import { PreferenceRow } from "../../shared/design-system/ui/PreferenceRow";
@@ -25,7 +25,7 @@ const INVALID = `Enter a whole number of at least ${MIN_COMPACT_AT / 1000}K, or 
  * `onChange`; anything else keeps its error and stops its form submitting. */
 export function CompactionField({
   value,
-  description = "Compacts at this size, or sooner if the harness would on its own.",
+  description = "Compacts at this many thousand tokens, or sooner if the harness would on its own.",
   disabled = false,
   onChange,
 }: {
@@ -34,7 +34,6 @@ export function CompactionField({
   disabled?: boolean;
   onChange(value: string): void;
 }) {
-  const unit = useId();
   const [text, setText] = useState(shown(value));
   useEffect(() => setText(shown(value)), [value]);
   const valid = parse(text) !== undefined;
@@ -50,16 +49,12 @@ export function CompactionField({
             <InputGroup
               surface="panel"
               trailing={
-                <span id={unit}>
-                  {text.trim() && <span aria-hidden="true">K tokens</span>}
-                  <span className="sr-only">thousand tokens</span>
-                </span>
+                text.trim() ? <span aria-hidden="true">K</span> : undefined
               }
             >
               <Input
                 {...label}
                 ref={input}
-                aria-describedby={`${label["aria-describedby"] ?? ""} ${unit}`.trim()}
                 aria-invalid={!valid || undefined}
                 inputMode="numeric"
                 placeholder="Model default"
