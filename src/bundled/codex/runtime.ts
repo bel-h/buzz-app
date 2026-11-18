@@ -50,7 +50,7 @@ import { threadReference } from "../../features/relay/thread-reference";
 import type { ChannelLabel } from "../../features/channels/channel-icon";
 import { appClient, readFile } from "../../buzz-mcp/app-client";
 import { readAuthorNames } from "../../features/agent-harness/author-names";
-import { readProject } from "../../features/agent-harness/project";
+import { project, readCanvas } from "../../features/agent-harness/project";
 import type { Facts } from "../../features/agent-harness/sections/index";
 import {
   referencedFolders,
@@ -1780,24 +1780,30 @@ export class CodexRuntime {
     if (wake && !wakeLands(wake, topLevel)) return delivery.ignored?.();
     // Only a Solo chat's Canvas is handed over.
     const canvas = reads.canvas?.bind(reads);
-    const [canvasProject, folders] = await Promise.all([
+    const [canvasRead, folders] = await Promise.all([
       solo
-        ? readProject(
-            canvas && (() => canvas(channelId, agent.owner)),
-            // A Solo chat is one conversation, with no thread root.
-            Boolean(this.folder(reads.scope, agent.key, channelId)),
-          )
+        ? readCanvas(canvas && (() => canvas(channelId, agent.owner)))
         : undefined,
       referencedFolders(event, agent.owner, reads.scope),
     ]);
-    const project =
+    const skills = referencedSkills(event, agent.owner, agent.pubkey);
+    // The Canvas states the rule for its folders from whether the
+    // conversation has one of its own, which a plugin can assign as its
+    // session is admitted.
+    const projectOf = () =>
       [
-        canvasProject?.section,
+        canvasRead &&
+          project(
+            canvasRead.text,
+            // A Solo chat is one conversation, with no thread root.
+            Boolean(this.folder(reads.scope, agent.key, channelId)),
+          ).section,
         folders.section,
-        referencedSkills(event, agent.owner, agent.pubkey),
+        skills,
       ]
         .filter(Boolean)
         .join("\n\n") || undefined;
+    const projectText = projectOf();
     // A stop during the reads deleted this agent's entry; recreating it would
     // reopen the agent.
     delivery.signal.throwIfAborted();
@@ -1899,7 +1905,7 @@ export class CodexRuntime {
       ...(delivery.sessionContext
         ? { sessionContext: delivery.sessionContext }
         : {}),
-      ...(project ? { project: `${project}\n` } : {}),
+      ...(projectText ? { project: `${projectText}\n` } : {}),
       answered,
       failActivity,
       ...(delivery.accepted ? { accepted: delivery.accepted } : {}),
@@ -1937,6 +1943,9 @@ export class CodexRuntime {
             request.sessionContext = admitted.context;
           else delete request.sessionContext;
         }
+        const admittedProject = projectOf();
+        if (admittedProject) request.project = `${admittedProject}\n`;
+        else delete request.project;
         const text = textOf(request.event, agent.name);
         let lane = entry.lanes.get(key);
         if (!lane) {
