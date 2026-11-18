@@ -126,6 +126,7 @@ export function useAgentSettingsHost({
 const CARRY_LABELS: Record<keyof Carry, string> = {
   instructions: "Instructions",
   workspace: "Workspace",
+  sessionScope: "Sessions",
 };
 const CARRY_KEYS = Object.keys(CARRY_LABELS) as (keyof Carry)[];
 
