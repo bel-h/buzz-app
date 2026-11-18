@@ -143,6 +143,15 @@ export type SavedConversation = Conversation &
 /** A little over the host's grace (`STOP_GRACE`) before it kills a stopped
  * process. */
 const STOP_WAIT_MS = 5_000;
+/** An agent's own `claude` asks for the environment variables saved for local
+ * agents; its pinned protected copy and setup steps never do. */
+const agentEnv = (id: string, options: Parameters<Spawn>[1]) =>
+  id === "claude"
+    ? {
+        ...options,
+        secrets: [...(options?.secrets ?? []), "agent-env" as const],
+      }
+    : options;
 const CONVERSATION_READ_TIMEOUT_MS = 4_000;
 const CHAT = [9, 40002];
 
@@ -240,7 +249,7 @@ export class ClaudeRuntime {
   /** One process started ahead of need, for any agent's next new conversation. */
   private readonly spare = new Spare(
     // Started ahead of need, it never stops a conversation to make room.
-    (id, options) => this.spawn(id, options),
+    (id, options) => this.spawn(id, agentEnv(id, options)),
     (_conversation, message) =>
       respond(undefined, {}, message, this.added(), listing(this.added())),
     undefined,
@@ -1694,7 +1703,7 @@ export class ClaudeRuntime {
       };
     const saved = this.savedSessions(agent);
     entry.sessions = new AgentSessions({
-      spawn: (id, options) => this.spawn(id, options),
+      spawn: (id, options) => this.spawn(id, agentEnv(id, options)),
       room: () => this.room(),
       ...(!this.target ? { spare: this.spare } : {}),
       strictResume: !!this.target,

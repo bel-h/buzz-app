@@ -67,6 +67,7 @@ impl Fixture {
         let app = mock_builder()
             .manage(PluginManager(Ok(manager.clone())))
             .manage(crate::host_process::HostProcesses::default())
+            .manage(crate::agent_env::AgentEnv::new())
             .manage(registry)
             .manage(identity)
             .invoke_handler(move |invoke| {

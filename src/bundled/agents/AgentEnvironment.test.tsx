@@ -88,3 +88,50 @@ it("removing a saved row deletes it on save", async () => {
   await user.click(screen.getByRole("button", { name: "Save" }));
   expect(calls("agent_env_set")[0]?.[1]).toEqual({ rows: [] });
 });
+
+it("locks the list while a save runs, so no edit is lost when it finishes", async () => {
+  const user = userEvent.setup();
+  let finish = () => {};
+  native.invoke.mockImplementation(async (command) => {
+    if (command === "agent_env_status") return { names, saved };
+    if (command === "agent_env_set")
+      await new Promise<void>((resolve) => {
+        finish = resolve;
+      });
+    return undefined;
+  });
+  render(<AgentEnvironment />);
+  await user.type(await screen.findByLabelText("Value of SAVED_KEY"), "new");
+  await user.click(screen.getByRole("button", { name: "Save" }));
+  expect(screen.getByLabelText("Value of SAVED_KEY")).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Add variable" })).toBeDisabled();
+  expect(
+    screen.getByRole("button", { name: "Remove SAVED_KEY" }),
+  ).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+  finish();
+  await waitFor(() =>
+    expect(screen.getByLabelText("Value of SAVED_KEY")).toBeEnabled(),
+  );
+  expect(screen.getByRole("button", { name: "Add variable" })).toBeEnabled();
+});
+
+it("offers Retry for a list it cannot read, never an empty one", async () => {
+  const user = userEvent.setup();
+  let readable = false;
+  native.invoke.mockImplementation(async (command) => {
+    if (command !== "agent_env_status") return undefined;
+    if (!readable) throw "The credential store is locked";
+    return { names, saved };
+  });
+  render(<AgentEnvironment />);
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "The credential store is locked",
+  );
+  expect(screen.queryByRole("button", { name: "Add variable" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
+  readable = true;
+  await user.click(screen.getByRole("button", { name: "Retry" }));
+  expect(await screen.findByLabelText("Value of SAVED_KEY")).toBeEnabled();
+  expect(screen.queryByRole("alert")).toBeNull();
+});

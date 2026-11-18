@@ -122,8 +122,10 @@ export type HostProcessOptions = Readonly<{
   protectedAgent?: Readonly<{ pubkey: string; relay: string }>;
   /** Secrets native code holds, set in its environment after `env`; one that
    * is not saved is left unset. Each is only for the processes it belongs
-   * to: `anthropic-api-key` (`ANTHROPIC_API_KEY`) for Buzz's Claude. */
-  secrets?: readonly "anthropic-api-key"[];
+   * to: `anthropic-api-key` (`ANTHROPIC_API_KEY`) for Buzz's Claude, and
+   * `agent-env`, the environment variables saved for local agents, for a
+   * process that runs an agent. */
+  secrets?: readonly ("anthropic-api-key" | "agent-env")[];
   onStdout?(data: string): void;
   onStderr?(data: string): void;
 }>;

@@ -149,6 +149,18 @@ async fn every_blocked_name_is_rejected_in_any_case() {
         .iter()
         .copied()
         .chain(["BUZZ_AGENT", "NOSTR_KEY", "path"])
+        // Named here too, so dropping one from `BLOCKED` fails.
+        .chain([
+            "OPENAI_BASE_PATH",
+            "LITELLM_BASE_PATH",
+            "AZURE_OPENAI_DEPLOYMENT_NAME_MAP",
+            "AZURE_OPENAI_RESOURCE_NAME",
+            "KIMI_CODE_OAUTH_HOST",
+            "KIMI_OAUTH_HOST",
+            "ANTHROPIC_FOUNDRY_RESOURCE",
+            "CODEX_AGENT_IDENTITY_AUTHAPI_BASE_URL",
+            "CODEX_AGENT_IDENTITY_JWKS_BASE_URL",
+        ])
     {
         let mixed: String = name
             .chars()

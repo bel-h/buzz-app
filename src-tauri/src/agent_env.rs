@@ -1,7 +1,7 @@
 //! Environment variables every local agent on this device starts with. Native
 //! code owns them: the list is kept in the OS credential store under Buzz's own
 //! item, never synced, and no command returns a value. It is added to the
-//! processes of Buzz's harnesses that run a local, unprotected agent
+//! processes of Buzz's harnesses that ask for it and run a local, unprotected agent
 //! (`may_have`), after the login shell's and before the harness's own, so a
 //! harness's variable wins. A saved list reaches processes started after the
 //! save; running ones keep the list they started with until Buzz restarts.
@@ -71,6 +71,7 @@ const BLOCKED: &[&str] = &[
     "AZURE_FOUNDRY_MODEL",
     "PROVIDER",
     "AZURE_OPENAI_DEPLOYMENT_NAME",
+    "AZURE_OPENAI_DEPLOYMENT_NAME_MAP",
     "SAGEMAKER_ENDPOINT_NAME",
     "GOOSE_LIVE_VOICE_MODEL",
     "DATABRICKS_MODEL_FILTER",
@@ -81,6 +82,7 @@ const BLOCKED: &[&str] = &[
     "ANTHROPIC_BEDROCK_BASE_URL",
     "ANTHROPIC_BEDROCK_MANTLE_BASE_URL",
     "ANTHROPIC_FOUNDRY_BASE_URL",
+    "ANTHROPIC_FOUNDRY_RESOURCE",
     "ANTHROPIC_GOOGLE_CLOUD_BASE_URL",
     "ANTHROPIC_VERTEX_BASE_URL",
     "CLAUDE_CODE_API_BASE_URL",
@@ -95,6 +97,9 @@ const BLOCKED: &[&str] = &[
     "CODEX_REVOKE_TOKEN_URL_OVERRIDE",
     "CODEX_EXEC_SERVER_URL",
     "CODEX_CLOUD_TASKS_BASE_URL",
+    "CODEX_AGENT_IDENTITY_AUTHAPI_BASE_URL",
+    "CODEX_AGENT_IDENTITY_JWKS_BASE_URL",
+    "CODEX_APP_SERVER_LOGIN_ISSUER",
     "GOOSE_PROVIDER__HOST",
     "DATABRICKS_HOST",
     "LMSTUDIO_HOST",
@@ -131,7 +136,18 @@ const BLOCKED: &[&str] = &[
     "TANZU_AI_ENDPOINT",
     "TETRATE_HOST",
     "XAI_HOST",
+    "OPENAI_BASE_PATH",
+    "LITELLM_BASE_PATH",
+    "AZURE_OPENAI_RESOURCE_NAME",
+    "KIMI_CODE_OAUTH_HOST",
+    "KIMI_OAUTH_HOST",
+    "AWS_ENDPOINT_URL",
+    "AWS_ENDPOINT_URL_BEDROCK_RUNTIME",
+    "AWS_ENDPOINT_URL_STS",
 ];
+
+/// The `secrets` name an agent launch asks for the list by.
+pub(crate) const SECRET: &str = "agent-env";
 
 /// Whether `process_id` of `plugin` runs a local agent: each harness's
 /// unprotected conversation process. Protected launches never get the list.

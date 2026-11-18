@@ -213,6 +213,7 @@ export const GooseProcess = {
         ...launch.env,
         ...(launch.protected && { GOOSE_DISABLE_SESSION_NAMING: "true" }),
       },
+      ...(!launch.protected && { secrets: ["agent-env"] }),
     });
     const cancel = () => void goose.kill();
     launch.signal?.addEventListener("abort", cancel, { once: true });

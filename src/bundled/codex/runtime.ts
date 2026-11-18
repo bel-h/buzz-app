@@ -1219,6 +1219,7 @@ export class CodexRuntime {
         (id, options) =>
           this.spawn(id, {
             ...options,
+            secrets: [...(options?.secrets ?? []), "agent-env"],
             args: [
               ...(options?.args ?? []),
               ...(this.hooks && !this.target ? callbackHookArgs : []),

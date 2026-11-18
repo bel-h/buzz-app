@@ -53,6 +53,7 @@ it("starts the host once, with the install script, and pairs each answer with it
   expect(host.processes).toHaveLength(1);
   const [process] = host.processes;
   expect(process?.id).toBe("pi-sh");
+  expect(process?.options.secrets).toEqual(["agent-env"]);
   expect(process?.options.cwd).toBe("~");
   expect(process?.options.args?.[1]).toBe("pi.sh");
   expect(process?.options.args?.at(-1)).toContain("BUZZ_PI_HOST");
@@ -374,6 +375,7 @@ it("isolates protected agents, contains their runtime code and cancels a native 
     );
     if (!worker) throw new Error("Missing protected worker");
     expect(worker.id).toBe("pi-protected-sh");
+    expect(worker.options.secrets).toBeUndefined();
     expect(
       manifest.host.processes.find((process) => process.id === worker.id),
     ).toMatchObject({

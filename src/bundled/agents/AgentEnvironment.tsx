@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { PlusIcon, TrashIcon } from "../../shared/design-system/icons";
 import { AlertDialog } from "../../shared/design-system/ui/AlertDialog";
 import { Button } from "../../shared/design-system/ui/Button";
+import { Field } from "../../shared/design-system/ui/Field";
 import { InlineHeader } from "../../shared/design-system/ui/Header";
 import { IconButton } from "../../shared/design-system/ui/IconButton";
 import { Input } from "../../shared/design-system/ui/Input";
@@ -37,15 +38,30 @@ export function AgentEnvironment() {
     setSaved(status.saved);
     setDirty(false);
   }, []);
-  useEffect(() => {
-    if (!isTauri()) return;
+  const fetch = useCallback(() => {
+    setError(undefined);
     // Hosts without the native list (test fixtures) answer nothing.
     invoke<Status | null>("agent_env_status").then(
       (status) => status && load(status),
       (reason: unknown) => setError(String(reason)),
     );
   }, [load]);
-  if (!rows) return error ? <p role="alert">{error}</p> : null;
+  useEffect(() => {
+    if (isTauri()) fetch();
+  }, [fetch]);
+  // An unreadable list is never shown as an empty one.
+  if (!rows)
+    return error ? (
+      <div className="mt-section-gap">
+        <InlineHeader title="Environment variables" />
+        <p role="alert" className="m-0 mb-2 text-body-sm">
+          {error}
+        </p>
+        <Button size="sm" onClick={fetch}>
+          Retry
+        </Button>
+      </div>
+    ) : null;
   const edit = (key: number, change: Partial<Row>) => {
     setRows(rows.map((row) => (row.key === key ? { ...row, ...change } : row)));
     setDirty(true);
@@ -75,28 +91,44 @@ export function AgentEnvironment() {
         agents don’t get them, and a harness’s own settings win. Models,
         providers and endpoints are set above, not here.
       </p>
-      <SettingsGroup>
+      {/* Nothing that changes the list works while a save runs, so no edit is
+          lost when it finishes. */}
+      <SettingsGroup layout="form">
         {rows.map((row) => (
-          <div key={row.key} className="flex items-center gap-2 p-2">
-            <Input
-              aria-label="Variable name"
-              placeholder="NAME"
-              value={row.name}
-              disabled={row.saved}
-              autoCapitalize="off"
-              spellCheck={false}
-              onValueChange={(name) => edit(row.key, { name })}
-            />
-            <Input
-              aria-label={`Value of ${row.name || "new variable"}`}
-              type="password"
-              placeholder={row.saved ? "Saved — type to replace" : "Value"}
-              value={row.value}
-              onValueChange={(value) => edit(row.key, { value })}
-            />
+          <div key={row.key} className="flex items-end gap-2">
+            <Field label="Variable name">
+              <Input
+                placeholder="NAME"
+                value={row.name}
+                disabled={row.saved || pending}
+                autoCapitalize="off"
+                spellCheck={false}
+                onValueChange={(name) => edit(row.key, { name })}
+              />
+            </Field>
+            <Field
+              label={
+                <>
+                  Value
+                  <span className="sr-only">
+                    {" "}
+                    of {row.name || "new variable"}
+                  </span>
+                </>
+              }
+            >
+              <Input
+                type="password"
+                placeholder={row.saved ? "Saved — type to replace" : "Value"}
+                value={row.value}
+                disabled={pending}
+                onValueChange={(value) => edit(row.key, { value })}
+              />
+            </Field>
             <IconButton
               aria-label={`Remove ${row.name || "variable"}`}
               icon={<TrashIcon size={17} />}
+              disabled={pending}
               onClick={() => {
                 setRows(rows.filter((other) => other.key !== row.key));
                 setDirty(true);
@@ -104,9 +136,10 @@ export function AgentEnvironment() {
             />
           </div>
         ))}
-        <div className="flex flex-wrap items-center gap-2 p-2">
+        <div className="flex flex-wrap items-center justify-end gap-2">
           <Button
             size="sm"
+            disabled={pending}
             onClick={() => {
               setRows([
                 ...rows,
@@ -129,7 +162,7 @@ export function AgentEnvironment() {
           </Button>
         </div>
         {error && (
-          <p role="alert" className="m-0 p-2 text-body-sm">
+          <p role="alert" className="m-0 text-body-sm">
             {error}
           </p>
         )}

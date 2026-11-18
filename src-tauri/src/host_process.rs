@@ -522,10 +522,18 @@ pub(crate) async fn plugin_host_process_spawn<R: tauri::Runtime>(
         process_command(&program, helper.as_deref(), None, &declared.args, &args)
     };
     let environment = env.unwrap_or_default();
-    let agent_env = app
-        .state::<crate::agent_env::AgentEnv>()
-        .for_process(&plugin, &declared.id, protected)
-        .await;
+    let secrets = secrets.unwrap_or_default();
+    // The saved list goes only to a process that asks for it and runs an agent.
+    let agent_env = if secrets.iter().any(|s| s == crate::agent_env::SECRET) {
+        if protected || !crate::agent_env::may_have(&plugin, &declared.id) {
+            return Err("That secret is not available to this process".into());
+        }
+        app.state::<crate::agent_env::AgentEnv>()
+            .for_process(&plugin, &declared.id, protected)
+            .await
+    } else {
+        Vec::new()
+    };
     set_environment(
         &mut command,
         login_shell_environment(),
@@ -555,7 +563,10 @@ pub(crate) async fn plugin_host_process_spawn<R: tauri::Runtime>(
             }
         }
     }
-    for secret in secrets.unwrap_or_default() {
+    for secret in secrets {
+        if secret == crate::agent_env::SECRET {
+            continue;
+        }
         if secret != crate::claude_key::SECRET
             || !crate::claude_key::may_have(&plugin, &declared.id)
         {

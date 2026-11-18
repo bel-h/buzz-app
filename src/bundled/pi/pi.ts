@@ -362,6 +362,7 @@ export class Pi {
         : undefined;
     const processId = boot ? "pi-protected-sh" : windows ? "node" : "pi-sh";
     const starting = this.spawn()(processId, {
+      ...(!boot && { secrets: ["agent-env"] }),
       args:
         boot && runtime
           ? [
