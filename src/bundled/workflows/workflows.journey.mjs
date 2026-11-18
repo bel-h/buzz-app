@@ -674,6 +674,78 @@ test("run history loads older runs at its end and keeps itself current", async (
   await expect(details).toHaveAttribute("open", "");
 });
 
+// Browser-only: a wheel scrolls the container under the pointer and, once that
+// is at its end, the next one that can scroll; and a line hidden by absolute
+// positioning is laid out against the nearest positioned ancestor, past any
+// scroller in between. jsdom has neither.
+test("wheeling to the end of run history leaves the editor dialog in place", async ({
+  page,
+}) => {
+  await page.goto(url);
+  const editor = editorControls(page);
+  const rows = page.locator(".workflow-runs article");
+  const end = page.getByText("No older runs.");
+  // A full newest page and a full older one. Every cursor reads the older
+  // page, so the second read adds nothing and ends the history.
+  await page.evaluate(() => {
+    const pages = window.workflowFixture.runPages;
+    const full = (prefix, status) =>
+      Array.from({ length: 20 }, (_, index) => ({
+        ...pages.newest.runs[0],
+        id: `${prefix}-${`${index}`.padStart(12, "0")}`,
+        status,
+      }));
+    const older = full("11111111-1111-4111-8111", "cancelled");
+    pages.newest = {
+      runs: full("22222222-2222-4222-8222", "completed"),
+      next: pages.newest.next,
+    };
+    pages.older = {
+      runs: older,
+      next: { before: "2026-09-11T12:00:00.123456Z", beforeId: older[19].id },
+    };
+  });
+  await editor.open("Message helper");
+  await editor.tab("Runs").click();
+  await expect(rows).toHaveCount(20);
+  await settleDialogMotion(editorDialog(page));
+  const body = editorDialog(page).locator(".buzz-dialog-body");
+  const tabs = editorDialog(page).getByRole("tablist");
+  const place = await tabs.boundingBox();
+
+  // Each step is far longer than the list. A step the list cannot take goes
+  // to whatever else can scroll.
+  await rows.first().hover();
+  await page.mouse.wheel(0, 10_000);
+  await expect(rows).toHaveCount(40);
+  await page.mouse.wheel(0, 10_000);
+  await expect(end).toBeInViewport();
+  // One more at the end of the list, seen by the page and painted.
+  await page.evaluate(() => {
+    window.wheeled = new Promise((resolve) =>
+      addEventListener(
+        "wheel",
+        () => requestAnimationFrame(() => requestAnimationFrame(resolve)),
+        { once: true },
+      ),
+    );
+  });
+  await page.mouse.wheel(0, 10_000);
+  await page.evaluate(() => window.wheeled);
+
+  // The dialog body has not moved and has nothing to scroll, so no step still
+  // on its way can move it either. The tabs and the end of the list are where
+  // a reader left them.
+  expect(
+    await body.evaluate((node) => ({
+      top: node.scrollTop,
+      overflow: node.scrollHeight - node.clientHeight,
+    })),
+  ).toEqual({ top: 0, overflow: 0 });
+  expect(await tabs.boundingBox()).toEqual(place);
+  await expect(end).toBeInViewport();
+});
+
 test("real session page under StrictMode fences community changes, warns before discarding a dirty draft and purges access", async ({
   page,
 }) => {
