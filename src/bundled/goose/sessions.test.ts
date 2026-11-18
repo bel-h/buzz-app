@@ -567,30 +567,62 @@ describe("AgentSessions", () => {
     expect(goose?.killed).toBe(false);
   });
 
-  it("opens sessions in a goose started with a changed compaction threshold, stopping the old one once its turns end", async () => {
+  it("opens new sessions in a goose started with a changed compaction threshold, keeping open ones in theirs", async () => {
     let limit: number | undefined;
-    const { fake, sessions, change } = setup({}, true, {
-      compactAt: () => limit,
-      fingerprint: (settings) => JSON.stringify([settings.workspace, limit]),
-    });
+    const { fake, sessions } = setup({}, true, { compactAt: () => limit });
     const one = sessions.deliver("a", "one", 1);
     await vi.waitFor(() => expect(fake.geese[0]?.turns).toHaveLength(1));
     expect(fake.geese[0]?.env).not.toHaveProperty(
       "GOOSE_AUTO_COMPACT_TOKEN_LIMIT",
     );
-    limit = 200000;
-    change({});
-    const other = sessions.deliver("b", "other", 2);
-    await vi.waitFor(() => expect(fake.geese[1]?.turns).toHaveLength(1));
-    expect(fake.geese[1]?.env.GOOSE_AUTO_COMPACT_TOKEN_LIMIT).toBe("200000");
-    // The turn already running keeps its goose until it ends.
-    expect(fake.geese[0]?.killed).toBe(false);
     fake.geese[0]?.turns[0]?.finish();
     await expect(one).resolves.toMatchObject({ ok: true });
-    await vi.waitFor(() => expect(fake.geese[0]?.killed).toBe(true));
-    expect(fake.geese[1]?.killed).toBe(false);
+    limit = 200000;
+    // An open conversation keeps its session, and the history goose holds.
+    const again = sessions.deliver("a", "two", 2);
+    await vi.waitFor(() => expect(fake.geese[0]?.turns).toHaveLength(2));
+    expect(fake.geese[0]?.turns[1]?.sessionId).toBe(
+      fake.geese[0]?.turns[0]?.sessionId,
+    );
+    const other = sessions.deliver("b", "other", 3);
+    await vi.waitFor(() => expect(fake.geese[1]?.turns).toHaveLength(1));
+    expect(fake.geese[1]?.env.GOOSE_AUTO_COMPACT_TOKEN_LIMIT).toBe("200000");
+    expect(fake.geese[0]?.killed).toBe(false);
+    fake.geese[0]?.turns[1]?.finish();
     fake.geese[1]?.turns[0]?.finish();
+    await expect(again).resolves.toMatchObject({ ok: true });
     await expect(other).resolves.toMatchObject({ ok: true });
+    expect(fake.geese[0]?.killed).toBe(false);
+  });
+
+  it("stops a drained goose before starting one with a changed compaction threshold", async () => {
+    let limit: number | undefined;
+    let started = 0;
+    const { fake, sessions } = setup({}, false, {
+      compactAt: () => limit,
+      // At the host's process limit, a second goose can start only once the
+      // first has gone.
+      wrap: (spawn) => async (id, options) => {
+        if (started++ && !fake.geese[0]?.killed)
+          throw new Error("Too many processes");
+        return spawn(id, options);
+      },
+    });
+    await sessions.runOnce("watch/x", () => "look");
+    limit = 200000;
+    await expect(sessions.runOnce("watch/y", () => "look")).resolves.toEqual(
+      expect.objectContaining({ ok: true }),
+    );
+    expect(fake.geese).toHaveLength(2);
+    expect(fake.geese[1]?.env.GOOSE_AUTO_COMPACT_TOKEN_LIMIT).toBe("200000");
+  });
+
+  it("leaves goose its own token limit for a threshold above it", async () => {
+    const { fake, sessions } = setup({}, false, { compactAt: () => 400000 });
+    await sessions.runOnce("watch/x", () => "look");
+    expect(fake.geese[0]?.env).not.toHaveProperty(
+      "GOOSE_AUTO_COMPACT_TOKEN_LIMIT",
+    );
   });
 
   it("reports a failed immediate compaction", async () => {

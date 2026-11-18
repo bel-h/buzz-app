@@ -130,8 +130,11 @@ export type SessionsOptions = Readonly<{
   resolveDirectory: ResolveDirectory;
   /** Answers the agent's Buzz tools. */
   tools: ToolServer;
-  /** The process its sessions open in, started when needed. */
-  process: Readonly<{ get(): Promise<AcpProcess> }>;
+  /** The process its sessions open in, started when needed. One that would
+   * replace a process `drained` says no session needs stops it first. */
+  process: Readonly<{
+    get(drained?: (process: AcpProcess) => boolean): Promise<AcpProcess>;
+  }>;
   /** The servers its sessions hold: the shared pool unless given. */
   pool?: ServerPool;
   /** The agent's current settings, for a new session. */
@@ -582,7 +585,10 @@ export class AgentSessions {
     // Removed meanwhile: a process started now would outlive it.
     if (this.disposed) throw new Error(`${this.options.label} was stopped`);
     const [process, cwd] = await Promise.all([
-      this.options.process.get(),
+      // Only this open is opening: no other can be in it.
+      this.options.process.get(
+        (process) => this.opens.size === 1 && !this.used(process),
+      ),
       absolute(resolveDirectory, launch.workspace),
     ]);
     if (process !== this.process) {
@@ -590,6 +596,7 @@ export class AgentSessions {
       this.process = process;
       void process.exited.then(() => {
         this.replaced.delete(process);
+        if (this.process === process) this.process = undefined;
         for (const [key, live] of this.live)
           if (live.process === process) this.drop(key, live);
       });
@@ -778,16 +785,17 @@ export class AgentSessions {
       this.retire();
     });
   }
+  /** Whether a session is in `process`, or closing in it. */
+  private used(process: AcpProcess) {
+    return [...this.live.values(), ...this.once.values(), ...this.closing].some(
+      (live) => live?.process === process,
+    );
+  }
   /** Stops each replaced process that no session is in or opening in. */
   private retire() {
     if (this.opens.size) return;
-    const used = [
-      ...this.live.values(),
-      ...this.once.values(),
-      ...this.closing,
-    ];
     for (const process of this.replaced)
-      if (!used.some((live) => live?.process === process)) {
+      if (!this.used(process)) {
         this.replaced.delete(process);
         void process.kill().catch(() => undefined);
       }

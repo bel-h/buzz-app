@@ -7,7 +7,12 @@ import {
 } from "../../features/agent-harness/acp/agent-sessions";
 import type { AgentProtection } from "../../features/agent-protection/service";
 import { nativeProtectionBridge } from "../../features/agent-protection/native-bridge";
-import { GooseProcess, type GooseHost, type ServeMcp } from "./goose";
+import {
+  GooseProcess,
+  gooseLimit,
+  type GooseHost,
+  type ServeMcp,
+} from "./goose";
 import type {
   SavedConversation,
   SessionStore,
@@ -50,15 +55,27 @@ export class AgentProcess {
 
   /** The running process. One that failed to start is started again on the
    * next call once it has exited. One started with another compaction limit
-   * is left to its sessions, which stop it once none needs it. */
-  get(): Promise<GooseProcess> {
+   * is left to its sessions, which stop it once none needs it, or stopped
+   * first when `drained` says none does, so it holds no process slot. */
+  get(
+    drained: (process: GooseProcess) => boolean = () => false,
+  ): Promise<GooseProcess> {
     this.protection?.assertAvailable();
-    const limit = this.compactAt();
+    const limit = gooseLimit(this.compactAt());
     if (this.current && limit === this.limit) return this.current.ready;
     this.limit = limit;
+    const old = this.current?.process;
+    const stopped =
+      old && drained(old)
+        ? old
+            .kill()
+            .then(() => old.exited)
+            .catch(() => undefined)
+        : undefined;
     const agent = this.agent();
     const start: Start = {
       ready: (async () => {
+        await stopped;
         const bridge =
           this.protection &&
           (await nativeProtectionBridge(this.serve, this.protection));
