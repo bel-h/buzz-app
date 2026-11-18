@@ -50,6 +50,7 @@ export type WorkflowRun = Readonly<{
   /** 0-based index of the step the run is on; equals the step count once completed. The relay writes it only at start, on approval suspend, on failure, and on completion, so it is stale while running. */
   currentStep: number;
   trace: readonly unknown[];
+  /** Set when the relay marks the run running, before its first step. Null on a failed run means the relay rejected it before any step ran (at capacity, unreadable definition, or the start itself failed). */
   startedAt: number | null;
   completedAt: number | null;
   createdAt: number;

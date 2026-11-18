@@ -92,7 +92,7 @@ function RunPage({
         </p>
       )}
       {snapshot.status === "ready" && !snapshot.data.runs.length && (
-        <p>{cursor ? "No runs returned on this page." : "No runs yet."}</p>
+        <p>{cursor ? "No older runs." : "No runs yet."}</p>
       )}
       {snapshot.data.runs.map((run) => (
         <article key={run.id} className="workflow-step">
@@ -106,12 +106,13 @@ function RunPage({
             </time>
           </p>
           {run.status === "waiting_approval" ? (
-            <p className="text-body-sm text-secondary">
+            <p className="text-body text-secondary">
               Current step: {run.currentStep + 1}
             </p>
-          ) : run.status === "failed" ? (
-            <p className="text-body-sm text-secondary">
-              Failed at step {run.currentStep + 1}
+          ) : run.status === "failed" && run.startedAt !== null ? (
+            // A run that failed without starting never reached a step.
+            <p className="text-body text-secondary">
+              Step {run.currentStep + 1}
             </p>
           ) : null}
           {(run.errorCode || run.errorMessage) && (

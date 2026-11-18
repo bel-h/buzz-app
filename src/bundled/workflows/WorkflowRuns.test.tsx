@@ -48,13 +48,46 @@ it("labels each status and shows a step only while awaiting approval or failed",
   ])
     expect(await screen.findByText(label)).toBeVisible();
   // The relay never updates currentStep while a run is running, so only the
-  // waiting_approval and failed runs show a step, numbered from 1.
+  // waiting_approval run and the failed run that started show a step, numbered
+  // from 1.
   expect(
     screen.getAllByText(/^Current step:/).map((line) => line.textContent),
   ).toEqual(["Current step: 4"]);
   expect(
-    screen.getAllByText(/^Failed at step/).map((line) => line.textContent),
-  ).toEqual(["Failed at step 1"]);
+    screen.getAllByText(/^Step \d+$/).map((line) => line.textContent),
+  ).toEqual(["Step 1"]);
+});
+
+it("claims no step for a run the relay rejected before it started", async () => {
+  const fixture = createWorkflowFixture();
+  // What the relay stores for a run turned away at its concurrency limit:
+  // failed on step 0 with no trace, like a first-step failure, but never started.
+  const runs = fixtureView({
+    runs: [
+      {
+        ...fixtureRun,
+        status: "failed" as const,
+        currentStep: 0,
+        trace: [],
+        startedAt: null,
+        errorCode: "capacity_exceeded",
+        errorMessage: "capacity exceeded",
+      },
+    ],
+    next: null,
+  });
+  runs.update({ status: "ready", data: runs.view.snapshot().data });
+  render(
+    <WorkflowRuns
+      capability={{ ...fixture.capability, runs: () => runs.view }}
+      workflow={fixtureDefinition}
+    />,
+  );
+  expect(await screen.findByText("Failed")).toBeVisible();
+  expect(
+    screen.getByText("capacity_exceeded: capacity exceeded"),
+  ).toBeVisible();
+  expect(screen.queryByText(/^Step \d+$/)).toBeNull();
 });
 
 it("says a workflow has no runs yet on the first page", async () => {
@@ -68,7 +101,7 @@ it("says a workflow has no runs yet on the first page", async () => {
     />,
   );
   expect(await screen.findByText("No runs yet.")).toBeVisible();
-  expect(screen.queryByText("No runs returned on this page.")).toBeNull();
+  expect(screen.queryByText("No older runs.")).toBeNull();
 });
 
 it("keeps loaded runs visible without a refresh banner and retains failures", async () => {

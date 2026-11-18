@@ -486,7 +486,7 @@ test("history stays lazy and paged; an unknown run never repeats or locks", asyn
   await expect(page.getByText("Completed", { exact: true })).toBeVisible();
   await expect(page.getByText(/^Current step:/)).toHaveCount(0);
   await button("Older runs").click();
-  await expect(page.getByText("No runs returned on this page.")).toBeVisible();
+  await expect(page.getByText("No older runs.")).toBeVisible();
   expect(await page.evaluate(() => window.workflowFixture.runCursor())).toEqual(
     {
       before: "2026-09-12T12:00:00.123456Z",
