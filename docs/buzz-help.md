@@ -468,8 +468,8 @@ and are asked to sign in again in Buzz.
   use Bot. Existing members keep their saved roles.
   If admin setup is interrupted, **Retry** on the opening message attempts to
   finish it without restoring later demotions or removals. If setup is blocked,
-  choose **Abandon admin setup** in Outbox as soon as the chat exists. This keeps
-  the chat and current roles and stops unfinished setup in other windows. Then
+  choose **Abandon admin setup** in the notice above the chat's composer. This
+  keeps the chat and current roles and stops unfinished setup in other windows. Then
   retry the opening message, or send a new one if the original has expired.
   Solo conversations continue at the chat's top level
   rather than requiring a new thread for each reply. Where available, use

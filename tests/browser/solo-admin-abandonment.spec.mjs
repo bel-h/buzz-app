@@ -96,6 +96,98 @@ test("opening recovery grants a quiet owned default without promoting its shared
   });
 });
 
+// Production users have no Diagnostics, so the blocked chat offers abandonment.
+test("a blocked setup is abandoned from its chat without Diagnostics", async ({
+  page,
+  app,
+}, info) => {
+  const createdAt = Math.floor(Date.now() / 1000);
+  const agent = app.soloAgents[0].pubkey;
+  const creation = app.sign({
+    kind: 9007,
+    created_at: createdAt,
+    content: "",
+    tags: [
+      ["h", chat],
+      ["p", agent],
+    ],
+  });
+  const message = app.sign({
+    kind: 9,
+    created_at: createdAt,
+    content: "Opening work",
+    tags: [
+      ["h", chat],
+      ["p", agent],
+    ],
+  });
+  app.report.setupCreation = creation;
+  app.report.setupReceiverTime = createdAt;
+  await page.addInitScript(
+    ({ scope, creation, message, agent }) => {
+      localStorage.setItem(
+        `buzz-outbox-v1:${scope}`,
+        JSON.stringify([
+          {
+            event: creation,
+            signed: creation,
+            delivery: "accepted",
+            recovery: {
+              key: `solo-initial-admins:${creation.tags[0][1]}`,
+              value: JSON.stringify([agent]),
+            },
+          },
+          { event: message, signed: message, delivery: "failed" },
+        ]),
+      );
+    },
+    {
+      scope: `https://primary.example:${app.viewer}`,
+      creation,
+      message,
+      agent,
+    },
+  );
+  await page.goto(app.origin);
+  await openPage(page, "Messages");
+  await page
+    .getByRole("button", { name: "Recovery chat", exact: true })
+    .click();
+  const abandon = page.getByRole("button", {
+    name: "Abandon admin setup",
+    exact: true,
+  });
+  await abandon.click();
+  const confirmation = page.getByRole("alertdialog", {
+    name: "Abandon admin setup?",
+  });
+  await confirmation.screenshot({
+    path: info.outputPath("ABANDON_FROM_CHAT.png"),
+  });
+  await confirmation
+    .getByRole("button", { name: "Abandon admin setup", exact: true })
+    .click();
+  await expect(abandon).toHaveCount(0);
+  const composer = page.getByRole("textbox", {
+    name: "Message your agents",
+    exact: true,
+  });
+  await composer.fill("Continue with current roles");
+  await composer.press("Enter");
+  await expect
+    .poll(
+      () =>
+        app.report.publications.filter(({ event }) => event.kind === 9).length,
+    )
+    .toBe(1);
+  expect(
+    app.report.publications.filter(({ event }) => event.kind === 9000),
+  ).toEqual([]);
+  expect(
+    app.report.publications.find(({ event }) => event.kind === 9).event.content,
+  ).toBe("Continue with current roles");
+});
+
 async function openOutbox(page, origin) {
   await page.goto(origin);
   await openPage(page, "Messages");
