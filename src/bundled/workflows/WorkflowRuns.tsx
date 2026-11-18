@@ -1,9 +1,8 @@
-import { useCallback, useState } from "react";
+import { useCallback } from "react";
 import type {
   WorkflowCapability,
   WorkflowDefinition,
   WorkflowRun,
-  WorkflowRunCursor,
   WorkflowReference,
 } from "../../features/workflows/types";
 import {
@@ -13,6 +12,8 @@ import {
 import { useClockFormat } from "../../shared/clock-preference";
 import { Button } from "../../shared/design-system/ui/Button";
 import { useWorkflowView } from "./useWorkflowView";
+import { LoadingRegion } from "../../shared/design-system/ui/LoadingRegion";
+import { useWorkflowRunList } from "./useWorkflowRunList";
 
 export function WorkflowRuns({
   capability,
@@ -23,7 +24,6 @@ export function WorkflowRuns({
   workflow: WorkflowDefinition;
   heading?: boolean;
 }) {
-  const [cursor, setCursor] = useState<WorkflowRunCursor | undefined>();
   if (!capability.availability.history)
     return (
       <p className="text-secondary">
@@ -31,49 +31,48 @@ export function WorkflowRuns({
       </p>
     );
   return (
-    <RunPage
-      key={cursor ? `${cursor.before}:${cursor.beforeId}` : "first"}
-      capability={capability}
-      workflow={workflow}
-      cursor={cursor}
-      onPage={setCursor}
-      heading={heading}
-    />
+    <RunList capability={capability} workflow={workflow} heading={heading} />
   );
 }
-function RunPage({
+/** One list, newest first, that keeps itself current while it is on screen. */
+function RunList({
   capability,
   workflow,
-  cursor,
-  onPage,
   heading,
 }: {
   capability: WorkflowCapability;
   workflow: WorkflowReference;
-  cursor: WorkflowRunCursor | undefined;
-  onPage: (cursor: WorkflowRunCursor | undefined) => void;
   heading: boolean;
 }) {
   useClockFormat();
   const { snapshot, refresh } = useWorkflowView(
-    useCallback(
-      () => capability.runs(workflow, cursor),
-      [capability, workflow, cursor],
-    ),
+    useCallback(() => capability.runs(workflow), [capability, workflow]),
   );
+  const list = useWorkflowRunList({
+    capability,
+    workflow,
+    newest: snapshot,
+    refresh,
+  });
   if (!snapshot) return <p role="status">Reading runs…</p>;
+  const needsRefresh =
+    snapshot.status === "idle" || snapshot.status === "error";
   return (
-    <section aria-label="Workflow runs" className="workflow-runs">
-      <div className="workflow-toolbar">
-        {heading && <h3 className="text-heading">Runs</h3>}
-        <Button
-          disabled={snapshot.status === "loading"}
-          onClick={() => void refresh()}
-        >
-          Refresh runs
-        </Button>
-      </div>
-      {snapshot.status === "loading" && !snapshot.data.runs.length && (
+    <section
+      ref={list.section}
+      aria-label="Workflow runs"
+      className="workflow-runs"
+    >
+      {(heading || needsRefresh) && (
+        <div className="workflow-toolbar">
+          {heading && <h3 className="text-heading">Runs</h3>}
+          {/* The list rereads itself; only these states wait for a person. */}
+          {needsRefresh && (
+            <Button onClick={() => void refresh()}>Refresh runs</Button>
+          )}
+        </div>
+      )}
+      {snapshot.status === "loading" && !list.loaded && (
         <p role="status">Reading runs…</p>
       )}
       {snapshot.status === "unavailable" && (
@@ -91,10 +90,10 @@ function RunPage({
             "Run history could not be read. Retry with Refresh runs."}
         </p>
       )}
-      {snapshot.status === "ready" && !snapshot.data.runs.length && (
-        <p>{cursor ? "No older runs." : "No runs yet."}</p>
-      )}
-      {snapshot.data.runs.map((run) => (
+      {(snapshot.status === "ready" || snapshot.status === "loading") &&
+        list.loaded &&
+        !list.runs.length && <p>No runs yet.</p>}
+      {list.runs.map((run) => (
         <article key={run.id} className="workflow-step">
           <p className="text-body">
             <strong>{RUN_STATUS_LABELS[run.status]}</strong> ·{" "}
@@ -129,20 +128,27 @@ function RunPage({
           </details>
         </article>
       ))}
-      <div className="workflow-toolbar">
-        {cursor && (
-          <Button onClick={() => onPage(undefined)}>Newest runs</Button>
-        )}
-        {snapshot.status === "ready" && snapshot.data.next && (
-          <Button
-            onClick={() => {
-              if (snapshot.data.next) onPage(snapshot.data.next);
-            }}
+      {list.more && (
+        // Reaching this loads the next page; the button is the same action
+        // for a keyboard or screen reader, and stays put while a page is read.
+        <div ref={list.end}>
+          <LoadingRegion
+            pending={list.older === "loading"}
+            label="Reading older runs…"
+            feedback={
+              list.older === "failed" ? (
+                <p role="alert" className="text-danger">
+                  Older runs could not be read. Retry with Load older runs.
+                </p>
+              ) : undefined
+            }
           >
-            Older runs
-          </Button>
-        )}
-      </div>
+            <Button onClick={() => void list.loadOlder()}>
+              Load older runs
+            </Button>
+          </LoadingRegion>
+        </div>
+      )}
     </section>
   );
 }

@@ -58,13 +58,13 @@ See the [capability contract](../src/features/workflows/types.ts).
   Saving an edit, including toggling configured state, updates the saved timestamp;
   edits within the same second still follow that tiebreak.
   Sorting is local to the page and Clear all only resets filters. Switching sort
-  recreates the row/detail views, resetting run-history paging and card-local state.
+  recreates the row/detail views, resetting the loaded run history and card-local state.
   Discovery still reads all eligible channels.
   Creating a workflow can still target any eligible channel. Each row runs the
   saved configuration in one click and toggles its configured state. Selecting
   a row shows its detail, actions and run history in a resizable side pane, as
-  on Agents; a created run rereads that history. Editing opens a modal over the
-  list. Create begins with channel selection in that editor; the empty draft's
+  on Agents; a created run rereads that history in place. Editing opens a modal
+  over the list. Create begins with channel selection in that editor; the empty draft's
   primary action adds its first step.
   Form mode uses a selectable flow and contextual inspector, with insertion
   menus and removal. On narrow screens the inspector is a nested side dialog.
@@ -104,8 +104,16 @@ See the [capability contract](../src/features/workflows/types.ts).
   shows the relative `/hooks/{id}` route only.
 - Destructive deletion confirmation, unconfirmed manual run of the saved
   configuration (the editor's Run now is unavailable while the draft has
-  unsaved changes), and on-demand run/trace history in
-  20-row pages with the relay's exact `(before,beforeId)` cursor.
+  unsaved changes), and on-demand run/trace history as one list, newest
+  first. Older runs load in 20-row pages with the relay's exact
+  `(before,beforeId)` cursor as the reader reaches the end of the list; **Load
+  older runs** does the same from the keyboard. The relay sends no run events,
+  so the list rereads itself while it is on screen: new runs appear on top and
+  a pending, running or waiting run changes in place, sooner while any shown
+  run is still active. Rows are matched by run ID, so open details and the
+  scroll position survive. Nothing is read while the window or the list is
+  hidden; it catches up when shown again. A failed read keeps the runs already
+  shown and offers **Refresh runs**, as does history the session cleared.
 - Archived channels: the relay accepts saves and runs there, but every run
   fails. Their group and Recently updated rows say Archived. Run now and
   turning a workflow on are unavailable in rows, details and the editor, whose

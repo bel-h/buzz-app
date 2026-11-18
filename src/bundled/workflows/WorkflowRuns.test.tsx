@@ -90,7 +90,7 @@ it("claims no step for a run the relay rejected before it started", async () => 
   expect(screen.queryByText(/^Step \d+$/)).toBeNull();
 });
 
-it("says a workflow has no runs yet on the first page", async () => {
+it("says a workflow has no runs yet", async () => {
   const fixture = createWorkflowFixture();
   const runs = fixtureView({ runs: [], next: null });
   runs.update({ status: "ready", data: { runs: [], next: null } });
@@ -101,7 +101,7 @@ it("says a workflow has no runs yet on the first page", async () => {
     />,
   );
   expect(await screen.findByText("No runs yet.")).toBeVisible();
-  expect(screen.queryByText("No older runs.")).toBeNull();
+  expect(screen.queryByRole("button", { name: "Load older runs" })).toBeNull();
 });
 
 it("keeps loaded runs visible without a refresh banner and retains failures", async () => {
@@ -118,7 +118,8 @@ it("keeps loaded runs visible without a refresh banner and retains failures", as
   act(() => runs.update({ status: "loading", data }));
   expect(screen.getByText("Completed")).toBeVisible();
   expect(screen.queryByText("Reading runs…")).toBeNull();
-  expect(screen.getByRole("button", { name: "Refresh runs" })).toBeDisabled();
+  // The list rereads itself, so only a failure offers a refresh.
+  expect(screen.queryByRole("button", { name: "Refresh runs" })).toBeNull();
   act(() => runs.update({ status: "error", error: "Read failed", data }));
   expect(screen.getByRole("alert")).toHaveTextContent("Read failed");
   expect(screen.getByRole("button", { name: "Refresh runs" })).toBeEnabled();
