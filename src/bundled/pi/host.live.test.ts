@@ -307,6 +307,52 @@ const compacting = async (key, compactAt) => {
   return { compacted: (await kinds()).includes("pi.compaction"), calls: faux.state.callCount - from };
 };
 out.threshold = { at: await compacting("chan/threshold", 40_000), unset: await compacting("chan/unset") };
+// A run the host stopped in a tool resumes in the next host, whose next
+// request checks the threshold the agent opened with, before any turn
+// brings it.
+{
+  let pause;
+  const pausing = defineExtension({
+    name: "pausing",
+    tools: [defineTool({
+      name: "pause",
+      description: "Wait",
+      parameters: { type: "object", properties: {} },
+      execute: async (_args, _api, context) => {
+        if (pause) { pause.entered.release(); await abortable(pause.gate, context?.abortSignal); }
+        return { output: [{ type: "text", text: "waited" }] };
+      },
+    })],
+  });
+  const key = "chan/recover", context = { channel: "chan", root: key }, long = (request) => ({ ...turn(request, "word ".repeat(25_000)), key, context });
+  await pi.stop();
+  pi = start(undefined, [nesting, pausing]);
+  await pi.rpc("open", { agent, tools });
+  faux.setResponses([
+    () => fauxAssistantMessage("Read it"),
+    () => fauxAssistantMessage(fauxToolCall("pause", {}), { stopReason: "toolUse" }),
+    ...Array.from({ length: 3 }, () => () => fauxAssistantMessage("Read it")),
+  ]);
+  const r1 = await pi.rpc("deliver", long("RC1"));
+  await pi.rpc("wait", { agent, submission: r1.submission });
+  pause = { ...held(), entered: held() };
+  const r2 = await pi.rpc("deliver", long("RC2"));
+  await pause.entered.gate;
+  const kinds = async () => (await pi.rpc("entries", { agent, conversation: r2.conversation })).entries.map((entry) => entry.kind);
+  const before = (await kinds()).includes("pi.compaction");
+  const waiting = pi.rpc("wait", { agent, submission: r2.submission });
+  await pi.stop();
+  await waiting.catch(() => undefined);
+  pause = undefined;
+  pi = start(undefined, [nesting, pausing]);
+  await pi.rpc("open", { agent, tools, compactAt: 40_000 });
+  const resumed = await pi.rpc("wait", { agent, submission: r2.submission });
+  for (let tries = 0; tries < 100 && !(await kinds()).includes("pi.compaction"); tries++) await new Promise((resolve) => setTimeout(resolve, 20));
+  out.recovered = { before, resumed: resumed.status, compacted: (await kinds()).includes("pi.compaction") };
+  await pi.stop();
+  pi = start();
+  await pi.rpc("open", { agent, tools });
+}
 // Every model has it, so a run resumed on any of them does; and none starts
 // its background compaction later than Pi's own.
 const policy = new Compaction(() => [{ provider: "p", id: "small", contextWindow: 128_000 }, { provider: "p", id: "large", contextWindow: 1_000_000 }]);
@@ -967,6 +1013,11 @@ describe.skipIf(!DEPS)("the Pi host on Pi durable", () => {
     expect(out.threshold).toEqual({
       at: { compacted: true, calls: 3 },
       unset: { compacted: false, calls: 2 },
+    });
+    expect(out.recovered).toEqual({
+      before: false,
+      resumed: "done",
+      compacted: true,
     });
     expect(out.policy).toEqual({
       "p/small": { backgroundTokens: 32_768 },
