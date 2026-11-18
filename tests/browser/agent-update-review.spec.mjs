@@ -48,9 +48,12 @@ test("a scope proposal shows the current and proposed settings before Save", asy
   );
   const propose = (scope) =>
     page.evaluate((scope) => window.proposeFixtureSettings({ scope }), scope);
+  await page.setViewportSize({ width: 1280, height: 720 });
   await propose("community");
   const review = page.getByRole("dialog", { name: "Edit Ada" });
   const summary = review.getByRole("region", { name: "Proposed settings" });
+  await expect(summary.getByRole("heading")).toBeFocused();
+  await expect(summary).toBeInViewport({ ratio: 1 });
   await expect(summary).toContainText("Sessions");
   await expect(summary).toContainText("One session per thread");
   await expect(summary).toContainText("One session per community");

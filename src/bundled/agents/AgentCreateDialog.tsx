@@ -2,6 +2,7 @@
 import {
   type AriaAttributes,
   type ReactElement,
+  type Ref,
   useEffect,
   useId,
   useLayoutEffect,
@@ -109,9 +110,11 @@ const startingConfig = (type: RegisteredAgentType | undefined) => {
 };
 
 function ProposedSettings({
+  headingRef,
   saved,
   proposed,
 }: {
+  headingRef: Ref<HTMLHeadingElement>;
   saved: unknown;
   proposed: AgentSettingsProposal;
 }) {
@@ -148,7 +151,13 @@ function ProposedSettings({
   );
   return (
     <section aria-labelledby={headingId} className="flex flex-col gap-2">
-      <InlineHeader id={headingId} level={2} title="Proposed settings" />
+      <InlineHeader
+        ref={headingRef}
+        id={headingId}
+        level={2}
+        title="Proposed settings"
+        tabIndex={-1}
+      />
       {rows.length ? (
         <SettingsGroup>
           {rows.map(({ label, before, after }) => (
@@ -305,6 +314,7 @@ export function AgentCreateDialog({
   const [configurationReady, setConfigurationReady] = useState(false);
   const avatarRef = useRef<{ prepare(): Promise<string> }>(null);
   const nameField = useRef<HTMLInputElement>(null);
+  const proposalHeading = useRef<HTMLHeadingElement>(null);
   const createButton = useRef<HTMLButtonElement>(null);
   const introContinue = useRef<HTMLButtonElement>(null);
   const previousIntro = useRef(false);
@@ -572,7 +582,7 @@ export function AgentCreateDialog({
       closeLabel={showRemoteIntro ? "Back to agent settings" : "Close"}
       height="content"
       chromeSpacing="padded"
-      initialFocus={nameField}
+      initialFocus={reviewingSettings ? proposalHeading : nameField}
       // A started draft only closes from the close button.
       dismissOnOutsideClick={!dirty}
       onEscape={() => {
@@ -654,6 +664,7 @@ export function AgentCreateDialog({
         <div className={styles.createStack}>
           {update?.request.settings && (
             <ProposedSettings
+              headingRef={proposalHeading}
               saved={update.agent.config}
               proposed={update.request.settings}
             />
