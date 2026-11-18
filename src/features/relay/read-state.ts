@@ -131,12 +131,20 @@ const withBlockedClear = (
   unread: UnreadJournal,
   error?: string,
   keys: readonly string[] = [],
+  capacity: readonly string[] = [],
 ): UnreadJournal => {
-  const { blockedClear: _, blockedKeys: __, ...rest } = unread;
-  if (error === undefined) return rest;
-  return keys.length
-    ? { ...rest, blockedClear: error, blockedKeys: keys }
-    : { ...rest, blockedClear: error };
+  const {
+    blockedClear: _,
+    blockedKeys: __,
+    capacityKeys: ___,
+    ...rest
+  } = unread;
+  return {
+    ...rest,
+    ...(error !== undefined && { blockedClear: error }),
+    ...(error !== undefined && keys.length > 0 && { blockedKeys: keys }),
+    ...(capacity.length > 0 && { capacityKeys: capacity }),
+  };
 };
 const same = (a: unknown, b: unknown): boolean => {
   if (Object.is(a, b)) return true;
@@ -349,18 +357,23 @@ export function createReadState({
    * synchronized until a publication fits the merged groups again. */
   let blockedClear: string | undefined;
   let blockedKeys: readonly string[] = [];
+  let capacityKeys: readonly string[] = [];
+  /** A clock or held warning outranks a capacity one. */
+  const warning = () =>
+    blockedClear ?? (capacityKeys.length ? UNREAD_CAPACITY : undefined);
   const health = (patch: Partial<ReadSyncSnapshot>) => {
     if (patch.status) failedRevision = undefined;
     if (patch.status === "error") resumable = undefined;
     let next = { ...snapshot, ...patch };
+    const error = warning();
     if (
-      blockedClear &&
+      error &&
       (next.status === "local" ||
         next.status === "pending" ||
         next.status === "accepted" ||
         next.status === "reconciled")
     )
-      next = { ...next, status: "error", error: blockedClear };
+      next = { ...next, status: "error", error };
     if (!same(next, snapshot)) {
       snapshot = Object.freeze(next);
       emit();
@@ -541,6 +554,7 @@ export function createReadState({
     journal = saved;
     blockedClear = saved.unread?.blockedClear;
     blockedKeys = saved.unread?.blockedKeys ?? [];
+    capacityKeys = saved.unread?.capacityKeys ?? [];
     state = localState(saved, now());
     armUpkeep();
     if (released) schedule();
@@ -557,6 +571,7 @@ export function createReadState({
     journal = current;
     blockedClear = current.unread?.blockedClear;
     blockedKeys = current.unread?.blockedKeys ?? [];
+    capacityKeys = current.unread?.capacityKeys ?? [];
     state = localState(current, now());
     armUpkeep();
     emit();
@@ -1009,16 +1024,20 @@ export function createReadState({
     }
     const active = (ctx: string) =>
       unreadActive(next.overrides[ctx], frontier(next, ctx), clock);
+    // Each refused channel resolves on its own clear or inactivity.
     const settle = (resolved: readonly string[]) => {
-      blockedKeys = blockedKeys.filter(
-        (ctx) => !resolved.includes(ctx) && active(ctx),
-      );
+      const open = (ctx: string) => !resolved.includes(ctx) && active(ctx);
+      blockedKeys = blockedKeys.filter(open);
+      capacityKeys = capacityKeys.filter(open);
       if (!blockedKeys.length) blockedClear = undefined;
     };
-    // A capacity refusal never hides a clock or held warning.
     const refuse = (error: string) => {
-      if (error !== UNREAD_CAPACITY || !blockedClear) blockedClear = error;
-      blockedKeys = [...new Set([...blockedKeys, ...live])];
+      if (error === UNREAD_CAPACITY)
+        capacityKeys = [...new Set([...capacityKeys, ...live])];
+      else {
+        blockedClear = error;
+        blockedKeys = [...new Set([...blockedKeys, ...live])];
+      }
     };
     const live = [...new Set([key, ...clearKeys])].filter(
       (ctx) => channelContext(ctx) && active(ctx),
@@ -1131,6 +1150,7 @@ export function createReadState({
           // refusal here, or the publication fit recheck, changes it.
           blockedClear = current.unread?.blockedClear;
           blockedKeys = current.unread?.blockedKeys ?? [];
+          capacityKeys = current.unread?.capacityKeys ?? [];
           const groups = changeGroups(
             { ...current, state: kept.state, reserve: kept.reserve, own },
             key,
@@ -1159,7 +1179,12 @@ export function createReadState({
           // publication fits again or a later read's clear succeeds.
           const unreadJournal =
             current.unread &&
-            withBlockedClear(current.unread, blockedClear, blockedKeys);
+            withBlockedClear(
+              current.unread,
+              blockedClear,
+              blockedKeys,
+              capacityKeys,
+            );
           synced = timestamp !== undefined || !!groups;
           return {
             ...current,
@@ -1254,7 +1279,7 @@ export function createReadState({
           }
           // A blocked clear is rechecked even with nothing new to send: peer
           // clears may have shrunk the merged groups until they fit again.
-          if (journal.revision <= journal.acceptedRevision && !blockedClear)
+          if (journal.revision <= journal.acceptedRevision && !warning())
             return;
           const owned = [journal.slot, ...(journal.spill ?? [])];
           const unreadSlot = (journal.unread ?? newUnreadJournal()).slot;
@@ -1304,39 +1329,49 @@ export function createReadState({
           // A refused clear's warning ends once none of its groups is active.
           const { overrides } = journal.state;
           if (
-            blockedKeys.some(
+            [...blockedKeys, ...capacityKeys].some(
               (key) =>
                 !unreadActive(overrides[key], merged.frontiers[key], clock),
             )
           )
             await save((current) => {
-              if (!current.unread?.blockedKeys) return current;
+              if (!current.unread) return current;
               const at = localState(current, now());
-              const keys = current.unread.blockedKeys.filter((key) =>
-                unreadActive(
-                  current.state.overrides[key],
-                  at.frontiers[key],
-                  unreadClock(current, now()),
-                ),
-              );
+              const open = (keys: readonly string[] = []) =>
+                keys.filter((key) =>
+                  unreadActive(
+                    current.state.overrides[key],
+                    at.frontiers[key],
+                    unreadClock(current, now()),
+                  ),
+                );
+              const keys = open(current.unread.blockedKeys);
               return {
                 ...current,
                 unread: withBlockedClear(
                   current.unread,
                   keys.length ? current.unread.blockedClear : undefined,
                   keys,
+                  open(current.unread.capacityKeys),
                 ),
               };
             });
           let groups: ReadBlob;
           try {
             groups = unreadOf(journal.state.overrides);
-            // Fitting resolves only a capacity refusal; clock and held
+            // Fitting resolves only capacity refusals; clock and held
             // refusals wait for a successful clear.
-            if (!heldCount(journal) && blockedClear === UNREAD_CAPACITY)
+            if (!heldCount(journal) && capacityKeys.length)
               await save((current) =>
-                current.unread?.blockedClear === UNREAD_CAPACITY
-                  ? { ...current, unread: withBlockedClear(current.unread) }
+                current.unread?.capacityKeys
+                  ? {
+                      ...current,
+                      unread: withBlockedClear(
+                        current.unread,
+                        current.unread.blockedClear,
+                        current.unread.blockedKeys,
+                      ),
+                    }
                   : current,
               );
           } catch {

@@ -3072,38 +3072,72 @@ describe("expiring unread (version 2)", () => {
       await owner.flush();
       expect(owner.snapshot()).toMatchObject(clockNotice);
     });
+    /** Peer groups overfill the primary, or with `cleared`, shrink again. */
+    async function fill(
+      f: ReturnType<typeof fixture>,
+      owner: Awaited<ReturnType<typeof started>>,
+      cleared = false,
+    ) {
+      const groups = [];
+      for (let n = 0; n < 150; n++)
+        groups.push(
+          await peerUnreadMarker(f, `c${n}`.padEnd(120, "x"), 0, {
+            slot: n.toString(16).padStart(32, "b"),
+            ...(cleared
+              ? { createdAt: T + 1, set: T, clear: T + 1 }
+              : { createdAt: T }),
+          }),
+        );
+      owner.accept(groups);
+      await owner.refresh();
+    }
     it("keeps its notice through a capacity refusal and a later fit", async () => {
       const { f, owner } = await refused();
-      // Peer groups overfill the primary: another channel's clear is refused
-      // for capacity, which must not replace the clock warning.
-      const fill = [];
-      for (let n = 0; n < 150; n++)
-        fill.push(
-          await peerUnreadMarker(f, `c${n}`.padEnd(120, "x"), 0, {
-            slot: n.toString(16).padStart(32, "b"),
-            createdAt: T,
-          }),
-        );
-      owner.accept(fill);
-      await owner.refresh();
+      // A capacity refusal of another channel must not replace the warning.
+      await fill(f, owner);
       await owner.read("other", 0, () => true, true);
       expect(owner.snapshot()).toMatchObject(clockNotice);
-      // The peers clear their groups: the next publication fits again.
-      const cleared = [];
-      for (let n = 0; n < 150; n++)
-        cleared.push(
-          await peerUnreadMarker(f, `c${n}`.padEnd(120, "x"), 0, {
-            slot: n.toString(16).padStart(32, "b"),
-            createdAt: T + 1,
-            set: T,
-            clear: T + 1,
-          }),
-        );
-      owner.accept(cleared);
-      await owner.refresh();
+      await fill(f, owner, true);
       await owner.flush();
       expect(owner.snapshot()).toMatchObject(clockNotice);
-    });
+    }, 30000);
+    it("lets a fit resolve a capacity refusal once the clock refusal clears", async () => {
+      const { f, owner } = await refused();
+      await fill(f, owner);
+      await owner.read("other", 0, () => true, true);
+      await fill(f, owner, true);
+      f.setNow(T + 301);
+      await owner.read("room", 0, () => true, true);
+      expect(f.journal()?.unread?.blockedClear).toBeUndefined();
+      await owner.flush();
+      expect(f.journal()?.unread?.capacityKeys).toBeUndefined();
+      expect(f.journal()?.unread?.blockedClear).toBeUndefined();
+      expect(owner.snapshot().error).toBeUndefined();
+    }, 30000);
+    it("keeps another clock-refused channel's notice through that fit", async () => {
+      const { f, owner } = await refused();
+      owner.accept([
+        await peerUnreadMarker(f, "late", 0, {
+          createdAt: T,
+          set: T + 400,
+          slot: "d".repeat(32),
+          clientId: "late-peer",
+        }),
+      ]);
+      await owner.refresh();
+      // Refused in turn: room, late, room again, then other for capacity.
+      await owner.read("late", 0, () => true, true);
+      await owner.read("room", 0, () => true, true);
+      await fill(f, owner);
+      await owner.read("other", 0, () => true, true);
+      await fill(f, owner, true);
+      f.setNow(T + 301);
+      await owner.read("room", 0, () => true, true);
+      await owner.flush();
+      expect(f.journal()?.unread?.blockedKeys).toEqual(["late"]);
+      expect(f.journal()?.unread?.capacityKeys).toBeUndefined();
+      expect(owner.snapshot()).toMatchObject(clockNotice);
+    }, 30000);
     it("clears its notice once the same channel's clear succeeds", async () => {
       const { f, owner } = await refused();
       f.setNow(T + 301);

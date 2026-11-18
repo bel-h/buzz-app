@@ -78,12 +78,15 @@ export type UnreadJournal = Readonly<{
    * never makes an expired mark live again. */
   watermark: number;
   held: Readonly<Record<string, readonly HeldGroup[]>>;
-  /** A refused channel clear's warning, kept across reloads. The clear
+  /** A clock or held refusal's warning, kept across reloads. The clear
    * itself is not retried; the user reads again. */
   blockedClear?: string;
   /** The channels whose clears it refused: it clears once each has had a
    * successful clear or its group is no longer active. */
   blockedKeys?: readonly string[];
+  /** Channels whose clears capacity refused, which a fitting publication
+   * also resolves. */
+  capacityKeys?: readonly string[];
 }>;
 export const HELD_GROUPS_PER_KEY = 8;
 export const newUnreadJournal = (): UnreadJournal => ({
@@ -132,7 +135,11 @@ function readUnread(raw: unknown, slots: readonly string[]): UnreadJournal {
       (raw.blockedClear === undefined ||
         !Array.isArray(raw.blockedKeys) ||
         raw.blockedKeys.length > READ_STATE_KEYS / 3 ||
-        !raw.blockedKeys.every(channelContext)))
+        !raw.blockedKeys.every(channelContext))) ||
+    (raw.capacityKeys !== undefined &&
+      (!Array.isArray(raw.capacityKeys) ||
+        raw.capacityKeys.length > READ_STATE_KEYS / 3 ||
+        !raw.capacityKeys.every(channelContext)))
   )
     throw new Error("Invalid saved unread state");
   const held: Record<string, readonly HeldGroup[]> = {};
@@ -162,6 +169,9 @@ function readUnread(raw: unknown, slots: readonly string[]): UnreadJournal {
     ...(raw.blockedKeys === undefined
       ? {}
       : { blockedKeys: Object.freeze([...(raw.blockedKeys as string[])]) }),
+    ...(raw.capacityKeys === undefined
+      ? {}
+      : { capacityKeys: Object.freeze([...(raw.capacityKeys as string[])]) }),
   });
 }
 /** Keeps only the covers of marks still saved at the same revision. */
