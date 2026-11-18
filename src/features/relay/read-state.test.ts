@@ -2173,6 +2173,9 @@ describe("publication fences", () => {
     let owner = make();
     await owner.ready;
     await owner.refresh();
+    // A second tab, never told about the first tab's saves.
+    const other = make();
+    await other.ready;
     await owner.read("room", T - 10, () => true);
     expect((await owner.markLocalUnread("room", () => true)).sync).toBe(
       "pending",
@@ -2205,6 +2208,9 @@ describe("publication fences", () => {
     expect(owner.snapshot().error).toBe(
       "Channel mark read cannot be synchronized",
     );
+    // An unrelated read in the other tab keeps the shared warning.
+    await other.read("third", T - 10, () => true);
+    other.dispose();
     // The refused clear is not retried, but its notice survives a reload.
     const sends = f.host.publish.mock.calls.length;
     owner.dispose();

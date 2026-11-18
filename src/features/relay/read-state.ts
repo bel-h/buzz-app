@@ -1046,6 +1046,9 @@ export function createReadState({
           );
           // A whole channel's mark unread, and its clears, sync as override
           // groups; message and thread mark unread stay on this device.
+          // The shared journal's warning, not this tab's cached copy: only a
+          // refusal here, or the publication fit recheck, changes it.
+          blockedClear = current.unread?.blockedClear;
           const groups = changeGroups(
             { ...current, state: kept.state, reserve: kept.reserve, own },
             key,
