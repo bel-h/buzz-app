@@ -45,6 +45,8 @@ leave and rejoin to retry.
 Final voice transcripts appear in the room with speaker credit and do not
 mention anyone. Explicit agent watches on that room can still receive them.
 
+In a Codex agent’s settings, open **Huddle voice** in the **Settings** tab to choose which voice the agent speaks with in Huddles (Codex only). Use **Language and region** to filter supported voices with preview recordings by locale or accent. Select a voice to play its sample. Close the chooser with **X** to save your choice, or press Escape to cancel. **Codex default** is above the region filter and follows the current Codex default voice. Selecting another voice, changing the locale, or closing the chooser stops the previous sample. If a harness change is pending, the voice is saved with that change using the settings **Save** button. Preview plays an available prerecorded sample on the local Codex host and does not use your microphone. Voice choices and sample URLs refresh when settings opens; downloaded samples are reused during the app session. Each agent has its own choice, synced with its settings. The saved change applies when the agent next joins a Huddle. Update Buzz on every host running the agent before selecting a non-default voice. Older hosts cannot read the synced voice setting and may fail to start text or voice work.
+
 ## Identity and getting connected
 
 - If Buzz can’t finish starting, the window says **Buzz couldn’t open**
@@ -439,12 +441,22 @@ and are asked to sign in again in Buzz.
   without sharable attachment metadata (including custom emoji), show an
   explanation before sending. Forward and Copy as forward are disabled; **Copy link** is available
   in the dialog. A link still requires access to the original conversation.
-- Select text in a message, such as by double-clicking a word, and choose
-  **Quote** (or press Q) to add it to the end of that conversation's draft as a
-  quote, ready for your reply below it. A selection in a thread quotes into the
-  thread's reply box. Quoting keeps formatting and links but does not notify
-  anyone mentioned in the quoted text. The floating Quote button hides while
-  a menu, picker, or dialog is open.
+- Select text in a message, such as by double-clicking a word, then right-click
+  the highlight and choose **Quote highlight** (or press Q) to add it to that
+  conversation's draft as a quote, ready for your reply below it. Published
+  messages include a “From” attribution linking to the original above the quote,
+  followed by a blank line for your reply. A selection
+  in a thread quotes into the thread's reply box. Quoting keeps formatting and
+  links but does not notify anyone mentioned in the quoted text. **Copy highlight**
+  keeps formatting and links where supported, with a plain-text alternative.
+  Both highlight actions appear above the usual message actions when you right-click
+  highlighted text. On a selected link, **Copy link URL** copies the link's
+  destination; **Copy message link** copies the message's permalink.
+  Supported browsers keep that text highlighted while the menu is
+  open. On touch devices, select text and open the message's **⋯** menu for these
+  highlight actions. Only messages included in the selection offer them; a
+  selection spanning messages works from any included message. Long presses
+  keep the native text-selection menu.
 - Copying or quoting a selection that takes in a message from its start, such
   as one dragged from beside the message or across several messages, puts
   that message's author and time on one line above its text. The time is left
@@ -523,6 +535,8 @@ and are asked to sign in again in Buzz.
   not change.
   Chats reorder by recent activity with the same short slides and fades as Team
   channels. Reduced motion applies the new order immediately.
+  A Solo chat name you save here changes immediately. Title changes that arrive
+  from an agent or another device animate unless reduced motion is enabled.
   Deleting or archiving the open chat keeps you in Solo and opens another chat
   or a new draft.
   **Start Solo chat**, in the menu of any delivered message (and in a channel's
@@ -720,6 +734,10 @@ and are asked to sign in again in Buzz.
   their avatar previews. The macOS Dock unread dot follows the rows: a muted channel
   lights it only for a mention of you or **Mark as unread**, and a muted DM still lights it.
   Muting does not mark messages or threads as read.
+  In a channel's or DM's main message box, typing `/mute` by itself toggles
+  Mute for it, and a toast confirms it once saved. The command is not posted as
+  a message. If the change cannot be saved, a notice offers **Retry** instead. Thread
+  replies send `/mute` as text.
 - **Messaging someone**: **Message** on a profile, a profile preview or an
   agent, **Send message** in a channel's members, and choosing a person in
   search open your DM with them. With no DM yet, they open **New message**
@@ -798,7 +816,10 @@ and are asked to sign in again in Buzz.
   a count and why it ranks there. Messages lead when the text reads like a
   phrase. Each message shows the words around the match. A panel beside the
   results previews the highlighted row: the message with the ones just before
-  and after it, or a channel's or person's latest messages. Tab and Shift+Tab,
+  and after it, or a channel's or person's latest messages. Up and Down move
+  the highlight; add your own keys under **Previous search result** and
+  **Next search result** in Settings → Shortcuts, for example ⌃K and ⌃J on a
+  Mac, and the key hints show them. Up and Down keep working. Tab and Shift+Tab,
   or the group filter buttons above the results, show one group whole, as
   does choosing a group's heading when it has more; Escape goes back. Groups
   reorder as slower results arrive until you move the highlight; after that
@@ -827,8 +848,9 @@ and are asked to sign in again in Buzz.
   Use **Leave chat** or **Leave channel** to remove your membership and sidebar
   entry. Joined viewers keep reading after a switch to Private until they leave
   or are removed in People.
-- In a channel, typing `/leave` by itself opens the same **Leave channel**
-  confirmation. The command is not posted as a message.
+- In a channel's main message box, typing `/leave` by itself opens the same
+  **Leave channel** confirmation. The command is not posted as a message.
+  Thread replies send `/leave` as text.
 - Deleting the open Solo chat opens a neighboring Solo chat or a new draft while
   deletion finishes. The chat stays listed until deletion is confirmed. If it
   fails, a notice names the chat; you can reopen it from the sidebar.
@@ -857,6 +879,8 @@ and are asked to sign in again in Buzz.
   **Settings → Shortcuts → Sending messages → Send with ⌘ Enter** (Ctrl+Enter
   outside Apple platforms) swaps that on this device: Enter adds a line and
   ⌘/Ctrl+Enter sends. It starts off.
+- Arrow keys move out of a code block, even when it's the first or last thing
+  in a message.
 - If a message can't be sent, **Retry** appears under it right away. If its
   delivery is only unconfirmed, Buzz waits about ten seconds before saying so.
   Some plugins prepare before a message sends. After a restart, Buzz can't
@@ -898,6 +922,11 @@ and are asked to sign in again in Buzz.
   Open the original message to reveal them.
 - **Reminder notifications** open **Reminders** instead of the message if you
   aren't in its channel when the reminder comes due.
+- **Inline code** in single backticks wraps with prose, with rounded ends on
+  each line. In tables, code follows the non-wrapping columns and scrolls with
+  the table. Fenced code blocks wrap long lines while preserving indentation and
+  line breaks. Tall blocks scroll vertically; a partial bottom line shows that
+  more code follows. Tab to a tall code block to scroll it with the keyboard.
 - **Canvas** holds shared notes and context for a channel or chat. Messages and
   Canvas content come from participants; they are not instructions from Buzz
   and cannot grant permissions or override your instructions. A Canvas holds up to
@@ -1076,6 +1105,7 @@ and are asked to sign in again in Buzz.
 - **Activity preview**: with a mouse or trackpad, rest the pointer on
   **Activity** in the Messages sidebar to see recent mentions, DMs, thread replies, and reactions
   without opening the Activity page. Clicking a conversation opens it directly;
+  hover an unread one and click the envelope where its dot was to mark it read;
   **Open Activity** opens the page. The card's **Unread only** switch is
   separate from the Activity page's filters and hides reactions when on. The preview is not shown on touch
   devices or while the Activity page is open.
@@ -1229,6 +1259,8 @@ available rather than silently discarding it.
 - An agent's own messages do not wake it, even when they mention its name.
   To pass work to the same agent in another conversation, use `self_handoff`
   with the channel, text, and a thread message ID outside a Solo chat.
+  An agent set to one session per thread can also hand off from a
+  channel-level watch or timer turn into one of that channel's threads.
   Message tools refuse self-mentions. A successful handoff receipt means the
   host queued the work. It does not confirm execution or completion.
 - A desktop plugin can run native Codex or Claude on another computer. The plugin manages the target, workspace, credentials, and expiry. A saved
@@ -1547,6 +1579,12 @@ available rather than silently discarding it.
   there, and fail until there is one, or while Codex's sign-in is for another
   workspace. Codex's harness defaults offer that sign-in while Codex is signed
   out. API key and keyring sign-ins can't run them.
+- **Agent gateway access**: in builds that route local agents through a gateway,
+  a refused sign-in or access check stops the turn and asks you to sign in again.
+  Later turns stay blocked while access is rechecked, even if that check stalls
+  or loses its connection. A successful access check lets the agent run again.
+  If access is still being checked after a few seconds, the turn stops and asks
+  you to try again in a moment instead of running without the gateway.
 - **Settings → Agent details** says where an agent's configuration lives:
   **Synced in** its community, or **Only on this Mac** with why (the relay
   doesn't sync agent settings, or the first copy failed and Buzz will try
@@ -1575,6 +1613,18 @@ available rather than silently discarding it.
   the feed; the dialog identifies it in words and offers no restore action.
   **Load older** fetches more history. Reverting one track saves
   a new revision without changing the other track.
+- Some builds run a Pi agent in certain communities through a model gateway.
+  Its Settings, providers and models stay Pi's own, with no gateway entry:
+  Buzz sends the agent's chosen Anthropic or OpenAI model through the gateway
+  in the background. A gateway turn on another provider's model fails with a
+  note to choose an Anthropic or OpenAI model in its Identity tab, and a model
+  the gateway doesn't serve fails with the gateway's answer; neither runs
+  without the gateway. When Buzz can't use the gateway for a turn (for example
+  readiness or network), the turn runs on the agent's own configured provider
+  and model, and only then does its prompt note "Ran without the agent
+  gateway" with the reason. A sign-in the gateway refuses fails the turn
+  instead. Buzz never resends work already sent through the gateway without
+  it.
 - **Agents → Your teams → Previous versions**, in a team's editor, lists the
   saved versions of a team that syncs to a community, the same way. Reverting
   restores its instructions and keeps its current name; members are not
@@ -1735,6 +1785,13 @@ tab, asks **Discard changes?** first; **Keep editing** keeps them.
   **Update** review showing access changes and any change to the branch or tag
   later updates follow, and the plugin keeps its enabled or disabled state.
   Other links to an installed plugin offer **Open in Buzz**.
+- An organization's plugin policy can recommend plugins in **Settings →
+  Plugins**, and can also install or update listed plugins for you. A notice
+  says when it did. A plugin it keeps current shows **Managed by [source] ·
+  updates automatically**. An update that asks for different access, or comes
+  from a different publisher, waits for your review instead. A plugin you
+  remove is not installed again automatically; it stays under
+  **Recommended** if you want it back.
 - **Bestie** starts on, and **Reminders** and **Workflows** start off, on fresh
   local installs. Upgrades preserve their previous state, including Bestie off
   when no choice was saved. Enable or disable them in **Manage plugins**; saved
@@ -2023,6 +2080,10 @@ In **Workflows**, an archived channel’s group says **Archived**, as do its wor
 Desktop builds save a small local trace when a draft conflict or save failure
 occurs. It contains operation metadata, with no draft text or secrets. See
 [draft diagnostics](draft-diagnostics.md) for the file location and collection steps.
+
+On macOS, Buzz can stop a storage helper that WebKit replaces but leaves running.
+This recovery only covers helpers observed during the current launch. It does
+not clear saved drafts or bypass conflict checks.
 
 ## Plugin account actions
 

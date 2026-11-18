@@ -1379,6 +1379,7 @@ function Composer({
     `${scope}:${draftKey}`,
     channelId,
     !!submission?.attachments,
+    host ? [scope, `${draftKey}:files`] : undefined,
   );
   const picker = useRef<HTMLInputElement>(null);
   const pickerFocus = useRef<
@@ -1857,7 +1858,13 @@ function Composer({
     terminator?: string,
   ) {
     const separated = /^[ \t]/.test(valueRef.current.text.slice(at));
-    if (!insert(separated ? text : `${text} `, undefined, range, terminator))
+    const start = range?.start ?? input.current?.selectionStart ?? at;
+    const value =
+      /^:\d{1,64}:/.test(text) &&
+      /\d/.test(valueRef.current.text[start - 1] ?? "")
+        ? ` ${text}`
+        : text;
+    if (!insert(separated ? value : `${value} `, undefined, range, terminator))
       return false;
     const field = input.current;
     const end = field?.selectionEnd ?? 0;
@@ -3312,7 +3319,13 @@ function Composer({
               )
             )
               return "conflict";
-            const target = attachmentDraft(session, recoveryKey, channelId);
+            const target = attachmentDraft(
+              session,
+              recoveryKey,
+              channelId,
+              false,
+              host ? [scope, `${draftKey}:files`] : undefined,
+            );
             if (target.snapshot().length) return "conflict";
             if (
               current !== capturedRevision &&

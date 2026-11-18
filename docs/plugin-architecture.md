@@ -1619,11 +1619,11 @@ are also deferred; opt in when the contribution's static title is sufficient unt
 selection.
 
 A plugin panel, which cannot import host modules, names its tab with
-`ctx.panels.useTabTitle(label)`, a React hook called in the panel component (for
+`ctx.panels.useTabTitle(label, icon?)`, a React hook called in the panel component (for
 example `ctx.panels.useTabTitle("#12554892")` for a build opened from a link). The
 label replaces the static `title` while the component is mounted and the static
-`title` returns when it unmounts; outside a panel tab the call does nothing. It
-takes a label only, no icon. Hosts that predate it lack the hook, so plugins that
+`title` returns when it unmounts; outside a panel tab the call does nothing. The
+optional `icon` is a React node. Hosts that predate it lack the hook, so plugins that
 support them test `typeof ctx.panels.useTabTitle === "function"` first.
 
 Channels keeps layout and channel/thread selection. The Terminal plugin binds its
@@ -3247,8 +3247,9 @@ The existing native and browser upload adapters prepare `voice-note-*.wav` files
 as the old Buzz H.264/AAC MP4 envelope. Voice Notes adds no uploader, signer or
 outbox. Files upload on Send, retain the shared progress/recovery behavior, and
 carry bounded duration and waveform metadata through ordinary `imeta` tags.
-Recordings stop at five minutes. Pending files have the same tab-local lifetime
-and limits as other attachment drafts; they do not survive app restart.
+Recordings stop at five minutes. Pending files have the same lifetime and limits
+as other attachment drafts: uploaded files survive app restart with the draft;
+files still uploading do not.
 
 The player loads audio on Play, supports seeking and playback speed, and pauses
 when its conversation is hidden. Existing voice notes are recognized from signed
