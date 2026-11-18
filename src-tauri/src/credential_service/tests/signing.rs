@@ -586,19 +586,26 @@ async fn every_tool_together_has_a_budget_of_asks() {
 async fn a_declined_tool_may_ask_again_once_it_has_waited() {
     let fixture = fixture();
     let token = paired(&fixture).await;
-    tokio::time::pause();
     let pending = sign(&fixture, &token, leave());
     let request = sign_asked(&fixture).await;
     answer(&fixture, &request.id, Answer::Deny);
     pending.await.unwrap();
     let again = ask(&fixture, &token, "sign_event", &[&leave()]).await;
     assert_eq!(error(&again).1, "rate_limited");
-    tokio::time::advance(Duration::from_secs(31)).await;
+    skip(31).await;
     let pending = sign(&fixture, &token, leave());
     let next = sign_asked(&fixture).await;
     assert_ne!(next.id, request.id);
     answer(&fixture, &next.id, Answer::Once);
     signed(&pending.await.unwrap());
+}
+
+/// Moves the clock `seconds` ahead. It runs on, not paused, so the time a
+/// request spends off this runtime is not skipped too.
+async fn skip(seconds: u64) {
+    tokio::time::pause();
+    tokio::time::advance(Duration::from_secs(seconds)).await;
+    tokio::time::resume();
 }
 
 /// Asks from `token` and gives `reply`.
@@ -613,7 +620,6 @@ async fn asked(fixture: &Fixture, token: &str, reply: Answer) -> (StatusCode, Va
 async fn each_deny_in_a_row_makes_a_tool_wait_longer_until_one_is_allowed() {
     let fixture = fixture();
     let token = paired(&fixture).await;
-    tokio::time::pause();
     let retry = || async {
         let reply = ask(&fixture, &token, "sign_event", &[&leave()]).await;
         assert_eq!(error(&reply).1, "rate_limited");
@@ -621,10 +627,10 @@ async fn each_deny_in_a_row_makes_a_tool_wait_longer_until_one_is_allowed() {
     };
     asked(&fixture, &token, Answer::Deny).await;
     assert!((1..=30).contains(&retry().await));
-    tokio::time::advance(Duration::from_secs(31)).await;
+    skip(31).await;
     asked(&fixture, &token, Answer::Deny).await;
     assert!((31..=60).contains(&retry().await));
-    tokio::time::advance(Duration::from_secs(61)).await;
+    skip(61).await;
     signed(&asked(&fixture, &token, Answer::Once).await);
     asked(&fixture, &token, Answer::Deny).await;
     assert!((1..=30).contains(&retry().await));
