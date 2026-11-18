@@ -161,5 +161,7 @@ export function documentEditorDraft(markdown: string) {
 
 /** CommonMark document structure; bounded-parser fallbacks stay exact source. */
 export function documentEditorMarkdown(draft: MentionDraft) {
-  return composerMarkdown(draft, draft.document ? "document" : "chat");
+  return composerMarkdown(draft, {
+    mode: draft.document ? "document" : "chat",
+  });
 }

@@ -2376,10 +2376,13 @@ test("installed documents reuse host Markdown, workspace tabs and persisted spli
     .getByRole("button", { name: "Markdown source", exact: true })
     .click();
   const tableSource = "| Key | Value |\n| :--- | ---: |\n| A \\| B | **12** |";
-  const quoted = `> First point\n>\n> Second point\n\n${tableSource}\n\nEnd`;
+  const rawTable = "| A | B |\n| - | - |\n| a | b | extra |";
+  const quoted = `> First point\n>\n> Second point\n\n${tableSource}\n\n${rawTable}\n\nEnd`;
   await markdownSource.fill(quoted);
   await reader.getByRole("button", { name: "Rich text", exact: true }).click();
   const grid = richEditor.getByRole("table");
+  await expect(grid).toHaveCount(1);
+  await expect(richEditor).toContainText("| a | b | extra |");
   await expect(grid.getByRole("cell", { name: "A | B" })).toBeVisible();
   await expect(grid.getByRole("cell", { name: "12" })).toHaveCSS(
     "text-align",

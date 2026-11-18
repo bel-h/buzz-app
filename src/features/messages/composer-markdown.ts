@@ -54,8 +54,10 @@ export type ComposerMarkdownMode = "chat" | "document";
  * the typed source without the namesake qualifiers a send adds. */
 export function composerMarkdown(
   draft: MentionDraft,
-  mode: ComposerMarkdownMode = "chat",
-  { authored = false }: { authored?: boolean } = {},
+  {
+    authored = false,
+    mode = "chat",
+  }: { authored?: boolean; mode?: ComposerMarkdownMode } = {},
 ): string {
   const project = (node: EditorNode): EditorNode =>
     node.type.name === "token" && node.attrs.semantic
@@ -67,7 +69,7 @@ export function composerMarkdown(
   const wire = (body: EditorNode) =>
     [
       ...(draft.chatCards ?? []),
-      blocksMarkdown(body, mode),
+      blocksMarkdown(body, mode, !authored && mode === "chat"),
       ...(draft.gifs ?? []),
     ]
       .filter(Boolean)
@@ -78,6 +80,32 @@ export function composerMarkdown(
   // span binds, so qualifiers there would only add characters.
   const sent = wire(qualified);
   return prepareMarkdown(sent).kind === "plain" ? wire(doc) : sent;
+}
+
+/** The empty paragraph a code block exit opens at an edge of the draft, a
+ * quote or a list item sends only the blank line that separates it from the
+ * code block. One is dropped per edge, so the exit fits at the length limit
+ * while every other blank line, and every empty line of prose, still counts.
+ * The rule is positional: an authored or pasted empty paragraph in the same
+ * place is dropped too, even where no exit would open one. A list item's leading paragraph is kept, since no exit opens one and
+ * dropping it lets a nested marker join the item's own. */
+function withoutCodeBlockExits(doc: EditorNode): EditorNode {
+  const blank = (edge: EditorNode, beside: EditorNode) =>
+    edge.type.name === "paragraph" &&
+    !edge.childCount &&
+    beside.type.name === "code_block";
+  let { content } = doc;
+  const count = () => content.childCount;
+  if (
+    doc.type.name !== "list_item" &&
+    count() > 1 &&
+    blank(content.child(0), content.child(1))
+  )
+    content = content.cut(content.child(0).nodeSize);
+  const last = () => content.child(count() - 1);
+  if (count() > 1 && blank(last(), content.child(count() - 2)))
+    content = content.cut(0, content.size - last().nodeSize);
+  return content === doc.content ? doc : doc.copy(content);
 }
 
 /** The timeline binds a bare `@Name` only when one tagged key carries the name.
@@ -161,7 +189,14 @@ function qualifyNamesakes(
   return visit(doc);
 }
 
-function blocksMarkdown(doc: EditorNode, mode: ComposerMarkdownMode): string {
+/** `exits` drops code block exit paragraphs, as a send does; an authored copy
+ * keeps every blank line the user typed. */
+function blocksMarkdown(
+  container: EditorNode,
+  mode: ComposerMarkdownMode,
+  exits: boolean,
+): string {
+  const doc = exits ? withoutCodeBlockExits(container) : container;
   const blocks: string[] = [];
   let previous: EditorNode | undefined;
   const authored = authoredLiteralRanges(doc, mode);
@@ -218,7 +253,7 @@ function blocksMarkdown(doc: EditorNode, mode: ComposerMarkdownMode): string {
         { fences: true },
       ).slice(0, -1);
     } else if (block.type.name === "blockquote") {
-      output = blocksMarkdown(block, mode)
+      output = blocksMarkdown(block, mode, exits)
         .split("\n")
         .map((line) => (line ? `> ${line}` : ">"))
         .join("\n");
@@ -233,7 +268,7 @@ function blocksMarkdown(doc: EditorNode, mode: ComposerMarkdownMode): string {
             : alternate
               ? "* "
               : "- ";
-        const lines = blocksMarkdown(item, mode).split("\n");
+        const lines = blocksMarkdown(item, mode, exits).split("\n");
         items.push(
           prefix +
             lines

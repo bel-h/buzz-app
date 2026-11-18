@@ -33,7 +33,7 @@ test("generated author package exposes shared messages, captured-read Undo, host
       join(dir, "consumer.ts"),
       `
 import { createElement } from "react";
-import type { Context, DocumentEditorProps, DocumentEditorHandle, DocumentEditorSelection, Delivery, HarnessConversation, McpHandler, StandaloneTurn, TurnResult, DecisionResult, Host, HostRequestOnceOptions, AddedTool, AddedToolContext, AddedToolReply, BuzzClient, Media, HostByteUpload, HostByteRequest, HostByteResponse, HostSavedBytes, PluginManifest, NamingPolicy, PagePreviewProps, PageSidebarProps, SidebarSectionContribution, SidebarSections, SidebarRowContribution, SidebarRows, ReadMutationResult, UnreadCapability, Backdrops } from "@buzz/author";
+import type { Context, DocumentEditorProps, DocumentEditorHandle, DocumentEditorSelection, ChannelMembersDialogProps, ChannelGeneralAccessProps, GeneralAccessPolicy, MemberChange, Delivery, HarnessConversation, McpHandler, StandaloneTurn, TurnResult, DecisionResult, Host, HostRequestOnceOptions, AddedTool, AddedToolContext, AddedToolReply, BuzzClient, Media, HostByteUpload, HostByteRequest, HostByteResponse, HostSavedBytes, PluginManifest, NamingPolicy, PagePreviewProps, PageSidebarProps, SidebarSectionContribution, SidebarSections, SidebarRowContribution, SidebarRows, ReadMutationResult, UnreadCapability, Backdrops } from "@buzz/author";
 export const manifest: PluginManifest = {
   id: "example.plugin", name: "Example", apiVersion: 1,
   host: {
@@ -52,6 +52,18 @@ const ExamplePreview = ({ close }: PagePreviewProps) =>
   createElement("button", { type: "button", onClick: close }, "Open");
 export const inject = ["agents", "decisions", "host", "identityNames", "pages", "relay"];
 export function apply(ctx: Context) {
+  const sharingPolicy: GeneralAccessPolicy = { subject: "record", allowPublic: false, visibilityDescription: () => "Record access changes." };
+  const general: ChannelGeneralAccessProps = { capability: ctx.relay.snapshot().session.channelDetails, channelId: "record", policy: sharingPolicy };
+  const picker: ChannelMembersDialogProps = { session: ctx.relay.snapshot().session, channelId: "record", trigger: { current: null }, close() {},
+    nonMemberLabel: "Not in this record",
+    memberActions: { canAdd: true, pending: false, async change(change: MemberChange, signal: AbortSignal) { void [change.expectedRole, signal.aborted]; } },
+    accessSettings: createElement(ctx.conversation.ui.GeneralAccess, general), shareLink: "buzz://plugin?id=example.plugin" };
+  createElement(ctx.conversation.ui.MembersDialog, picker);
+  type HostPickerKeys = "agents" | "communities" | "navigator" | "signal" | "visit" | "canOpenLink" | "onOpenLink" | "onOpenMessage";
+  const pickerHasNoHostProps: Extract<keyof ChannelMembersDialogProps, HostPickerKeys> extends never ? true : false = true;
+  void pickerHasNoHostProps;
+  // @ts-expect-error Host navigation visits are not plugin props.
+  createElement(ctx.conversation.ui.MembersDialog, { ...picker, visit: true });
   const editorRef: { current: DocumentEditorHandle | null } = { current: null };
   const selection: DocumentEditorSelection = { start: 0, end: 1, source: false };
   const editor: DocumentEditorProps = { ref: editorRef, value: "**Hello**", onChange(value) { void value.length; }, editing: true, source: false, onSourceChange() {}, linkOpen: false, onLinkOpenChange() {}, onSave() {}, maxLength: 32768, destinations: [{label: "Reference", href: "buzz://plugin?id=example.plugin"}] };

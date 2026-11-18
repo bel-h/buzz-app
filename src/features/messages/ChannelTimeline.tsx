@@ -49,6 +49,7 @@ import type {
   ChannelWindow,
 } from "../relay/contracts";
 import { useRowProfiles } from "../relay/react";
+import { useHeaderChannel } from "../relay/listed-channel";
 import { useHeadReadPending, useRecovery } from "../relay/RecoveryNotice";
 import { geometryFor, geometrySignature } from "./geometry";
 import { readView, writeView } from "../../shared/view-state";
@@ -216,6 +217,8 @@ export type ChannelTimelineProps = {
   onOpenLink(url: string, origin?: MessageLinkOrigin): boolean;
   canOpenLink?: ((target: string) => boolean) | undefined;
   revealMessageId?: string | undefined;
+  /** Root of the thread currently displayed beside this conversation. */
+  openThreadRootId?: string | undefined;
   /** One inline exact visit: focus the verified mounted row, without a page
    * navigation. `focus: false` marks it beside a reader that owns focus. */
   inlineTarget?:
@@ -266,6 +269,7 @@ function Timeline({
   onOpenLink,
   canOpenLink,
   revealMessageId,
+  openThreadRootId,
   inlineTarget,
   transient = false,
   marksRead = true,
@@ -312,6 +316,12 @@ function Timeline({
   // rows. The reader follows the bottom meanwhile; their input retires it.
   const pendingRestore = useRef<number | undefined>(undefined);
   const profiles = useRowProfiles(queries.profiles, window.rows);
+  // Archived and read-only conversations have no composer to start one in.
+  const composerless = useHeaderChannel(
+    queries.channels,
+    channelId,
+    (channel) => !!channel?.readOnly || !!channel?.archived,
+  );
   const agentPubkeys = useKnownAgentPubkeys(queries, profiles);
   const visibleRows = useMemo(
     () =>
@@ -759,7 +769,7 @@ function Timeline({
     agentPubkeys,
   );
   const activity = presentation.groups;
-  const stableActivity = useStableRowActivity();
+  const stableActivity = useStableRowActivity(chronologicalRows);
   const rowsById = useMemo(
     () => new Map(chronologicalRows.map((row) => [row.id, row])),
     [chronologicalRows],
@@ -1528,7 +1538,7 @@ function Timeline({
     const measured = edge.current?.clientWidth ?? 0;
     initialCache.current = geometry.get(
       channelId,
-      latest.current.signature(),
+      latest.current.signature,
       measured,
     );
     let measuredSize = { width: 0, height: 0, edgeHeight: 0 };
@@ -1800,7 +1810,10 @@ function Timeline({
       }
       settled.current = true;
       readingPositioned(scroller.current);
-      if (scroller.current) updateJumpToLatest(scroller.current);
+      // Virtua may apply the scroll just requested after this frame, so a
+      // reader following the latest message is still at its bottom.
+      if (follow.current) setShowJumpToLatest(false);
+      else if (scroller.current) updateJumpToLatest(scroller.current);
     });
     return () => {
       cancelAnimationFrame(frame);
@@ -2187,6 +2200,7 @@ function Timeline({
                   session={queries}
                   scope={scope}
                   row={row}
+                  threadOpen={row.id === openThreadRootId}
                   unread={queries.unread}
                   extensions={extensions}
                   profile={profiles.get(row.authorId)}
@@ -2289,6 +2303,22 @@ function Timeline({
           })}
         </Virtualizer>
       )}
+      {!rows.length &&
+        !shownIntro &&
+        !window.hasMore &&
+        window.status === "ready" &&
+        !window.error &&
+        !window.loadingOlder && (
+          <div className={styles.emptyConversation}>
+            <EmptyState
+              icon={<ChatCircleIcon />}
+              title="No messages yet."
+              description={
+                composerless ? undefined : "Start the conversation below."
+              }
+            />
+          </div>
+        )}
       <div ref={activityTail}>
         <AgentConnectionSetup
           key={channelId}
@@ -2311,24 +2341,6 @@ function Timeline({
         />
         <div className={styles.timelineEnd} aria-hidden="true" />
       </div>
-      {!rows.length &&
-        !shownIntro &&
-        !window.hasMore &&
-        window.status === "ready" &&
-        !window.error &&
-        !window.loadingOlder && (
-          <div className={styles.emptyConversation}>
-            <EmptyState
-              icon={<ChatCircleIcon />}
-              title="No messages yet."
-              description={
-                queries.channels.get?.(channelId)?.readOnly
-                  ? undefined
-                  : "Start the conversation below."
-              }
-            />
-          </div>
-        )}
       <SelectionQuote list={scroller} />
     </section>
   );

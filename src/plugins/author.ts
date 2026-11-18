@@ -47,6 +47,8 @@ export type {
   PluginInstallOutcome,
   PluginInstallSource,
   PluginInstaller,
+  PluginReleaseCandidate,
+  PluginReleaseComparison,
 } from "./installer";
 export type {
   SidebarRestriction,
@@ -63,6 +65,12 @@ export type {
 export type { PanelSplit } from "../features/panels/usePanelSplit";
 export type { MarkdownProps } from "../features/messages/PluginMarkdown";
 export type { Conversation } from "../features/conversation/service";
+export type { ChannelMembersDialogProps } from "../bundled/channels/ChannelMembersDialog";
+export type {
+  ChannelGeneralAccessProps,
+  GeneralAccessPolicy,
+} from "../bundled/channels/ChannelGeneralAccess";
+export type { MemberChange } from "../features/channel-members/administration-protocol";
 export type {
   DocumentEditorProps,
   DocumentEditorHandle,
@@ -210,6 +218,7 @@ export type {
   SoloWorkspaces,
   SoloWorkspaceSnapshot,
   SoloWorkspaceProps,
+  SoloChannelGroupProps,
   SoloRegionBinding,
   SoloRegionSnapshot,
   SoloRegionAction,

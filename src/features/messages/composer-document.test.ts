@@ -772,7 +772,7 @@ it.each(["chat", "document"] as const)(
       paragraph(schema.nodes.token.create({ source: chip.id, semantic: chip })),
     );
     const draft = projectComposerDocument(original).draft;
-    const tree = fromMarkdown(composerMarkdown(draft, mode));
+    const tree = fromMarkdown(composerMarkdown(draft, { mode }));
     expect(tree.children).toMatchObject([
       { type: "paragraph", children: [{ type: "text", value: chip.id }] },
     ]);
