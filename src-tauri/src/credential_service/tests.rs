@@ -155,6 +155,7 @@ pub(crate) fn service_over(
     *service.0.pairings.communities.lock().unwrap() = Some(vec![RELAY.into()]);
     // The page's prompt is listening, as it is once the app shell shows.
     service.0.pairings.prompt(true);
+    service.0.pairings.sign_prompt(true);
     service
 }
 
@@ -956,10 +957,7 @@ fn every_kind_has_one_class() {
     for kind in [
         0, 3, 5, 9005, 9044, 10002, 10100, 28936, 30621, 41011, 45011,
     ] {
-        assert!(
-            matches!(classes(kind), Verdict::Deny(reason) if reason.contains("use Buzz")),
-            "{kind}"
-        );
+        assert_eq!(classes(kind), Verdict::Ask, "{kind}");
     }
     for kind in [1, 4, 1059, 24243, 24245, 30350, 39000] {
         assert!(matches!(classes(kind), Verdict::Deny(_)), "{kind}");
@@ -1186,3 +1184,4 @@ fn a_launch_token_reaches_no_child_the_app_spawns() {
 }
 
 mod pairing;
+mod signing;

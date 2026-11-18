@@ -10,6 +10,9 @@ use std::time::Duration;
 use tokio::sync::oneshot;
 use tokio::time::Instant;
 
+mod approval;
+pub(crate) use approval::{Answer, SignRequest};
+
 /// How long a request waits for the human.
 pub(crate) const APPROVAL: Duration = Duration::from_secs(120);
 /// Why a paired tool waits while the sign-in it was approved under lapsed.
@@ -52,6 +55,8 @@ pub(crate) struct Listed {
     created: u64,
     last_used: u64,
     expires: u64,
+    /// Kinds it may have signed without asking, for now.
+    windows: Vec<approval::Listed>,
 }
 
 /// What the page is told.
@@ -70,8 +75,12 @@ pub(crate) enum Notice {
     Ask(Request),
     /// The request with this id is over: answered, expired or abandoned.
     Closed(String),
-    /// The list changed.
+    /// The list changed, or a kind's window began or ended.
     Changed,
+    /// Ask the human to approve one signature.
+    SignAsk(SignRequest),
+    /// The signature request with this id is over.
+    SignClosed(String),
 }
 pub(crate) type Notify = Arc<dyn Fn(Notice) + Send + Sync>;
 
@@ -117,6 +126,13 @@ struct State {
     generation: u64,
     /// A revoke-all is not yet saved: nothing acts until it is.
     owed: bool,
+    /// The signature waiting for the human.
+    signing: Option<approval::Pending>,
+    /// Signature prompts the page has listening, as [`State::prompts`].
+    sign_prompts: usize,
+    sign_asked: VecDeque<Instant>,
+    /// Kinds a pairing may have signed without asking, until they lapse.
+    windows: Vec<approval::Window>,
     /// The NIP-FI retirements already revoked for (see [`Pairings::follow`]).
     retirements: u64,
     /// Sign-outs and changes of account recorded but not yet over; see
@@ -175,6 +191,13 @@ impl Pairings {
                     // Dropping the sender declines it.
                     state.pending = None;
                 }
+            }
+            if state
+                .signing
+                .as_ref()
+                .is_some_and(|pending| !is_saved(&communities, &pending.relay))
+            {
+                state.signing = None;
             }
             *saved = Some(communities);
         }
@@ -606,15 +629,19 @@ impl Pairings {
         let mut state = self.state();
         state.prompts = 0;
         state.pending = None;
+        state.sign_prompts = 0;
+        state.signing = None;
     }
 
     pub(crate) async fn list(&self) -> Result<Vec<Listed>, String> {
         self.settled().await?;
+        let now = unix_now().map_err(|failure| failure.message)?;
         Ok(self
             .loaded()
             .await?
             .into_iter()
             .map(|record| Listed {
+                windows: self.windows_of(&record.id, now),
                 expires: record.last_used + DISUSE,
                 id: record.id,
                 client: record.client,
@@ -625,8 +652,10 @@ impl Pairings {
             .collect())
     }
 
-    /// Revokes one pairing, once its deletion is saved.
+    /// Revokes one pairing, once its deletion is saved. Its windows and any
+    /// signature it waits on end first, even if the deletion fails.
     pub(crate) async fn revoke(&self, id: &str) -> Result<(), String> {
+        self.forget(id);
         self.mutate(|records| {
             records.retain(|record| record.id != id);
             Some(())
@@ -674,8 +703,10 @@ impl Pairings {
     fn fence(&self, state: &mut State) {
         state.generation += 1;
         state.owed = true;
-        // Dropping the sender declines the open prompt.
+        // Dropping the senders declines the open prompts.
         state.pending = None;
+        state.signing = None;
+        state.windows.clear();
     }
 
     /// Revokes every pairing, from now, once the NIP-FI session reports a

@@ -10,7 +10,15 @@ const PROOF_WINDOW: u64 = 60;
 #[derive(Debug, PartialEq, Eq)]
 pub(super) enum Verdict {
     Sign,
+    /// Signed only once the human approves it; refused for a caller nobody
+    /// can be asked for.
+    Ask,
     Deny(String),
+}
+
+/// Why a sensitive kind is refused to a caller the human is not asked for.
+pub(super) fn unasked(kind: u16) -> String {
+    format!("Kind {kind} can't be signed by a local tool; use Buzz")
 }
 
 /// Everyday work: messages and their edits, pins, bookmarks, schedules and
@@ -68,9 +76,7 @@ pub(super) fn classify(
     if ORDINARY.contains(&kind) {
         Verdict::Sign
     } else if SENSITIVE.contains(&kind) {
-        Verdict::Deny(format!(
-            "Kind {kind} can't be signed by a local tool; use Buzz"
-        ))
+        Verdict::Ask
     } else {
         Verdict::Deny(format!("Kind {kind} is not signed for local callers"))
     }
