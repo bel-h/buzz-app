@@ -1722,6 +1722,8 @@ export type ConfigHistory = Readonly<{
   }>[];
   /** What a settings revision must fit to be reverted to. */
   settings?: SettingsCheck;
+  /** Why settings cannot be revised by this client, independent of snapshot validity. */
+  settingsProblem?: string | undefined;
   /** Saves a revert or restore of `side`, as History builds it. */
   revise(
     side: Side,
@@ -4671,6 +4673,9 @@ export class AgentsService extends Service implements Agents {
       read: config.read,
       sides,
       ...(schema && { settings: { agentType: agent.type, schema } }),
+      settingsProblem: this.otherType(agent)
+        ? "These settings belong to another harness. Use a client with that harness to change or restore them."
+        : undefined,
       revise: async (side, template) => {
         // As a save: a revert can't put this type back over another's.
         const problem = side === "settings" && this.otherType(agent);
