@@ -335,7 +335,9 @@ export function MessageLink({
         aria-description={
           chatChip && withheld
             ? "Chat unavailable. You don’t have access, or it no longer exists."
-            : description
+            : // A withheld message link has no title; its preview says why.
+              (description ??
+              (withheld && !referenced ? previewFailures.withheld : undefined))
         }
         aria-disabled={withheld || undefined}
         data-link-label={label ?? ""}
