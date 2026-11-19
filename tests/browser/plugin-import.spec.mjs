@@ -2895,6 +2895,35 @@ test("joined list items retain paragraphs after nested blocks on reopen", async 
   }
 });
 
+test("a trailing hard break preserves heading levels on reopen", async ({
+  page,
+  app,
+}) => {
+  const { reader, rich, source, markdown, formatted } = await openTableEditor(
+    page,
+    app,
+  );
+  for (const level of [1, 2]) {
+    await markdown.click();
+    await source.fill(`${"#".repeat(level)} Head`);
+    await formatted.click();
+    const heading = rich.getByRole("heading", { level });
+    await rich.focus();
+    await heading.evaluate((element) => {
+      element.ownerDocument
+        .getSelection()
+        ?.collapse(element, element.childNodes.length);
+    });
+    await page.keyboard.press("Shift+Enter");
+    await expect(heading.locator("br").first()).toBeAttached();
+    await rich.press("ControlOrMeta+Enter");
+    await expect(reader.getByRole("status")).toHaveText(`Saved ${level}`);
+    await reader.getByRole("button", { name: "Read Guide" }).click();
+    await reader.getByRole("button", { name: "Edit Guide" }).click();
+    await expect(heading).toHaveText("Head");
+  }
+});
+
 const smallTable = "| Cell | Value |\n| --- | --- |\n| cellword | 2 |";
 
 async function selectCellText(page, cell) {

@@ -373,6 +373,16 @@ function paragraphMarkdown(
   authoredLiterals?: () => SourceRange[],
   mode: ComposerMarkdownMode = "chat",
 ): string {
+  const heading = block.type.name === "heading";
+  let inlineCount = block.childCount;
+  if (heading) {
+    // A Markdown hard break needs a following line of heading content.
+    while (
+      inlineCount > 0 &&
+      block.child(inlineCount - 1).type.name === "hard_break"
+    )
+      inlineCount--;
+  }
   let text = "";
   const formats = [
     { mark: composerSchema.marks.spoiler, type: "spoiler" },
@@ -386,7 +396,8 @@ function paragraphMarkdown(
   const literals: SourceRange[] = [];
   const recipients: SourceRange[] = [];
   const hardBreaks: number[] = [];
-  block.forEach((node) => {
+  for (let index = 0; index < inlineCount; index++) {
+    const node = block.child(index);
     const start = text.length;
     if (mode === "document" && node.type.name === "hard_break")
       hardBreaks.push(start);
@@ -416,7 +427,7 @@ function paragraphMarkdown(
         previous.end = text.length;
       else spans.push({ start, end: text.length, ...(href ? { href } : {}) });
     });
-  });
+  }
   // A spoiler is inline syntax. Close/reopen it across authored blank lines so
   // every resulting Markdown paragraph stays hidden after publication.
   ranges[0] = (ranges[0] ?? []).flatMap((range) => {
@@ -433,7 +444,7 @@ function paragraphMarkdown(
     return parts;
   });
   if (
-    block.type.name !== "heading" &&
+    !heading &&
     !hardBreaks.length &&
     !literals.length &&
     ranges.every((spans) => !spans.length)
@@ -812,7 +823,7 @@ function paragraphMarkdown(
   const tree: Root = {
     type: "root",
     children: [
-      block.type.name === "heading"
+      heading
         ? {
             type: "heading",
             depth: block.attrs.level,
