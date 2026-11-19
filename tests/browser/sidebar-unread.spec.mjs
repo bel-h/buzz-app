@@ -868,6 +868,8 @@ test.describe("DM preview wiring", () => {
     await action.click({ trial: true });
     await below.click();
     await expect(firstUnread).toBeFocused();
+    // Leave the drawer before it resizes under the pointer and opens a pinned preview.
+    await page.mouse.move(0, 0);
 
     await clipFirstUnread();
     await expect(below).toHaveAccessibleName("7 unread conversations below");
@@ -902,6 +904,7 @@ test.describe("DM preview wiring", () => {
     }
     await above.click();
     await expect(firstUnread).toBeFocused();
+    await page.mouse.move(0, 0);
 
     await scroll(page, 0);
     await page.setViewportSize({ width: 568, height: 500 });
