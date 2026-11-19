@@ -3,7 +3,7 @@ import {
   scanMarkdown,
 } from "../relay/message-content";
 import type { AgentLibrary } from "../agents/library";
-import type { ChannelMessage, Profile } from "../relay/contracts";
+import type { Attachment, ChannelMessage, Profile } from "../relay/contracts";
 import { npubEncode } from "nostr-tools/nip19";
 import { literalRanges } from "./markdown-preparation";
 import type { MentionRecipient } from "./mention-draft";
@@ -50,24 +50,39 @@ export function messageEditText(
     .join("");
 }
 
-/** Attachments are not editable in this surface; original metadata stays signed. */
-export function validateMessageEdit(
+/** A sent attachment the edit keeps, with the Markdown that placed it. */
+export type EditAttachment = Readonly<{
+  attachment: Attachment;
+  markdown: readonly string[];
+}>;
+
+/** Editable prose without attachment Markdown; attachments are kept separately. */
+export function messageEditDraft(
   row: ChannelMessage,
-  initial: string,
-  content: string,
+  profiles: ReadonlyMap<string, Profile>,
+  agents: AgentLibrary["identities"] = [],
 ) {
-  const urls = new Set(row.attachments.map((attachment) => attachment.url));
-  const before = projectMarkdownAttachments(initial, urls);
-  const after = projectMarkdownAttachments(content, urls);
-  if (
-    [...urls].some(
-      (url) => initial.split(url).length !== content.split(url).length,
-    ) ||
-    JSON.stringify([before.urls, before.names]) !==
-      JSON.stringify([after.urls, after.names])
-  )
-    throw new Error(
-      "Keep attachment links unchanged. Only message text can be edited here.",
-    );
-  return content;
+  const body = messageEditText(row, profiles, agents);
+  const urls = new Set(row.attachments.map(({ url }) => url));
+  const { content, snippets } = projectMarkdownAttachments(body, urls);
+  return {
+    text: content.trim(),
+    attachments: row.attachments.map((attachment) => ({
+      attachment,
+      markdown: snippets
+        .filter(({ url }) => url === attachment.url)
+        .map(({ markdown }) => markdown),
+    })),
+  };
+}
+
+/** Kept attachments follow the prose, as a new message places its uploads. */
+export function messageEditContent(
+  text: string,
+  attachments: readonly EditAttachment[],
+) {
+  const files = attachments.flatMap(({ markdown }) => markdown);
+  return files.length
+    ? [text.trim(), ...files].filter(Boolean).join("\n\n")
+    : text;
 }

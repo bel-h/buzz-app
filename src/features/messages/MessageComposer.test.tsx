@@ -9959,6 +9959,7 @@ it.each([
       "c".repeat(64),
       markdown,
       "c".repeat(64),
+      [],
     );
     expect(h.messages.send).not.toHaveBeenCalled();
     expect(readView("scope", "draft:channel", "")).toBe("");
@@ -9982,6 +9983,7 @@ it("continues a list while editing and saves through Save changes", async () => 
     "c".repeat(64),
     "- Revised\n- Added",
     "c".repeat(64),
+    [],
   );
 });
 
@@ -10017,6 +10019,7 @@ it("saves an edited fenced message on Enter instead of opening a block from its 
     "c".repeat(64),
     "```js\ncode!\n```",
     "c".repeat(64),
+    [],
   );
   expect(h.messages.send).not.toHaveBeenCalled();
 });
@@ -10035,6 +10038,7 @@ it("saves only once and restores the new-message composer without waiting for de
     row.id,
     "Revised message",
     row.id,
+    [],
   );
   expect(h.messages.send).not.toHaveBeenCalled();
   expect(h.input()).toHaveAttribute("contenteditable", "false");
@@ -10284,6 +10288,7 @@ it.each([false, true])(
       "c".repeat(64),
       `${link} whats your name?`,
       "c".repeat(64),
+      [],
     );
     expect(h.messages.send).not.toHaveBeenCalled();
   },
@@ -10460,6 +10465,7 @@ it("keeps pasted identity links display-only during edits", () => {
     "c".repeat(64),
     `Original message ${link} `,
     "c".repeat(64),
+    [],
   );
 });
 

@@ -75,7 +75,9 @@ function attachmentName(url: string): string | undefined {
   }
 }
 
-export function imetaAttachmentUrls(event: EventData): ReadonlySet<string> {
+export function imetaAttachmentUrls(
+  event: Pick<EventData, "tags">,
+): ReadonlySet<string> {
   const urls = new Set<string>();
   for (const entry of event.tags) {
     if (entry[0] !== "imeta") continue;
@@ -392,9 +394,8 @@ export function foldMessages(
       const body = objectBody(content);
       if (typeof body?.content === "string") content = body.content;
     }
-    const attachmentEvent =
-      edits.find((edit) => edit.tags.some(([name]) => name === "imeta")) ??
-      event;
+    // The latest edit's attachment set is authoritative, even when empty.
+    const attachmentEvent = edits[0] ?? event;
     const imetaUrls = imetaAttachmentUrls(attachmentEvent);
     // Every CommonMark image begins with `![`, and every attachment title link
     // needs an imeta URL match; avoid parsing ordinary messages.
