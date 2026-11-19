@@ -444,8 +444,10 @@ and are asked to sign in again in Buzz.
   explanation before sending. Forward and Copy as forward are disabled; **Copy link** is available
   in the dialog. A link still requires access to the original conversation.
 - A link to a Buzz message shows that message as a card below the bubble:
-  its author, channel, time and text, or why it can't be shown. Spoilers stay
-  hidden. Clicking the card opens the message. After three cards, the rest
+  its author, channel and time over the message, formatted as in its
+  conversation with working links and custom emoji, or why it can't be shown.
+  Spoilers stay hidden until revealed. Clicking the card or its time opens the
+  message. After three cards, the rest
   fold behind **Show more linked messages**. Write the link as
   `<buzz://message?…>` to leave out its card. A quote's “From” link shows no
   card, since the quote is already there.
