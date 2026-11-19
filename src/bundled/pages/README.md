@@ -10,7 +10,7 @@ Your docs and docs created by your verified agents stay in the main collection.
 Open **Shared with me** for docs from other creators. Search applies to the open
 collection. Grouping does not change the creator, ownership or sharing settings.
 An agent doc stays in Shared with me until its ownership can be verified.
-Loaded collections and related-doc choices follow revisions and access changes.
+Loaded collections follow revisions and access changes.
 Revoked docs are removed. Deleted docs are hidden from ordinary agent lists and
 remain available through explicit reads, retained history and Show deleted.
 Edits save automatically after a pause; Doc actions → Revision history lets you

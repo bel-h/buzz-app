@@ -17,7 +17,6 @@ async function fixture(initial: Partial<NewDraft> = {}) {
   const onDraftChange = vi.fn();
   const props = {
     workspace,
-    catalogue: [],
     active: true,
     initial: {
       id: crypto.randomUUID(),

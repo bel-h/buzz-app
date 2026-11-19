@@ -2,18 +2,11 @@ import type {
   DocumentEditorHandle,
   DocumentEditorProps,
 } from "../../plugins/author";
-import { MAX_NOTE_BYTES, noteUrl, type Note } from "./model";
+import { MAX_NOTE_BYTES } from "./model";
 import { usePagesUi } from "./ui";
 
 export type NoteEditorHandle = DocumentEditorHandle;
-export function NoteEditor({
-  notes,
-  community,
-  ...props
-}: Omit<DocumentEditorProps, "maxLength"> & {
-  notes: readonly Note[];
-  community: string;
-}) {
+export function NoteEditor(props: Omit<DocumentEditorProps, "maxLength">) {
   const Editor = usePagesUi().conversation.DocumentEditor;
   return (
     <Editor
@@ -21,9 +14,6 @@ export function NoteEditor({
       maxLength={MAX_NOTE_BYTES}
       label="Doc body"
       placeholder="Write your doc…"
-      destinations={notes
-        .filter((note) => !note.deleted)
-        .map((note) => ({ label: note.title, href: noteUrl(note, community) }))}
     />
   );
 }

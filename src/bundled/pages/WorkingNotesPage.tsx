@@ -385,8 +385,6 @@ export function WorkingNotesCommunity({
                   initialFocus={createdFocus.current.get(key)}
                   initialAutoSave={createdAutoSave.current.get(key)}
                   workspace={workspace}
-                  catalogue={collection.notes}
-                  partial={collection.more}
                   active={selected === key}
                   view={
                     selected === key && destination?.view === "page"
@@ -423,7 +421,6 @@ export function WorkingNotesCommunity({
               <NewNoteDocument
                 workspace={workspace}
                 initial={draft}
-                catalogue={collection.notes}
                 active={selected === `new:${draft.id}`}
                 onDraftChange={(next) => drafts.current.set(next.id, next)}
                 onCreated={(note, { autoSave, focus, share }) => {
@@ -477,7 +474,7 @@ export function WorkingNotePanel({
     );
   return (
     <NotePanelContents
-      key={`${connection.scope}:${connection.generation}`}
+      key={`${connection.scope}:${connection.generation}:${noteKey(initial)}`}
       initial={initial}
       workspace={getWorkspace(connection.session)}
       navigator={navigator}
@@ -497,15 +494,7 @@ function NotePanelContents({
   navigator: Navigation;
   context: PanelProps["context"];
 }) {
-  const {
-    collection: catalogue,
-    error,
-    changed,
-    remove,
-  } = useNotesCollection(workspace);
-  const title =
-    catalogue.notes.find((note) => noteKey(note) === noteKey(initial))?.title ??
-    "Doc";
+  const [title, setTitle] = useState("Doc");
   const communityOrigin = workspace.session.scope.replace(/:[0-9a-f]{64}$/, "");
   const viewer = workspace.session.viewer ?? "";
   const openInDocs = useCallback(
@@ -538,28 +527,15 @@ function NotePanelContents({
   };
   return (
     <div className={styles.page}>
-      {error && (
-        <p role="status" className="text-caption text-subtle">
-          Related docs could not be loaded. {error}
-        </p>
-      )}
-      {[initial].map((address) => (
-        <div className={styles.page} key={noteKey(address)}>
-          <NoteDocument
-            address={address}
-            workspace={workspace}
-            catalogue={catalogue.notes}
-            partial={catalogue.more}
-            onChange={changed}
-            onUnavailable={(missing) => remove([missing.channel])}
-            onOpen={open}
-            onOpenInDocs={showInDocs}
-            onOpenLink={(url) =>
-              openBuzzLink(navigator, workspace.session, url)
-            }
-          />
-        </div>
-      ))}
+      <NoteDocument
+        address={initial}
+        workspace={workspace}
+        onChange={(note) => setTitle(note.title)}
+        onUnavailable={() => setTitle("Doc")}
+        onOpen={open}
+        onOpenInDocs={showInDocs}
+        onOpenLink={(url) => openBuzzLink(navigator, workspace.session, url)}
+      />
     </div>
   );
 }

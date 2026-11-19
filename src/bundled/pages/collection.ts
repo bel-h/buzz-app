@@ -8,7 +8,7 @@ import {
 import { noteKey, noteTag, type Note } from "./model";
 import type { NotesPage, NotesWorkspace } from "./workspace";
 
-/** Both document surfaces retain only the loaded, currently readable catalogue. */
+/** The Docs browser retains only the loaded, currently readable catalogue. */
 export function useNotesCollection(workspace: NotesWorkspace) {
   const current = useRef<NotesPage>({ notes: [], creators: {}, more: false });
   const [collection, publish] = useState(current.current);

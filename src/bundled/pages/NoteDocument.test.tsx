@@ -667,6 +667,47 @@ it("keeps formatted Buzz conversation links and Page navigation through the shar
   }
 });
 
+it("reports access loss to the tab before its refresh finishes", async () => {
+  let revoke: (() => void) | undefined;
+  const f = await workspaceFixture({ live: true }, (session) => ({
+    ...session,
+    artifacts: {
+      ...session.artifacts,
+      follow(ids, listener, revoked) {
+        revoke = () => revoked?.(ids);
+        return session.artifacts.follow(ids, listener, revoked);
+      },
+    },
+  }));
+  const note = f.seed("Live document", "Original body");
+  const onUnavailable = vi.fn();
+  render(
+    <NoteDocument
+      address={note}
+      workspace={f.workspace}
+      onOpen={vi.fn()}
+      onUnavailable={onUnavailable}
+    />,
+  );
+  await screen.findByRole("article", { name: "Live document" });
+  const pending = gate();
+  const refresh = vi
+    .spyOn(f.workspace, "open")
+    .mockImplementationOnce(async () => {
+      await pending.promise;
+      throw new Error("Access removed");
+    });
+  try {
+    act(() => revoke?.());
+    expect(refresh).toHaveBeenCalledOnce();
+    expect(onUnavailable).toHaveBeenCalledWith(note);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  } finally {
+    pending.release();
+  }
+  expect(await screen.findByRole("alert")).toHaveTextContent("Access removed");
+});
+
 it("keeps only the mounted Page channel live and receives a tool save through its transport", async () => {
   const f = await workspaceFixture({ live: true });
   const { workspace } = f;

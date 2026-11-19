@@ -2,21 +2,15 @@ import {
   useCallback,
   useEffect,
   useLayoutEffect,
-  useMemo,
   useRef,
   useState,
   useSyncExternalStore,
 } from "react";
 import {
-  MAX_MARKDOWN_LENGTH,
-  scanMarkdown,
-} from "../../features/relay/message-content";
-import {
   NoteConflict,
   noteKey,
   noteTag,
   noteUrl,
-  parseNoteUrl,
   type Note,
   type NoteAddress,
 } from "./model";
@@ -37,12 +31,8 @@ import { IconButton } from "../../shared/design-system/ui/IconButton";
 import { LoadingRegion } from "../../shared/design-system/ui/LoadingRegion";
 import {
   MenuItem,
-  MenuNote,
   MenuPopup,
   MenuRoot,
-  MenuSubmenu,
-  MenuSubmenuPopup,
-  MenuSubmenuTrigger,
   MenuTrigger,
 } from "../../shared/design-system/ui/Menu";
 import { Select } from "../../shared/design-system/ui/Select";
@@ -77,8 +67,6 @@ function hasEdits(base: Note, draft: Pick<Note, "title" | "markdown">) {
 export function NoteDocument({
   address,
   workspace,
-  catalogue = [],
-  partial = false,
   onOpen,
   onOpenInDocs,
   onOpenLink,
@@ -93,8 +81,6 @@ export function NoteDocument({
 }: {
   address: NoteAddress;
   workspace: NotesWorkspace;
-  catalogue?: readonly Note[];
-  partial?: boolean;
   onOpen(address: NoteAddress): void;
   onOpenInDocs?: () => void;
   onOpenLink?: ((url: string) => boolean) | undefined;
@@ -420,7 +406,10 @@ export function NoteDocument({
           )
             void refresh({ background: true });
         },
-        () => void refresh({ background: true }),
+        () => {
+          callbacks.current.onUnavailable(address);
+          void refresh({ background: true });
+        },
       ),
     [workspace, address, refresh],
   );
@@ -553,24 +542,6 @@ export function NoteDocument({
     markdown,
     save,
   ]);
-  const backlinks = useMemo(
-    () =>
-      catalogue.filter(
-        (source) =>
-          !source.deleted &&
-          source.markdown.length <= MAX_MARKDOWN_LENGTH &&
-          noteKey(source) !== noteKey(address) &&
-          scanMarkdown(source.markdown).links.some((link) => {
-            const target =
-              typeof link.url === "string" ? parseNoteUrl(link.url) : undefined;
-            return (
-              target?.community === community &&
-              noteKey(target) === noteKey(address)
-            );
-          }),
-      ),
-    [catalogue, address, community],
-  );
   const downloads = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   useEffect(() => {
     const pending = downloads.current;
@@ -823,27 +794,6 @@ export function NoteDocument({
                       {editing && source ? "Formatted text" : "Markdown source"}
                     </MenuItem>
                   )}
-                  {!note.deleted && backlinks.length > 0 && (
-                    <MenuSubmenu>
-                      <MenuSubmenuTrigger>Linked docs</MenuSubmenuTrigger>
-                      <MenuSubmenuPopup aria-label="Linked docs">
-                        {backlinks.map((source) => (
-                          <MenuItem
-                            key={noteKey(source)}
-                            onClick={() => onOpen(source)}
-                          >
-                            {source.title}
-                          </MenuItem>
-                        ))}
-                        {partial && (
-                          <MenuNote>
-                            More docs are available in the browser. Linked docs
-                            cover the loaded docs.
-                          </MenuNote>
-                        )}
-                      </MenuSubmenuPopup>
-                    </MenuSubmenu>
-                  )}
                   <NoteHistoryMenu
                     note={note}
                     workspace={workspace}
@@ -925,8 +875,6 @@ export function NoteDocument({
                 editing={editing}
                 onChange={setMarkdown}
                 disabled={blocking}
-                notes={catalogue}
-                community={community}
                 linkOpen={dialog === "link"}
                 onLinkOpenChange={(open) =>
                   setDialog(open ? "link" : undefined)

@@ -81,6 +81,24 @@ test("edits and preserves drafts using host UI, then adopts an agent revision wi
     );
   expect(h1 / h2).toBeGreaterThan(1);
   expect(h1 / h2).toBeLessThan(1.3);
+  await body.fill("");
+  await body.pressSequentially("[[");
+  await expect(body).toHaveText("[[");
+  await article.getByRole("button", { name: "Link", exact: true }).click();
+  const linkDialog = page.getByRole("dialog", { name: "Add link" });
+  await expect(linkDialog.getByRole("textbox", { name: "URL" })).toBeVisible();
+  await expect(
+    linkDialog.getByRole("combobox", { name: "Link destination" }),
+  ).toHaveCount(0);
+  await linkDialog.getByRole("textbox", { name: "Text" }).fill("Example");
+  await linkDialog
+    .getByRole("textbox", { name: "URL" })
+    .fill("https://example.org/");
+  await linkDialog.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(body.getByRole("link", { name: "Example" })).toHaveAttribute(
+    "href",
+    "https://example.org/",
+  );
   await body.fill("A draft retained while browsing.");
   await page.getByRole("button", { name: "Back to docs", exact: true }).click();
   await page

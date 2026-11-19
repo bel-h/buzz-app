@@ -35,14 +35,12 @@ export type NewDraft = {
 export function NewNoteDocument({
   workspace,
   initial,
-  catalogue,
   active,
   onDraftChange,
   onCreated,
 }: {
   workspace: NotesWorkspace;
   initial: NewDraft;
-  catalogue: readonly Note[];
   active: boolean;
   onDraftChange(draft: NewDraft): void;
   onCreated(
@@ -219,7 +217,6 @@ export function NewNoteDocument({
     title,
     markdown,
   ]);
-  const community = workspace.session.scope.replace(/:[0-9a-f]{64}$/, "");
   return (
     <article className={styles.documentPane} aria-label="New doc">
       {/* biome-ignore lint/a11y/useKeyWithClickEvents: blank-space clicks extend the existing textbox hit area; keyboard users reach that textbox with Tab. */}
@@ -341,8 +338,6 @@ export function NewNoteDocument({
               lastEditAt.current = Date.now();
               setMarkdown(next);
             }}
-            notes={catalogue}
-            community={community}
             linkOpen={active && linkOpen}
             onLinkOpenChange={setLinkOpen}
             onSave={() => void save()}
