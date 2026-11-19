@@ -821,6 +821,10 @@ test.describe("DM preview wiring", () => {
     app,
   }) => {
     await open(page, app);
+    await page.getByRole("textbox", { name: "Message #Alpha" }).focus();
+    await expect(
+      row(page, "alpha").locator("[data-channel-unread]"),
+    ).toHaveCount(0);
     await page.setViewportSize({ width: 568, height: 240 });
     await page.evaluate(() => {
       localStorage.setItem("buzz-font-scale.v1", "2");
@@ -834,26 +838,35 @@ test.describe("DM preview wiring", () => {
       .click();
     const action = sidebar(page).getByRole("button", { name: "New options" });
     const below = cue(page, "below");
+    const firstUnread = row(page, "beta");
+    // Place Beta just beyond the visible frame. Oversized nav padding would
+    // put it inside the nav's bounds even though the drawer clips it.
+    const clipFirstUnread = () =>
+      firstUnread.evaluate((button) => {
+        const nav = button.closest("nav");
+        const frame = nav.parentElement;
+        nav.scrollTop +=
+          button.getBoundingClientRect().top -
+          frame.getBoundingClientRect().bottom -
+          2;
+      });
+    await expect(firstUnread.locator("[data-channel-unread]")).toBeAttached();
+    await clipFirstUnread();
+    await expect(firstUnread).not.toBeInViewport();
     await expect(action).toBeInViewport({ ratio: 1 });
     await expect(below).toBeInViewport({ ratio: 1 });
-    await expect(below).toHaveAccessibleName(
-      /^\d+ unread conversations below$/,
-    );
+    await expect(below).toHaveAccessibleName("7 unread conversations below");
     await action.click({ trial: true });
     await below.click();
-    await expect(
-      list(page).locator("button[data-channel-id]:focus"),
-    ).toHaveCount(1);
+    await expect(firstUnread).toBeFocused();
 
-    await scroll(page, 0);
-    await expect(below).toBeInViewport({ ratio: 1 });
+    await clipFirstUnread();
+    await expect(below).toHaveAccessibleName("7 unread conversations below");
     await action.focus();
     await page.keyboard.press("Shift+Tab");
     await expect(below).toBeFocused();
     await page.keyboard.press("Enter");
-    await expect(
-      list(page).locator("button[data-channel-id]:focus"),
-    ).toHaveCount(1);
+    await expect(firstUnread).toBeFocused();
 
     await scroll(page, 0);
     await page.setViewportSize({ width: 568, height: 500 });
