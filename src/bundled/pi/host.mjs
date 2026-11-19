@@ -1986,8 +1986,15 @@ export function serve({
     if (Object.keys(change).length)
       await conversation.configure(change, context);
     if (refresh) {
-      const prompt = await refresh();
+      const prompt = await refresh(!!steers);
       if (!prompt) return;
+      // Built past any wait: a new run takes the instructions current now,
+      // which its prompt's Canvas reads too. A steer keeps its run's.
+      if (!steers && prompt.instructions !== undefined)
+        await conversation.configure(
+          { instructions: prompt.instructions },
+          context,
+        );
       turn = { ...turn, ...prompt };
     }
     if (withdrawn?.()) return;
@@ -2327,7 +2334,7 @@ export function serve({
           return submitted;
         };
         const prompt = refresh
-          ? () => call("prompt", { agent, request: turn.request })
+          ? (steers) => call("prompt", { agent, request: turn.request, steers })
           : undefined;
         let bound;
         try {
