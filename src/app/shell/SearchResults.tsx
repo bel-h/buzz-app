@@ -959,10 +959,12 @@ export function SearchResults({
             const agent = selectableAgents.get(pubkey);
             const isAgent = !!agent || !!profile.isAgent;
             // The name the label is not: a verified person's other verified
-            // name, else a handle that differs from the profile name.
+            // name, else a handle that differs from the label.
             const detail = verified
               ? otherVerifiedName(verifiedLabel(verified, preference), verified)
-              : profile.username && `@${profile.username}`;
+              : profile.username &&
+                profile.username !== label &&
+                `@${profile.username}`;
             return {
               key: `author:${pubkey}`,
               label,
