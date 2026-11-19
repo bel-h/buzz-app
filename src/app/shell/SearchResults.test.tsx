@@ -14,6 +14,7 @@ import {
 } from "@testing-library/react";
 import { type Filter, matchFilter } from "nostr-tools";
 import { npubEncode } from "nostr-tools/nip19";
+import { publicKeyLabels } from "../../shared/identity/public-key";
 import {
   bindNames,
   type IdentityNames,
@@ -5913,60 +5914,149 @@ it("keeps both exact authors selectable ahead of a crowded prefix page", async (
   }
 });
 
-it("offers namesakes with nothing but a name as identical rows, each its own person", async () => {
+// Two people whose profiles hold one name in both kind-0 fields, as Buzz
+// writes them. Neither is a member of `crew`. The relay's name search does not
+// cache what it finds; without that endpoint the NIP-50 fallback does.
+function namesakeSession(policy: boolean, endpoint = true) {
   const relay = keypair(),
     viewer = keypair();
   const sams = [keypair(), keypair()];
-  const owner = createRelaySession({
-    ...scriptedTransport(viewer.pubkey, relay.pubkey).transport,
-    query: (filters) =>
-      Promise.resolve(
-        filters.some((filter) => filter.kinds?.includes(0))
-          ? // As Buzz writes a profile: one name in both kind-0 fields.
-            sams.map((person) =>
-              profile(person, { display_name: "Sam", name: "Sam" }),
-            )
-          : [],
-      ),
-  });
-  const change = vi.fn();
-  const chosen = () => {
-    const queries = change.mock.calls.flat().sort();
-    change.mockClear();
-    return queries;
-  };
-  try {
-    render(
-      <SearchResults
-        session={owner.session}
-        query="from:sam deploy"
-        onQueryChange={change}
-        input={createRef()}
-        pages={[]}
-        openNewMessage={() => {}}
-        openConversation={() => {}}
-      />,
-    );
-    const people = within(await screen.findByRole("group", { name: "People" }));
-    // Nothing shown tells the two apart, and no key is added to do so.
-    const rows = await people.findAllByRole("option", { name: "Sam" });
-    expect(rows.map(rowLines)).toEqual(["Sam", "Sam"]);
-    expect(people.getAllByRole("option")).toHaveLength(2);
-    const own = sams.map(({ pubkey }) => `from:${pubkey} deploy`).sort();
-    for (const row of rows) fireEvent.click(row);
-    expect(chosen()).toEqual(own);
-    const input = screen.getByRole("combobox");
-    for (const row of rows) {
-      expect(input).toHaveAttribute("aria-activedescendant", row.id);
-      fireEvent.keyDown(input, { key: "Enter" });
-      fireEvent.keyDown(input, { key: "ArrowDown" });
+  const found = sams.map((person) =>
+    profile(person, { display_name: "Sam", name: "Sam" }),
+  );
+  const discovery = [
+    metadata(relay, "crew", "crew"),
+    roster(relay, "crew", [viewer.pubkey]),
+    ...found,
+  ];
+  // The default naming policy, as the bundled plugin registers it.
+  const directory = createAgentDirectory();
+  const owner = createRelaySession(
+    {
+      ...scriptedTransport(viewer.pubkey, relay.pubkey).transport,
+      async query(filters) {
+        return discovery.filter((event) =>
+          filters.some((filter) => matchFilter(filter as Filter, event)),
+        );
+      },
+      ...(endpoint ? { searchProfiles: async () => found } : {}),
+    },
+    policy
+      ? {
+          identityNames: {
+            bind: (source) =>
+              bindNames(source, {
+                snapshot: () => [directory],
+                subscribe: () => () => {},
+              }),
+          } as IdentityNames,
+        }
+      : {},
+  );
+  return { owner, sams };
+}
+
+it.each([
+  { operator: "from:", scope: undefined, policy: false },
+  { operator: "in:@", scope: undefined, policy: false },
+  // The naming policy never compares these two: it sees neither uncached
+  // profile, and in a channel it compares each with the members alone.
+  { operator: "from:", scope: undefined, policy: true },
+  { operator: "in:@", scope: undefined, policy: true },
+  { operator: "from:", scope: "crew", policy: true },
+  { operator: "in:@", scope: "crew", policy: true },
+])(
+  "tells namesakes with nothing but a name apart by key for $operator in $scope with policy $policy",
+  async ({ operator, scope, policy }) => {
+    const { owner, sams } = namesakeSession(policy);
+    const labels = publicKeyLabels(sams.map(({ pubkey }) => pubkey));
+    const change = vi.fn();
+    const chosen = () => {
+      const queries = change.mock.calls.flat();
+      change.mockClear();
+      return queries;
+    };
+    try {
+      render(
+        <SearchResults
+          session={owner.session}
+          query={`${operator}sam`}
+          onQueryChange={change}
+          input={createRef()}
+          pages={[]}
+          scopedChannelId={scope}
+          openNewMessage={() => {}}
+          openConversation={() => {}}
+        />,
+      );
+      const people = within(
+        await screen.findByRole("group", { name: "People" }),
+      );
+      await waitFor(() =>
+        expect(people.getAllByRole("option").map(rowLines).sort()).toEqual(
+          sams.map(({ pubkey }) => `Sam | ${labels.get(pubkey)}`).sort(),
+        ),
+      );
+      // Each row is announced with its key label and selects that key.
+      const rows = people.getAllByRole("option");
+      const own = rows.map((row) => {
+        const person = sams.find(
+          ({ pubkey }) => rowLines(row) === `Sam | ${labels.get(pubkey)}`,
+        );
+        assert.exists(person);
+        // jsdom joins the two lines without the space a browser reads.
+        expect(row).toHaveAccessibleName(`Sam${labels.get(person.pubkey)}`);
+        return `${operator}${person.pubkey} `;
+      });
+      expect(new Set(own).size).toBe(2);
+      for (const row of rows) fireEvent.click(row);
+      expect(chosen()).toEqual(own);
+      const input = screen.getByRole("combobox");
+      for (const row of rows) {
+        expect(input).toHaveAttribute("aria-activedescendant", row.id);
+        fireEvent.keyDown(input, { key: "Enter" });
+        fireEvent.keyDown(input, { key: "ArrowDown" });
+      }
+      expect(chosen()).toEqual(own);
+    } finally {
+      cleanup();
+      owner.dispose();
     }
-    expect(chosen()).toEqual(own);
-  } finally {
-    cleanup();
-    owner.dispose();
-  }
-});
+  },
+);
+
+it.each(["from:", "in:@"])(
+  "adds no key label for %s to namesakes the naming policy already qualifies",
+  async (operator) => {
+    const { owner, sams } = namesakeSession(true, false);
+    try {
+      render(
+        <SearchResults
+          session={owner.session}
+          query={`${operator}sam`}
+          onQueryChange={() => {}}
+          input={createRef()}
+          pages={[]}
+          openNewMessage={() => {}}
+          openConversation={() => {}}
+        />,
+      );
+      const people = within(
+        await screen.findByRole("group", { name: "People" }),
+      );
+      await waitFor(() =>
+        expect(people.getAllByRole("option").map(rowLines).sort()).toEqual(
+          sams
+            .map(({ pubkey }) => `Sam · ${npubEncode(pubkey).slice(-4)}`)
+            .sort(),
+        ),
+      );
+    } finally {
+      cleanup();
+      owner.dispose();
+    }
+  },
+);
 
 it.each(["from:@sam", "in:@sam"])(
   "shows a handle under a different profile name for %s, never a key",
