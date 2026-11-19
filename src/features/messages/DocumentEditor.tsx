@@ -22,6 +22,7 @@ import {
   documentEditorMarkdown,
 } from "./document-editor-markdown";
 import { MAX_MARKDOWN_LENGTH } from "../relay/message-content";
+import markdownStyles from "../markdown/Markdown.module.css";
 import styles from "./DocumentEditor.module.css";
 
 const noDecorations = () => [];
@@ -207,7 +208,7 @@ export function DocumentEditor({
               }}
             />
           ) : (
-            <div className="text-body">
+            <div className={`text-body ${markdownStyles.documentScale}`}>
               <EditableInput
                 ref={input}
                 draft={draft}

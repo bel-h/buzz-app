@@ -42,7 +42,6 @@ it.each([
 );
 
 it.each([
-  "# Heading\n\nParagraph",
   "~~removed~~",
   "**`code`**",
   ">",
@@ -54,9 +53,8 @@ it.each([
   "[](https://example.com)\n\nKeep",
   "[![Image](https://example.com/image.png)](https://example.com)",
   "> - [ ] a\n> - [ ] b",
-  "> # Heading\n> continuation",
   "- Item\n\n  | A | B |\n  | --- | --- |\n  | a | b |",
-  "> - Item\n>   > # Heading\n>   > continuation",
+  "> - Item\n>   > ## Heading\n>   > <!-- keep\n>   > this comment -->",
   "> [first\n> `code`](https://example.com)",
   '```js title="example"\nconst value = 1;\n```',
   '[label](https://example.com "title")',
@@ -130,7 +128,27 @@ const semanticTree = (value: unknown): unknown =>
         )
       : value;
 
+it("loads editable H1–H6 headings and preserves them on save", () => {
+  const markdown = Array.from(
+    { length: 6 },
+    (_, i) => `${"#".repeat(i + 1)} **Heading** ${i + 1}`,
+  ).join("\n\n");
+  const draft = documentEditorDraft(markdown);
+  const doc = readComposerSnapshot(draft.document, "document");
+  expect(
+    doc?.content.content.map(({ type, attrs }) => [type.name, attrs.level]),
+  ).toEqual([1, 2, 3, 4, 5, 6].map((level) => ["heading", level]));
+  expect(readComposerSnapshot(draft.document)).toBeUndefined();
+  expect(documentEditorMarkdown(draft)).toBe(markdown);
+});
+
 it.each([
+  "Setext heading\n===\n\nSecond\n---",
+  "> ## Quoted heading\n>\n> Text",
+  "> # Heading\n> continuation",
+  "> - Item\n>   > # Heading\n>   > continuation",
+  "- Item\n\n  ### Nested heading",
+  "# Escaped closing \\#\n\n# \\*literal\\* &amp; `code`",
   "> First point\n>\n> Second point\n\nEnd",
   "> > Nested first\n> >\n> > Nested second\n>\n> Outer last",
   "- First item\n\n  Second paragraph\n\n- Next item",

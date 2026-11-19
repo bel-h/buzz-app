@@ -10,6 +10,20 @@ import { spoilerDelimiter } from "./selection-copy";
 
 const { doc, paragraph, bullet_list, list_item, token } = composerSchema.nodes;
 
+it("copies heading levels to documents and keeps their Markdown prefix in chat", () => {
+  const heading = composerSchema.nodes.heading.create(
+    { level: 2 },
+    composerSchema.text("Heading"),
+  );
+  const original = doc.create(null, heading);
+  const copied = composerClipboard(original, document, "document");
+  expect(copied.text).toBe("## Heading");
+  expect(buzzCopyDocument(copied.html, "document")?.eq(original)).toBe(true);
+  const chat = buzzCopyDocument(copied.html);
+  expect(chat?.firstChild?.type.name).toBe("paragraph");
+  expect(chat?.textContent).toBe(copied.text);
+});
+
 it("copies aligned document tables with exact Markdown and pastes source in chat", () => {
   const source = "| Value |\n| ---: |\n| `a\\|b` |";
   const table = composerSchema.nodes.markdown_table.create({ source });

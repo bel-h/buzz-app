@@ -223,6 +223,9 @@ the same document format as `onChange`. Copy/paste retains that structure in bot
 plain Markdown and the app's rich HTML payload, including hard breaks and loose
 lists. Normal plain-text paste reads Markdown; paste-as-plain-text keeps the
 existing literal-text behavior.
+Type one to six hashes followed by a space at the start of a paragraph to
+create a heading. Loaded and pasted Markdown headings retain their level.
+Shift+Enter in H3–H6 behaves like Enter, since those headings are single-line in Markdown.
 Supported top-level GFM tables appear as grids in rich mode and retain their
 Markdown through surrounding edits. Edit their cells in source mode. Copy and
 Cut on selected grid text both copy the selection. Tables pasted or wrapped

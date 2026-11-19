@@ -24,6 +24,7 @@ import {
 export const composerSchema = new Schema<
   | "doc"
   | "paragraph"
+  | "heading"
   | "blockquote"
   | "code_block"
   | "markdown_table"
@@ -50,6 +51,25 @@ export const composerSchema = new Schema<
       whitespace: "pre",
       toDOM: () => ["p", 0],
       parseDOM: [{ tag: "p" }, { tag: "div" }],
+    },
+    heading: {
+      group: "block",
+      content: "inline*",
+      defining: true,
+      attrs: {
+        level: {
+          default: 1,
+          validate: (value) => {
+            if (!Number.isInteger(value) || value < 1 || value > 6)
+              throw new RangeError("Invalid heading level");
+          },
+        },
+      },
+      toDOM: (node) => [`h${node.attrs.level}`, 0],
+      parseDOM: [1, 2, 3, 4, 5, 6].map((level) => ({
+        tag: `h${level}`,
+        attrs: { level },
+      })),
     },
     blockquote: {
       group: "block",
@@ -662,12 +682,16 @@ function read(
     const node = item.node as Record<string, unknown>;
     if (typeof node.type !== "string" || !composerSchema.nodes[node.type])
       return;
+    if (
+      mode === "chat" &&
+      (node.type === "heading" || node.type === "markdown_table")
+    )
+      return;
     if (node.type === "text") {
       if (typeof node.text !== "string") return;
       length += node.text.length;
     }
     if (node.type === "token" || node.type === "markdown_table") {
-      if (node.type === "markdown_table" && mode !== "document") return;
       if (
         !node.attrs ||
         typeof node.attrs !== "object" ||

@@ -356,9 +356,10 @@ export function copyDocument(
     "[data-spoiler-delimiter]",
   ))
     delimiter.remove();
-  // Headings, rules and task checkboxes have no composer node. They become the
-  // Markdown source that renders them again once sent: paragraph and item text.
-  for (const heading of container.querySelectorAll("h1, h2, h3, h4, h5, h6")) {
+  // Chat keeps headings as authored Markdown; documents retain heading nodes.
+  for (const heading of mode === "document"
+    ? []
+    : container.querySelectorAll("h1, h2, h3, h4, h5, h6")) {
     const paragraph = html.createElement("p");
     if (heading.textContent)
       paragraph.append(`${"#".repeat(Number(heading.tagName.slice(1)))} `);

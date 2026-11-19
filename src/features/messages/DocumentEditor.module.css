@@ -21,6 +21,9 @@
   max-height: none;
   overflow: visible;
 }
+.editorBody [role="textbox"] :where(h1, h2, h3, h4, h5, h6) {
+  margin: var(--space-4) 0 var(--space-1h);
+}
 .sourceEditor {
   flex: 1;
   min-width: 0;

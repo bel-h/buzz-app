@@ -157,6 +157,7 @@ export function composerClipboard(
       ? new DOMSerializer(
           {
             ...serializer.nodes,
+            heading: (node) => [`h${node.attrs.level}`, 0],
             markdown_table: (node) => ["p", node.attrs.source],
             bullet_list: (node) => ["ul", spread(node), 0],
             ordered_list: (node) => [

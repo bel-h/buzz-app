@@ -86,7 +86,7 @@ export function documentEditorDraft(markdown: string) {
   // prefixes. Fall back at the root container so serialization cannot add them
   // a second time. Fully supported containers keep their rich structure.
   const supportedBlock = (node: RootContent): boolean =>
-    (node.type === "paragraph" &&
+    ((node.type === "paragraph" || node.type === "heading") &&
       node.children
         .flatMap((child) => inline(child))
         .every(
@@ -104,6 +104,11 @@ export function documentEditorDraft(markdown: string) {
       ) &&
       !/^\s*[-*+]\s+\[[ xX]\]/m.test(raw(node)));
   const block = (node: RootContent): EditorNode => {
+    if (node.type === "heading")
+      return schema.nodes.heading.create(
+        { level: node.depth },
+        node.children.flatMap((child) => inline(child)),
+      );
     if (node.type === "paragraph")
       return schema.nodes.paragraph.create(
         null,

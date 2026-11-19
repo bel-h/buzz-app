@@ -2417,12 +2417,14 @@ test("installed documents reuse host Markdown, workspace tabs and persisted spli
     name: "Markdown",
     exact: true,
   });
-  await expect(markdownSource).toHaveValue("**Changed guide**");
+  await expect(markdownSource).toHaveValue("## **Changed guide**");
   await markdownSource.fill("# Source heading\n\nKept literal source");
   await markdownSource.press("ControlOrMeta+Enter");
   await expect(reader.getByRole("status")).toContainText("Saved 1");
   await reader.getByRole("button", { name: "Rich text", exact: true }).click();
-  await expect(richEditor).toContainText("# Source heading");
+  await expect(
+    richEditor.getByRole("heading", { name: "Source heading", level: 1 }),
+  ).toBeVisible();
   await reader
     .getByRole("button", { name: "Replace document", exact: true })
     .click();
@@ -2781,6 +2783,43 @@ async function tableClipboard(rich, type, payload = {}) {
     { type, ...payload },
   );
 }
+
+test("formatted documents create, reopen, and paste headings", async ({
+  page,
+  app,
+}) => {
+  const { reader, rich, source, markdown, formatted } = await openTableEditor(
+    page,
+    app,
+  );
+  await markdown.click();
+  await source.fill("");
+  await formatted.click();
+  await rich.focus();
+  await page.keyboard.type("## ");
+  const heading = rich.locator("h2");
+  await expect(heading).toHaveCount(1);
+  await rich.press("ControlOrMeta+z");
+  await expect(rich.locator("p")).toHaveText("##");
+  await rich.press("ControlOrMeta+Shift+z");
+  await page.keyboard.type("Typed heading");
+  await expect(heading).toHaveText("Typed heading");
+  await page.keyboard.press("Enter");
+  await page.keyboard.type("Following paragraph");
+  await expect(rich.locator("p")).toHaveText("Following paragraph");
+  await rich.press("ControlOrMeta+Enter");
+  await expect(reader.getByRole("status")).toHaveText("Saved 1");
+  await reader.getByRole("button", { name: "Read Guide" }).click();
+  await reader.getByRole("button", { name: "Edit Guide" }).click();
+  await expect(heading).toHaveText("Typed heading");
+
+  await rich.press("ControlOrMeta+a");
+  await tableClipboard(rich, "paste", { text: "### Pasted heading" });
+  await expect(rich.locator("h3")).toHaveText("Pasted heading");
+  await page.keyboard.press("Shift+Enter");
+  await page.keyboard.type("After H3");
+  await expect(rich.locator("p")).toHaveText("After H3");
+});
 
 const smallTable = "| Cell | Value |\n| --- | --- |\n| cellword | 2 |";
 

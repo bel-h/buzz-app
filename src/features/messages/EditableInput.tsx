@@ -2412,7 +2412,7 @@ export function EditableInput({
           editor.dispatch(tr.scrollIntoView());
           // A typed delimiter converts in a second transaction: the third
           // character of a lone ``` or ~~~ line opens a code block at once, the
-          // space after a lone list or quote marker opens that block, and a
+          // space after a lone block marker opens that block, and a
           // closing delimiter converts its inline span. One undo restores the
           // typed source, that character included, and the next keystroke never
           // merges into the conversion. Near maxLength the typed character
@@ -2430,7 +2430,11 @@ export function EditableInput({
           ) {
             const block =
               composerCodeFence(editor.state, text) ??
-              composerBlockPrefix(editor.state, text);
+              composerBlockPrefix(
+                editor.state,
+                text,
+                current.current.markdownMode,
+              );
             const conversion = block ?? editor.state.tr;
             if (block || applyComposerInlineInput(conversion, text)) {
               const unconverted = editor.state;
@@ -2955,21 +2959,28 @@ export function EditableInput({
           if (editor.state.selection.empty && editor.hasFocus() && macWebKit())
             editor.dom.ownerDocument.getSelection()?.removeAllRanges();
           let tr: Transaction | undefined;
+          const parent = editor.state.selection.$from.parent;
+          // Only H1 and H2 have a multiline CommonMark representation.
+          const paragraphBreak =
+            kind === "paragraph" ||
+            (kind === "hard" &&
+              parent.type === composerSchema.nodes.heading &&
+              parent.attrs.level > 2);
           if (
             editor.state.selection instanceof NodeSelection &&
             editor.state.selection.node.type === table
           ) {
             const next = editor.state.tr;
             if (apply(next, createParagraphNear)) tr = next;
-          } else if (kind === "hard")
-            tr = editor.state.selection.$from.parent.type.spec.code
+          } else if (kind === "hard" && !paragraphBreak)
+            tr = parent.type.spec.code
               ? editor.state.tr.insertText("\n")
               : editor.state.tr.replaceSelectionWith(
                   composerSchema.nodes.hard_break.create(),
                 );
           else {
             tr = composerBlockLineBreak(editor.state);
-            if (!tr && kind === "paragraph") {
+            if (!tr && paragraphBreak) {
               const next = editor.state.tr;
               if (apply(next, splitBlockKeepMarks)) tr = next;
             }
