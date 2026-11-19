@@ -351,8 +351,8 @@ export type AgentSettingsHost = Readonly<{
   typeControl?: (dirty: boolean, action?: ReactNode) => ReactNode;
   /** Host-owned type change committed with the target type's settings draft. */
   pendingSave?: (config?: unknown) => Promise<void>;
-  /** This owner review was seeded with an agent-proposed model. */
-  proposedModel?: boolean;
+  /** Validate the final model and thinking pair in an owner review. */
+  proposedModelOrEffort?: boolean;
   /** This owner review was seeded with an agent-proposed Huddle voice. */
   proposedVoice?: boolean;
 }>;
@@ -2293,6 +2293,17 @@ export class AgentsService extends Service implements Agents {
   private updates: readonly AgentUpdateRequest[] = [];
   private teamUpdates: readonly TeamUpdateRequest[] = [];
   private readonly approving = new Set<string>();
+  private readonly updateProgress = new Map<
+    string,
+    {
+      base: ConfigBase;
+      localConfig: unknown;
+      type: string;
+      name: string;
+      picture: Agent["picture"];
+      saved: Set<string>;
+    }
+  >();
   /** Every saved membership, deleted ones included: native's list is the
    * agent list, and `records` only adds settings to it. */
   private identities: readonly Member[] = [];
@@ -4474,6 +4485,7 @@ export class AgentsService extends Service implements Agents {
   dismissUpdate = (id: string) => {
     if (this.approving.has(id)) return;
     this.updates = this.updates.filter((request) => request.id !== id);
+    this.updateProgress.delete(id);
     this.notify();
   };
   async approveUpdate(id: string, input: NewAgent, opened?: Agent) {
@@ -4493,30 +4505,49 @@ export class AgentsService extends Service implements Agents {
     const binding = this.bindingOf(identity);
     if (!binding || binding.controller.signal.aborted)
       throw new Error("Connect to the agent's community first");
+    const current = this.view(identity, this.recordOf(identity));
+    let progress = this.updateProgress.get(id);
     if (request.settings) {
-      const current = this.view(identity, this.recordOf(identity));
       if (
         !opened ||
         current.key !== opened.key ||
-        current.type !== opened.type ||
-        current.name !== opened.name ||
-        current.picture !== opened.picture ||
+        current.type !== (progress?.type ?? opened.type) ||
+        current.name !== (progress?.name ?? opened.name) ||
+        current.picture !== (progress ? progress.picture : opened.picture) ||
         current.protectionRevision !== opened.protectionRevision ||
         JSON.stringify(current.executionBinding) !==
           JSON.stringify(opened.executionBinding) ||
-        JSON.stringify(current.config) !== JSON.stringify(opened.config) ||
-        JSON.stringify(current.configBase) !== JSON.stringify(opened.configBase)
+        (progress
+          ? JSON.stringify(this.settingsOf(identity).config) !==
+            JSON.stringify(progress.localConfig)
+          : JSON.stringify(current.config) !== JSON.stringify(opened.config)) ||
+        SIDES.some(
+          (side) =>
+            current.configBase?.[side] !==
+            (progress?.base ?? opened.configBase)?.[side],
+        )
       )
         throw new Error(
           "The agent changed while this review was open. Close it and ask for a new proposal.",
         );
-      const problem = settingsProposalProblem(
-        request.settings,
-        current,
-        current.executionBinding,
-        request.agentType,
-      );
-      if (problem) throw new Error(problem);
+      if (!progress?.saved.has("Harness")) {
+        const problem = settingsProposalProblem(
+          request.settings,
+          current,
+          current.executionBinding,
+          request.agentType,
+        );
+        if (problem) throw new Error(problem);
+      }
+      progress ??= {
+        base: { ...opened.configBase },
+        localConfig: this.settingsOf(identity).config,
+        type: current.type,
+        name: current.name,
+        picture: current.picture,
+        saved: new Set(),
+      };
+      this.updateProgress.set(id, progress);
     }
     const { type, name, picture, config } = input;
     this.updateKind(identity, {
@@ -4529,20 +4560,55 @@ export class AgentsService extends Service implements Agents {
     const retyped = type !== identity.type;
     this.approving.add(id);
     try {
-      if (retyped)
+      const recordRevision = (side: Side, revision: string) => {
+        if (!progress) return;
+        progress.base[side] = revision;
+        progress.saved.add(side === "settings" ? "Settings" : "Instructions");
+      };
+      if (retyped) {
         await this.retype(
           key,
           type,
           config === undefined ? undefined : { config },
+          progress?.base ?? opened?.configBase,
+          recordRevision,
         );
-      await this.save(key, {
-        name,
-        ...(picture && { picture }),
-        ...(!retyped && config !== undefined && { config }),
-        ...(opened?.configBase && { base: opened.configBase }),
-      });
+        if (progress) {
+          progress.type = type;
+          progress.localConfig = this.settingsOf(identity).config;
+          progress.saved.add("Harness");
+        }
+      }
+      if (progress) {
+        if (!retyped && config !== undefined) {
+          await this.save(key, { config, base: progress.base }, recordRevision);
+          progress.localConfig = this.settingsOf(identity).config;
+          progress.saved.add("Settings");
+        }
+        await this.save(key, { name });
+        if (name !== current.name) progress.saved.add("Name");
+        progress.name = name.trim();
+        if (picture) {
+          await this.save(key, { picture });
+          if (picture !== current.picture) progress.saved.add("Picture");
+          progress.picture = picture;
+        }
+      } else {
+        await this.save(key, {
+          name,
+          ...(picture && { picture }),
+          ...(!retyped && config !== undefined && { config }),
+          ...(opened?.configBase && { base: opened.configBase }),
+        });
+      }
+      this.updateProgress.delete(id);
       this.updates = this.updates.filter((item) => item.id !== id);
       this.notify();
+    } catch (error) {
+      if (!progress?.saved.size) throw error;
+      throw new Error(
+        `Saved so far: ${[...progress.saved].join(", ")}. ${message(error)}. You can retry Save.`,
+      );
     } finally {
       this.approving.delete(id);
     }
@@ -5278,23 +5344,32 @@ export class AgentsService extends Service implements Agents {
   };
   /** A plugin's notes change only through `setNote` and its kin: any other
    * save keeps the agent's current ones. */
-  save(key: AgentKey, change: AgentChange) {
+  save(
+    key: AgentKey,
+    change: AgentChange,
+    onRevision?: (side: Side, revision: string) => void,
+  ) {
     if (!change.config || typeof change.config !== "object")
-      return this.saveAs(key, change);
+      return this.saveAs(key, change, onRevision);
     const { pluginNotes: _, ...config } = change.config as {
       pluginNotes?: unknown;
     };
     const notes = notesOf(this.liveAgent(key)?.config);
-    return this.saveAs(key, {
-      ...change,
-      config: notes ? { ...config, pluginNotes: notes } : config,
-    });
+    return this.saveAs(
+      key,
+      { ...change, config: notes ? { ...config, pluginNotes: notes } : config },
+      onRevision,
+    );
   }
   private liveAgent(key: AgentKey) {
     const { agents, running } = this.snapshot();
     return [...agents, ...running].find((item) => item.key === key);
   }
-  private async saveAs(key: AgentKey, change: AgentChange) {
+  private async saveAs(
+    key: AgentKey,
+    change: AgentChange,
+    onRevision?: (side: Side, revision: string) => void,
+  ) {
     const identity = this.liveMember(key);
     // A hosted agent's key is its pubkey.
     if (!identity)
@@ -5310,7 +5385,12 @@ export class AgentsService extends Service implements Agents {
     // isn't saved there changes nothing here and stays in the editor.
     const home = key === pubkey;
     if (change.config !== undefined)
-      await this.saveSynced(identity, change.config as object, change.base);
+      await this.saveSynced(
+        identity,
+        change.config as object,
+        change.base,
+        onRevision,
+      );
     if (!home && change.config !== undefined)
       await this.change(pubkey, (saved) =>
         changed(saved ?? this.settingsOf(identity), { config: change.config }),
@@ -5353,11 +5433,14 @@ export class AgentsService extends Service implements Agents {
     identity: AgentIdentity,
     config: object,
     base: ConfigBase = this.editorConfig(identity, config)?.base ?? {},
+    onRevision?: (side: Side, revision: string) => void,
+    only?: Side,
   ) {
     const live = this.communityConfigs.get(this.configHome(identity));
     const binding = this.configBinding(identity);
     const agent = this.configAgent(identity, config);
-    const applies = (side: Side) => side === "instructions" || !!agent.schema;
+    const applies = (side: Side) =>
+      (!only || side === only) && (side === "instructions" || !!agent.schema);
     this.refuseWhileMoving(identity, applies);
     const edited = SIDES.filter((side) => {
       const subject = binding[side]?.subject;
@@ -5382,7 +5465,15 @@ export class AgentsService extends Service implements Agents {
       })
     )
       throw new Error(problem);
-    const saved = await live.save(agent, config, base);
+    const saved = await live.save(
+      agent,
+      config,
+      only ? { [only]: base[only] } : base,
+    );
+    for (const side of SIDES) {
+      const result = saved[side];
+      if (result?.status === "saved") onRevision?.(side, result.head.id);
+    }
     const failures = (Object.values(saved) as Saved[]).flatMap((result) =>
       result.status === "saved" ? [] : [saveProblem(result)],
     );
@@ -5787,6 +5878,8 @@ export class AgentsService extends Service implements Agents {
     key: AgentKey,
     type: string,
     change?: Readonly<{ config: unknown }>,
+    base?: ConfigBase,
+    onRevision?: (side: Side, revision: string) => void,
   ) {
     const identity = this.liveMember(key);
     if (!this.native || !identity)
@@ -5808,8 +5901,22 @@ export class AgentsService extends Service implements Agents {
         kind,
       );
       const config = change ? change.config : adopted;
+      if (base && change && "instructions" in base)
+        await this.saveSynced(
+          identity,
+          config as object,
+          base,
+          onRevision,
+          "instructions",
+        );
       // Its other devices take the type its synced settings name.
-      await this.publishType(identity, type, config as object);
+      await this.publishType(
+        identity,
+        type,
+        config as object,
+        base,
+        onRevision,
+      );
       await this.applyType(identity, type, config);
       return preview.dropped;
     };
@@ -5856,11 +5963,15 @@ export class AgentsService extends Service implements Agents {
     identity: AgentIdentity,
     type: string,
     config: object,
+    base?: ConfigBase,
+    onRevision?: (side: Side, revision: string) => void,
   ) {
     await this.checkExecutionType(identity.pubkey, type);
     const settings = this.configBinding(identity).settings;
     if (!settings || !isSynced(this.configStore, settings)) return;
     const head = this.configStore.state(settings.subject).head;
+    if (base && (head?.id ?? null) !== (base.settings ?? null))
+      throw new Error("The agent’s settings changed while changing harnesses.");
     if (head && settingsType(head) === type) return;
     const live = this.communityConfigs.get(this.configHome(identity));
     if (!live) throw new Error("Connect to the community to change its type");
@@ -5876,6 +5987,7 @@ export class AgentsService extends Service implements Agents {
           ? saveProblem(result)
           : "This agent's config isn't synced here yet; try again",
       );
+    onRevision?.("settings", result.head.id);
   }
   /** Makes the agent `type` here with `config`, as its type's change saves. */
   private async applyType(

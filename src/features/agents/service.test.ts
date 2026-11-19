@@ -5344,6 +5344,80 @@ describe("an agent in several communities", () => {
       warn.mockRestore();
     });
 
+    it("uses the reviewed revision if the agent's settings change during retirement", async () => {
+      const c = channels("home synced", "example/echo");
+      let release!: () => void;
+      const retiring = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const retire = vi.fn(() => retiring);
+      const f = await joined({ retire });
+      await vi.waitFor(() => expect(c.get(home)?.attach).toHaveBeenCalled());
+      relayType(f);
+      const store = internals(f.service).configStore;
+      const side = settings(home);
+      const opened = store.state(side).head?.id;
+      if (!opened) throw new Error("Missing reviewed settings");
+      const retyping = f.service.retype(
+        bot,
+        "other/relay",
+        { config: {} },
+        { settings: opened },
+      );
+      const rejected = expect(retyping).rejects.toThrow(
+        "settings changed while changing harnesses",
+      );
+      try {
+        await vi.waitFor(() => expect(retire).toHaveBeenCalled());
+        store.applyRead(side, store.capture(side), {
+          kind: "head",
+          event: settingsFor("example/echo"),
+        });
+      } finally {
+        release();
+      }
+      await rejected;
+      expect(c.get(home)?.save).not.toHaveBeenCalled();
+      expect(f.native.setType).not.toHaveBeenCalled();
+    });
+
+    it("saves reviewed instructions as well as the new harness", async () => {
+      const c = channels("home synced", "example/echo");
+      const f = await joined();
+      await vi.waitFor(() => expect(c.get(home)?.attach).toHaveBeenCalled());
+      relayType(f);
+      const store = internals(f.service).configStore;
+      const instructionsSide = instructions(home);
+      const opened = {
+        settings: store.state(settings(home)).head?.id ?? null,
+        instructions: store.state(instructionsSide).head?.id ?? null,
+      };
+      const savedInstructions = revision("Reviewed instructions");
+      const save = c.get(home)?.save;
+      save?.mockImplementationOnce(async () => {
+        store.applyRead(instructionsSide, store.capture(instructionsSide), {
+          kind: "head",
+          event: savedInstructions,
+        });
+        return { instructions: { status: "saved", head: savedInstructions } };
+      });
+      const config = { instructions: "Reviewed instructions" };
+      await f.service.retype(bot, "other/relay", { config }, opened);
+      expect(save).toHaveBeenNthCalledWith(1, expect.anything(), config, {
+        instructions: opened.instructions,
+      });
+      expect(save).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({ type: "other/relay" }),
+        config,
+        {
+          settings: opened.settings,
+        },
+      );
+      expect(f.service.find(bot)?.type).toBe("other/relay");
+      expect(store.state(instructionsSide).head?.id).toBe(savedInstructions.id);
+    });
+
     it("refuses a History revert of its settings while their head names another type", async () => {
       const c = channels("home synced", "example/echo");
       const f = await joined();
@@ -22639,7 +22713,14 @@ it("keeps a self settings proposal out of agent state until its owner approves t
   await propose();
   const [fresh] = service.updateRequests();
   if (!fresh) throw new Error("Missing new review");
-  await service.approveUpdate(fresh.id, approved, service.find(bot));
+  const freshOpened = service.find(bot);
+  const renamed = { ...approved, name: "Reviewer" };
+  native.rename.mockRejectedValueOnce(new Error("Cannot rename right now"));
+  await expect(
+    service.approveUpdate(fresh.id, renamed, freshOpened),
+  ).rejects.toThrow("Cannot rename right now");
+  expect(service.find(bot)?.config).toEqual(approved.config);
+  await service.approveUpdate(fresh.id, renamed, freshOpened);
   expect(service.find(bot)?.config).toEqual(approved.config);
   expect(service.updateRequests()).toEqual([]);
 

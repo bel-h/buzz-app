@@ -1486,14 +1486,27 @@ export function createTabs(
         });
         if (!validWorkspace(settings.workspace))
           throw new Error("Enter an absolute or ~/… workspace path.");
-        if (settingsHost?.proposedModel && !bound && settings.model) {
+        if (
+          settingsHost?.proposedModelOrEffort &&
+          (settings.model || settings.effort)
+        ) {
           if (!data)
             throw new Error(
-              "Check Codex models or choose Codex default before saving.",
+              "Check Codex models or clear the model and thinking overrides before saving.",
             );
-          if (!catalogModel(settings.model, data))
+          const model = catalogModel(provider.resolve(settings).model, data);
+          if (!model)
             throw new Error(
               "Choose an available Codex model or Codex default before saving.",
+            );
+          if (
+            settings.effort &&
+            !model.supportedReasoningEfforts.some(
+              (choice) => choice.reasoningEffort === settings.effort,
+            )
+          )
+            throw new Error(
+              "Choose a thinking level this Codex model supports or use Default.",
             );
         }
         if (settingsHost?.proposedVoice && settings.voice) {
@@ -1743,6 +1756,21 @@ export function createTabs(
             )}
           </>
         )}
+        {settingsHost?.proposedModelOrEffort &&
+          (draft.model || draft.effort) && (
+            <div>
+              <Button
+                type="button"
+                variant="subtle"
+                disabled={saving}
+                onClick={() =>
+                  setDraft(offRecommended({ ...draft, model: "", effort: "" }))
+                }
+              >
+                Clear model and thinking overrides
+              </Button>
+            </div>
+          )}
         <AgentSaveButton form={form} saving={saving} disabled={!changed} />
         {settingsSection !== "identity" && settingsContent}
       </form>

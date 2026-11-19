@@ -900,6 +900,22 @@ export function createTabs({
       setSaving(true);
       setError("");
       try {
+        if (
+          settingsHost?.proposedModelOrEffort &&
+          (draft.model || draft.effort)
+        ) {
+          const model = models.value?.find(
+            ({ id }) => id === (draft.model || defaultModel(draft, defaults)),
+          );
+          if (!model)
+            throw new Error(
+              "Choose an available Pi model or clear the model and thinking overrides.",
+            );
+          if (draft.effort && !model.thinking.includes(draft.effort))
+            throw new Error(
+              "Choose a thinking level this Pi model supports or use Default.",
+            );
+        }
         await save({
           ...draft,
           workspace: draft.workspace.trim() || DEFAULT_CONFIG.workspace,
@@ -1007,6 +1023,19 @@ export function createTabs({
             />
           </>
         )}
+        {settingsHost?.proposedModelOrEffort &&
+          (draft.model || draft.effort) && (
+            <div>
+              <Button
+                type="button"
+                variant="subtle"
+                disabled={saving}
+                onClick={() => setDraft({ ...draft, model: "", effort: "" })}
+              >
+                Clear model and thinking overrides
+              </Button>
+            </div>
+          )}
         <AgentSaveButton
           form={form}
           saving={saving}

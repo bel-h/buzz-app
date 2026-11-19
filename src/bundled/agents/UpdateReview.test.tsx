@@ -31,6 +31,15 @@ const kind = (key: string, title: string) => ({
     reply: instructions ?? config.reply,
   }),
   Create,
+  settingsProposal: {
+    resolveRecommended: async () => ({
+      harness: "goose",
+      provider: "example",
+      model: "recommended-model",
+      effort: "medium",
+      label: "Recommended model",
+    }),
+  },
 });
 
 function fixture(
@@ -232,3 +241,28 @@ it.each([
     expect(agents.approveUpdate).not.toHaveBeenCalled();
   },
 );
+
+it("hides proposed settings when the owner chooses a different harness", async () => {
+  const user = userEvent.setup();
+  fixture({ settings: { model: "proposed-model" } });
+  const summary = await screen.findByRole("region", {
+    name: "Proposed settings",
+  });
+  expect(summary).toHaveTextContent("proposed-model");
+  await user.click(screen.getByRole("combobox", { name: "Harness" }));
+  await user.click(await screen.findByRole("option", { name: "Other" }));
+  expect(
+    screen.queryByRole("region", { name: "Proposed settings" }),
+  ).toBeNull();
+});
+
+it("keeps the recommended model when the proposal only changes thinking", async () => {
+  fixture({ settings: { effort: "high" } }, false, {
+    config: { model: "", effort: "", preset: "recommended" },
+  });
+  const summary = await screen.findByRole("region", {
+    name: "Proposed settings",
+  });
+  expect(summary).toHaveTextContent("recommended-model");
+  expect(summary).toHaveTextContent("high");
+});

@@ -1,5 +1,5 @@
 import type { SessionScope } from "../agent-harness/session-scope";
-import { offRecommended } from "./recommended";
+import { offRecommended, type RecommendedCandidate } from "./recommended";
 import type { Agent } from "./service";
 
 export type AgentSettingsProposal = Readonly<{
@@ -14,6 +14,7 @@ export type AgentSettingsProposal = Readonly<{
 export type AgentSettingsProposalSupport = Readonly<{
   voice?: true;
   apps?: true;
+  resolveRecommended?(): Promise<RecommendedCandidate | null>;
 }>;
 
 /** Explain when the current agent can no longer accept a proposal. */

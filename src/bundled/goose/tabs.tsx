@@ -1402,6 +1402,35 @@ export function createTabs({
         if (!validWorkspace(workspace))
           throw new Error("Enter an absolute or ~/… workspace path.");
         const next = { ...draft, model: draft.model.trim(), workspace };
+        if (
+          settingsHost?.proposedModelOrEffort &&
+          (next.model || next.effort)
+        ) {
+          if (agent.executionBinding)
+            throw new Error(
+              "Clear the model and thinking overrides to use the target’s defaults.",
+            );
+          if (next.model) {
+            const provider =
+              next.provider || (await setup.providers()).defaults.provider;
+            if (
+              !provider ||
+              !(await setup.models(provider)).some(
+                (model) => model.id === next.model,
+              )
+            )
+              throw new Error(
+                "Choose an available Goose model or clear the model and thinking overrides.",
+              );
+          }
+          if (
+            next.effort &&
+            !(await setup.efforts(next)).levels.includes(next.effort)
+          )
+            throw new Error(
+              "Choose a thinking level this Goose model supports or use Default.",
+            );
+        }
         // A Custom agent's save drops a mark left from before, which a later
         // blank synced model would otherwise turn back on.
         await save(onRecommended(next) ? next : offRecommended(next));
@@ -1492,6 +1521,21 @@ export function createTabs({
             />
           </>
         )}
+        {settingsHost?.proposedModelOrEffort &&
+          (draft.model || draft.effort) && (
+            <div>
+              <Button
+                type="button"
+                variant="subtle"
+                disabled={saving}
+                onClick={() =>
+                  setDraft(offRecommended({ ...draft, model: "", effort: "" }))
+                }
+              >
+                Clear model and thinking overrides
+              </Button>
+            </div>
+          )}
         <AgentSaveButton form={form} saving={saving} disabled={!changed} />
         {settingsSection !== "identity" && settingsContent}
       </form>

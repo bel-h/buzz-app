@@ -3643,3 +3643,26 @@ it("saves the voice against the latest synced revision", async () => {
     ),
   );
 });
+
+it("blocks an unsupported proposal effort and lets the owner clear it", async () => {
+  const f = fixture();
+  const user = userEvent.setup();
+  const save = vi.fn(async () => {});
+  render(
+    <f.tabs.SettingsTab
+      {...f.props({ ...defaults, model: "model-b", effort: "xhigh" }, save)}
+      settingsHost={{ proposedModelOrEffort: true, pendingSave: save }}
+    />,
+  );
+  await screen.findByRole("combobox", { name: "Model" });
+  await user.click(screen.getByRole("button", { name: "Save" }));
+  expect(await screen.findByText(/Choose a thinking level/)).toBeVisible();
+  expect(save).not.toHaveBeenCalled();
+  await user.click(
+    screen.getByRole("button", { name: "Clear model and thinking overrides" }),
+  );
+  await user.click(screen.getByRole("button", { name: "Save" }));
+  expect(save).toHaveBeenCalledWith(
+    expect.objectContaining({ model: "", effort: "" }),
+  );
+});

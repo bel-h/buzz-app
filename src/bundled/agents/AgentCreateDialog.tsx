@@ -26,6 +26,7 @@ import {
   followRecommended,
   onRecommended,
   recommendedCandidates,
+  type RecommendedCandidate,
   withRecommended,
 } from "../../features/agents/recommended";
 import { useRecommendedPick } from "../../features/agents/useRecommendedPick";
@@ -113,13 +114,17 @@ function ProposedSettings({
   headingRef,
   saved,
   proposed,
+  draft,
 }: {
   headingRef: Ref<HTMLHeadingElement>;
   saved: unknown;
   proposed: AgentSettingsProposal;
+  draft: unknown;
 }) {
   const headingId = useId();
   const current = (saved ?? {}) as AgentSettingsProposal;
+  const next = (draft ?? {}) as AgentSettingsProposal;
+  const leavingRecommended = onRecommended(current) && !onRecommended(next);
   const labels = {
     model: "Model",
     effort: "Thinking",
@@ -143,9 +148,13 @@ function ProposedSettings({
   };
   const rows = (Object.keys(labels) as (keyof typeof labels)[]).flatMap(
     (key) => {
-      if (proposed[key] === undefined) return [];
+      if (
+        proposed[key] === undefined &&
+        !(leavingRecommended && key === "model")
+      )
+        return [];
       const before = value(current, key);
-      const after = value(proposed, key);
+      const after = value(next, key);
       return before === after ? [] : [{ label: labels[key], before, after }];
     },
   );
@@ -282,18 +291,60 @@ export function AgentCreateDialog({
       proposed.instructions !== undefined && item?.adopt
         ? item.adopt({ instructions: proposed.instructions }, config)
         : config;
-    return proposed.settings &&
-      item?.key === (proposed.type ?? proposed.agentType)
-      ? applySettingsProposal(withInstructions, proposed.settings)
-      : withInstructions;
+    return withInstructions;
   };
   const [config, setConfig] = useState(() => seed(type));
+  const proposedSettings =
+    update && type?.key === (update.request.type ?? update.request.agentType)
+      ? update.request.settings
+      : undefined;
+  const modelProposal =
+    proposedSettings?.model !== undefined ||
+    proposedSettings?.effort !== undefined;
+  const recommendedType = types.find((item) => item.key === update?.agent.type);
+  const resolveRecommended =
+    update &&
+    !update.agent.executionBinding &&
+    onRecommended(update.agent.config) &&
+    (update.request.settings?.model !== undefined ||
+      update.request.settings?.effort !== undefined)
+      ? recommendedType?.settingsProposal?.resolveRecommended
+      : undefined;
+  const [candidate, setCandidate] = useState<RecommendedCandidate | null>();
+  useEffect(() => {
+    if (!resolveRecommended) return;
+    let current = true;
+    void resolveRecommended().then(
+      (value) => current && setCandidate(value),
+      () => current && setCandidate(null),
+    );
+    return () => {
+      current = false;
+    };
+  }, [resolveRecommended]);
+  const checkingProposal =
+    modelProposal && Boolean(resolveRecommended) && candidate === undefined;
+  const proposedConfig = useMemo(() => {
+    if (!proposedSettings) return config;
+    const manual =
+      candidate && modelProposal
+        ? followRecommended(
+            config,
+            config as { model: string; effort: string },
+            candidate,
+          )
+        : config;
+    return applySettingsProposal(manual, proposedSettings);
+  }, [candidate, config, modelProposal, proposedSettings]);
   const Settings = reviewingSettings
     ? type?.tabs?.find((tab) => tab.role === "settings")?.component
     : undefined;
   const settingsAgent = useMemo(
-    () => (edited && type ? { ...edited, type: type.key, config } : undefined),
-    [edited, type, config],
+    () =>
+      edited && type
+        ? { ...edited, type: type.key, config: proposedConfig }
+        : undefined,
+    [edited, type, proposedConfig],
   );
   const Form = reviewingSettings ? "div" : "form";
   const [automatic, setAutomatic] = useState(recommendable);
@@ -662,11 +713,12 @@ export function AgentCreateDialog({
         }
       >
         <div className={styles.createStack}>
-          {update?.request.settings && (
+          {update && proposedSettings && !checkingProposal && (
             <ProposedSettings
               headingRef={proposalHeading}
               saved={update.agent.config}
-              proposed={update.request.settings}
+              proposed={proposedSettings}
+              draft={proposedConfig}
             />
           )}
           <section aria-label="Identity" className={styles.profileIdentity}>
@@ -817,7 +869,9 @@ export function AgentCreateDialog({
             )}
           </section>
           {reviewingSettings ? (
-            Settings && settingsAgent && !edited?.configProblem ? (
+            checkingProposal ? (
+              <Checking />
+            ) : Settings && settingsAgent && !edited?.configProblem ? (
               <AgentSaveFooter.Provider
                 value={{ target: settingsActions, dialog: true }}
               >
@@ -827,10 +881,8 @@ export function AgentCreateDialog({
                   save={saveSettings}
                   settingsHost={{
                     pendingSave: saveSettings,
-                    proposedModel:
-                      update?.request.settings?.model !== undefined,
-                    proposedVoice:
-                      update?.request.settings?.voice !== undefined,
+                    proposedModelOrEffort: modelProposal,
+                    proposedVoice: proposedSettings?.voice !== undefined,
                   }}
                 />
               </AgentSaveFooter.Provider>
