@@ -545,22 +545,18 @@ export class GooseRuntime {
         solo,
         admitted,
       );
-      const { steering, choices, ...shown } = turn;
+      const { choices, ...shown } = turn;
       const { channel: where } = shown;
       const woken = wake && {
         wake: { ...wake, text: (await wakeText?.()) ?? wake.text },
       };
-      const render = (project: string | undefined) => {
-        const text = turnPrompt({
-          ...shown,
-          ...(project ? { project } : {}),
-          agent: agent.key,
-          channelLevel: topLevel && !solo,
-          ...woken,
-        });
-        return resumed ? `${text}\n\n${RESUMED_PROMPT}` : text;
-      };
-      const text = render(shown.project);
+      const said = turnPrompt({
+        ...shown,
+        agent: agent.key,
+        channelLevel: topLevel && !solo,
+        ...woken,
+      });
+      const text = resumed ? `${said}\n\n${RESUMED_PROMPT}` : said;
       return {
         key: shown.key,
         shown: shown.shown,
@@ -570,9 +566,6 @@ export class GooseRuntime {
             ? "DM"
             : where.id.slice(0, 8),
         text,
-        // A message that steers the running turn has its Canvas as that
-        // turn's prompt has the conversation's working location.
-        steer: steering === shown.project ? text : render(steering),
         choices,
       };
     };
@@ -624,22 +617,16 @@ export class GooseRuntime {
             ...(wake ? { current } : {}),
             // Built again as it is handed over: a wake, to read what is
             // current; a session closed since, for what the new one has not
-            // been shown; and a message whose section choices changed while
-            // it waited, so its Canvas says what its turn's instructions say.
-            refresh: async (fresh = false, steers = false) => {
-              const { now, running } = this.choices(entry, channel, key);
+            // been shown; and a message whose session took other section
+            // choices while it waited, so its Canvas says what the
+            // instructions of the turn it joins or starts say.
+            refresh: async (fresh = false) => {
               const same =
-                JSON.stringify((steers ? running : now) ?? null) ===
-                built.choices[steers ? "running" : "now"];
+                JSON.stringify(this.installed(entry, channel, key) ?? null) ===
+                built.choices;
               const ready =
                 wake || fresh || !same ? await prompt(fresh, key) : built;
-              return this.review(
-                entry,
-                steers ? ready.steer : ready.text,
-                notes,
-                channel,
-                noteRoot,
-              );
+              return this.review(entry, ready.text, notes, channel, noteRoot);
             },
             title: sessionTitle(entry.name, place, key.split("/")[1]),
             // A Solo chat takes the name goose gives its first session.
@@ -834,7 +821,7 @@ export class GooseRuntime {
     const owner = entry.handle?.owner;
     // A Solo chat is one conversation.
     const folder = session ? this.folder(agent.key, channelId) : undefined;
-    const { now, running } = this.choices(entry, channelId, key);
+    const chosen = this.installed(entry, channelId, key);
     const reading = solo
       ? readCanvas(
           session && owner
@@ -848,11 +835,7 @@ export class GooseRuntime {
             : undefined,
         ).then(
           (read) =>
-            read && {
-              section: project(read.text, worksElsewhere(folder, now)).section,
-              steering: project(read.text, worksElsewhere(folder, running))
-                .section,
-            },
+            read && project(read.text, worksElsewhere(folder, chosen)).section,
         )
       : Promise.resolve(undefined);
     const threadRead = (thread || (resumed && !dm)) && !topLevel;
@@ -897,7 +880,7 @@ export class GooseRuntime {
       ),
       reading,
     ]);
-    const section = canvas?.section || undefined;
+    const section = canvas || undefined;
     return {
       key,
       event,
@@ -923,23 +906,18 @@ export class GooseRuntime {
       ...(signingAuthority ? { signingAuthority } : {}),
       names,
       ...(section ? { project: section } : {}),
-      steering: canvas?.steering || undefined,
       /** The choices it was built with, to tell when to build it again. */
-      choices: {
-        now: JSON.stringify(now ?? null),
-        running: JSON.stringify(running ?? null),
-      },
+      choices: JSON.stringify(chosen ?? null),
     };
   }
 
-  /** The section choices a turn's Canvas is read with: the current ones, and
-   * for a steer, those its running turn's prompt was built with. */
-  private choices(entry: Entry, channelId: string, key: string) {
-    const now = entry.handle?.promptSections?.(channelId);
-    return {
-      now,
-      running: entry.located.has(key) ? entry.located.get(key) : now,
-    };
+  /** The section choices a turn's Canvas is read with: those its
+   * conversation's session took last, which a turn that starts takes as it
+   * is handed over and a steer joins; the current ones before it has any. */
+  private installed(entry: Entry, channelId: string, key: string) {
+    return entry.located.has(key)
+      ? entry.located.get(key)
+      : entry.handle?.promptSections?.(channelId);
   }
 
   private entry(agent: AgentKey, initial: Config): Entry {

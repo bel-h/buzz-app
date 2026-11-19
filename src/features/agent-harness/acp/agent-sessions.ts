@@ -365,8 +365,7 @@ export class AgentSessions {
             ...(current ? { current } : {}),
             ...(refresh
               ? {
-                  refresh: (_fresh?: boolean, steers?: boolean) =>
-                    refresh(!first, steers),
+                  refresh: () => refresh(!first),
                 }
               : {}),
           },
