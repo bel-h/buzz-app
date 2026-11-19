@@ -706,6 +706,33 @@ describe("AgentSessions", () => {
     expect(fake.geese[1]?.env.GOOSE_AUTO_COMPACT_TOKEN_LIMIT).toBe("200000");
   });
 
+  it("stops a goose whose session outlived a failed start with a changed compaction threshold, once that session closes", async () => {
+    let limit: number | undefined;
+    const { fake, sessions } = setup({}, false, {
+      compactAt: () => limit,
+      // At the host's process limit, a second goose starts only once the
+      // first has stopped.
+      wrap: (spawn) => async (id, options) => {
+        const first = fake.geese[0];
+        if (first && !first.killed) throw new Error("Too many processes");
+        return spawn(id, options);
+      },
+    });
+    await sessions.deliver("a", "one", 1);
+    limit = 200000;
+    await expect(sessions.deliver("b", "other", 2)).resolves.toMatchObject({
+      ok: false,
+    });
+    await sessions.reset("a", "new");
+    await vi.waitFor(() => expect(fake.geese[0]?.closed).toHaveLength(1));
+    await flush(30);
+    await expect(sessions.deliver("c", "more", 3)).resolves.toMatchObject({
+      ok: true,
+    });
+    expect(fake.geese[0]?.killed).toBe(true);
+    expect(fake.geese[1]?.env.GOOSE_AUTO_COMPACT_TOKEN_LIMIT).toBe("200000");
+  });
+
   it("keeps a goose whose session is still opening when the compaction threshold changes", async () => {
     let limit: number | undefined;
     let release!: () => void;

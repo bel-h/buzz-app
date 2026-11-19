@@ -33,8 +33,6 @@ export class AgentProcess {
   /** Every start whose process has not exited, even when its start failed
    * or a newer one replaced it, so `shutdown` stops each. */
   private readonly starts = new Set<Start>();
-  /** The token limit `current` started with: goose reads it at start. */
-  private limit: number | undefined;
   constructor(
     private readonly host: GooseHost,
     /** Starts a session's MCP server for its agent's tools. */
@@ -57,9 +55,9 @@ export class AgentProcess {
   ): Promise<GooseProcess> {
     this.protection?.assertAvailable();
     const limit = this.compactAt();
-    if (this.current && limit === this.limit) return this.current.ready;
-    this.limit = limit;
-    const old = this.current?.process;
+    if (this.current && limit === this.current.limit) return this.current.ready;
+    const previous = this.current;
+    const old = previous?.process;
     const stopped =
       old && drained(old)
         ? old
@@ -69,6 +67,8 @@ export class AgentProcess {
         : undefined;
     const agent = this.agent();
     const start: Start = {
+      limit,
+      previous,
       ready: (async () => {
         await stopped;
         const bridge =
@@ -115,10 +115,18 @@ export class AgentProcess {
     };
     const forget = () => {
       this.starts.delete(start);
-      if (this.current === start) this.current = undefined;
+      if (this.current !== start) return;
+      // One that failed leaves the latest it replaced still running current,
+      // so the next start retires it once drained.
+      let kept = start.previous;
+      while (kept && !this.starts.has(kept)) kept = kept.previous;
+      this.current = kept;
     };
     void start.ready.then(
-      (goose) => goose.exited.then(forget),
+      (goose) => {
+        delete start.previous;
+        return goose.exited.then(forget);
+      },
       () => (start.process ? start.process.exited.then(forget) : forget()),
     );
     this.starts.add(start);
@@ -143,8 +151,14 @@ export class AgentProcess {
   }
 }
 
-/** One start of `goose-acp`, and its process once spawned. */
-type Start = { ready: Promise<GooseProcess>; process?: GooseProcess };
+/** One start of `goose-acp`, the token limit goose read at it, and its
+ * process once spawned. Until it succeeds, it keeps the start it replaced. */
+type Start = {
+  ready: Promise<GooseProcess>;
+  limit: number | undefined;
+  previous?: Start | undefined;
+  process?: GooseProcess;
+};
 
 export type SessionsOptions = Omit<AcpSessionsOptions, "label">;
 
