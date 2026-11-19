@@ -296,8 +296,8 @@ test.describe("Share access profiles", () => {
     await page.goto(app.origin);
     await newChat(page);
     await page
-      .getByRole("navigation", { name: "Solo conversations" })
-      .locator(`[data-solo-channel-id="${id}"]`)
+      .getByRole("navigation", { name: "Subscribed channels" })
+      .locator(`[data-solo-destination-id="${id}"]`)
       .click();
     const conversation = page.getByRole("article", { name: "Conversation" });
     const share = conversation.getByRole("button", {
@@ -421,8 +421,8 @@ test.describe("Share access profiles", () => {
     await page.goto(app.origin);
     await newChat(page);
     await page
-      .getByRole("navigation", { name: "Solo conversations" })
-      .locator(`[data-solo-channel-id="${id}"]`)
+      .getByRole("navigation", { name: "Subscribed channels" })
+      .locator(`[data-solo-destination-id="${id}"]`)
       .click();
     const conversation = page.getByRole("article", { name: "Conversation" });
     const share = conversation.getByRole("button", {
@@ -510,8 +510,8 @@ test.describe("Share access profiles", () => {
     await page.goto(app.origin);
     await newChat(page);
     await page
-      .getByRole("navigation", { name: "Solo conversations" })
-      .locator(`[data-solo-channel-id="${id}"]`)
+      .getByRole("navigation", { name: "Subscribed channels" })
+      .locator(`[data-solo-destination-id="${id}"]`)
       .click();
     const conversation = page.getByRole("article", { name: "Conversation" });
     const share = conversation.getByRole("button", {
@@ -602,7 +602,7 @@ test.describe("Share access profiles", () => {
     await page.goto(app.origin);
     await newChat(page);
     const sidebar = page.getByRole("navigation", {
-      name: "Solo conversations",
+      name: "Subscribed channels",
     });
     const conversation = page.getByRole("article", { name: "Conversation" });
     const share = conversation.getByRole("button", {
@@ -614,14 +614,14 @@ test.describe("Share access profiles", () => {
       exact: true,
     });
     // Beta: the viewer's profile, opened from a message's author.
-    await sidebar.locator(`[data-solo-channel-id="${other}"]`).click();
+    await sidebar.locator(`[data-solo-destination-id="${other}"]`).click();
     await conversation
       .getByRole("button", { name: "View Fixture Reader profile", exact: true })
       .first()
       .click();
     await expect(profile).toBeFocused();
     // Alpha: Sam's profile, opened from Share access.
-    await sidebar.locator(`[data-solo-channel-id="${id}"]`).click();
+    await sidebar.locator(`[data-solo-destination-id="${id}"]`).click();
     await share.click();
     await page
       .getByRole("dialog", { name: "Share access", exact: true })
@@ -657,7 +657,7 @@ test.describe("Share access profiles", () => {
     // Alpha: Sam's profile, opened from his message's author. Share access
     // later opens Sam's profile again, directly or through Scout's owner, but
     // never the visit Back restores.
-    await sidebar.locator(`[data-solo-channel-id="${id}"]`).click();
+    await sidebar.locator(`[data-solo-destination-id="${id}"]`).click();
     const chat = page.getByRole("region", { name: "Chat Alpha", exact: true });
     await expect(chat).toBeVisible();
     const message = finalizeEvent(
