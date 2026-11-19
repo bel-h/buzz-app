@@ -1796,6 +1796,9 @@ tab, asks **Discard changes?** first; **Keep editing** keeps them.
   account cannot use decisions), your TypeSafe key answers there, and the row
   says so. A Builderlab account without decisions access says to contact your
   account administrator.
+  Choose **Off** for a community to turn decisions off there, for example
+  where they are billed and you don't want to use them: no provider is asked,
+  and TypeSafe does not answer in its place.
 - In **Settings → Decisions API**, TypeSafe’s saved API key stays masked. Its
   chevron menu offers **Replace / Remove**. Replacement starts blank and masked,
   with inline **Cancel / Save** controls. **Save** stays disabled until you enter

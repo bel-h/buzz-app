@@ -3585,7 +3585,9 @@ that were not asked are dropped.
 Settings > Decisions API lists each joined community with a menu of the
 providers `offered` there, and below it the chosen provider's `Settings` for
 that community, noting the other communities that share its setup. The user
-chooses a provider for each community. Choices are kept on this device, by the
+chooses a provider for each community, or Off, which asks no provider there
+and lets none answer in its place: `backend` is undefined and `status`
+`unavailable`. Choices are kept on this device, by the
 community's relay host. Each request is routed in its `community`. Until the
 user chooses for that community, the first default provider that is on and can
 answer there (`ready` or `unconfirmed`) does: Builderlab
