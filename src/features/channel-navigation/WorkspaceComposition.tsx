@@ -11,7 +11,10 @@ import {
 } from "../../shared/design-system/ui/NavigationItem";
 import { IconButton } from "../../shared/design-system/ui/IconButton";
 import { MenuItem } from "../../shared/design-system/ui/Menu";
-import { PencilSimpleIcon } from "../../shared/design-system/icons";
+import {
+  Cube3dSphereIcon,
+  PencilSimpleIcon,
+} from "../../shared/design-system/icons";
 import { SoloDisclosure } from "./SoloDisclosure";
 import type { SoloWorkspaceProps } from "./solo-navigation-contract";
 import styles from "./WorkspaceComposition.module.css";
@@ -79,6 +82,7 @@ export function RegionWorkspace(props: SoloWorkspaceProps) {
       {disclosure}
       <NavigationItem
         label={title}
+        icon={<Cube3dSphereIcon size={14} aria-hidden="true" />}
         selected={!!props.selected}
         data-solo-workspace-id={workspace.id}
         onClick={() => props.onSelect?.()}
