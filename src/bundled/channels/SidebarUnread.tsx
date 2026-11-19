@@ -176,8 +176,16 @@ export function SidebarUnread({
           upper.dataset.besideAction = "";
           if (lowerVisible) {
             cue.dataset.besideAction = "";
-            cue.dataset.shareActionRow = "";
-            upper.dataset.shareActionRow = "";
+            cue.dataset.shareActionRow = "split";
+            upper.dataset.shareActionRow = "split";
+            const clippedCount = [cue, upper].some((edge) => {
+              const label = edge.querySelector(`.${styles.unreadEdgeLabel}`);
+              return label && label.scrollWidth > label.clientWidth;
+            });
+            if (clippedCount) {
+              cue.dataset.shareActionRow = "stacked";
+              upper.dataset.shareActionRow = "stacked";
+            }
           }
         }
       });

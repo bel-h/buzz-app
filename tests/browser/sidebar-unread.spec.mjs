@@ -883,6 +883,18 @@ test.describe("DM preview wiring", () => {
       await scrollRowAbove(page, "beta");
       await expect(above).toHaveAccessibleName("1 unread conversation above");
       await expect(below).toHaveAccessibleName("6 unread conversations below");
+      for (const [control, count] of [
+        [above, 1],
+        [below, 6],
+      ]) {
+        const label = control.getByText(`${count} unread`, { exact: true });
+        await expect(label).toBeVisible();
+        await expect
+          .poll(() =>
+            label.evaluate((label) => label.scrollWidth - label.clientWidth),
+          )
+          .toBeLessThanOrEqual(1);
+      }
       for (const control of [above, below, action]) {
         await expect(control).toBeInViewport({ ratio: 1 });
         await control.click({ trial: true });
