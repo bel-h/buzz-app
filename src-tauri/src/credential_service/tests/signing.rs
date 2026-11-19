@@ -702,9 +702,40 @@ async fn the_wait_after_denies_starts_over_after_a_quiet_ten_minutes() {
     let token = paired(&fixture).await;
     denied_wait(&fixture, &token).await;
     skip(31).await;
-    assert!(denied_wait(&fixture, &token).await > 30);
-    skip(600).await;
+    let wait = denied_wait(&fixture, &token).await;
+    assert!(wait > 30);
+    skip(wait + 599).await;
+    assert!(denied_wait(&fixture, &token).await > 60);
+    skip(121 + 600).await;
     assert!(denied_wait(&fixture, &token).await <= 30);
+}
+
+/// Lets one ask from `token` go unanswered and gives how long it must then
+/// wait.
+async fn unanswered_wait(fixture: &Fixture, token: &str) -> u64 {
+    tokio::time::pause();
+    let reply = ask(fixture, token, "sign_event", &[&leave()]).await;
+    assert_eq!(error(&reply).1, "approval_required");
+    tokio::time::resume();
+    let reply = ask(fixture, token, "sign_event", &[&leave()]).await;
+    assert_eq!(error(&reply).1, "rate_limited");
+    reply.1["retry_after"].as_u64().unwrap()
+}
+
+#[tokio::test]
+async fn the_wait_after_unanswered_requests_stops_growing_at_eight_minutes() {
+    let fixture = fixture();
+    let token = paired(&fixture).await;
+    let mut waits = Vec::new();
+    for _ in 0..6 {
+        let wait = unanswered_wait(&fixture, &token).await;
+        waits.push(wait);
+        skip(wait + 1).await;
+    }
+    let ceilings = [30, 60, 120, 240, 480, 480];
+    for (wait, ceiling) in waits.iter().zip(ceilings) {
+        assert!(*wait > ceiling / 2 && *wait <= ceiling, "{waits:?}");
+    }
 }
 
 #[tokio::test]

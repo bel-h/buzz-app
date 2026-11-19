@@ -140,7 +140,7 @@ struct State {
     /// Until when a pairing that was declined, or not answered, may not ask.
     sign_cooldowns: HashMap<String, Instant>,
     /// Requests from each pairing that ended with no yes since its last yes,
-    /// and when the last one did.
+    /// and when the wait after the last one ends.
     sign_strikes: HashMap<String, (u32, Instant)>,
     /// The NIP-FI retirements already revoked for (see [`Pairings::follow`]).
     retirements: u64,

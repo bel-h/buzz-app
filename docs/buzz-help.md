@@ -363,8 +363,8 @@ approvals are only ever allowed once. Buzz asks only while it is open and you
 are signed in. A request that waits 2 minutes with no answer is refused. A
 tool waits 30 seconds before it can ask again after you deny it, nobody
 answers, or it drops its request. Each one in a row doubles the wait, up to 8
-minutes. The count starts over when you allow a request, or after 10 minutes
-without one. Reloading Buzz or removing the community ends what you allowed.
+minutes. The count starts over when you allow a request, or when 10 minutes
+pass after a wait ends without one. Reloading Buzz or removing the community ends what you allowed.
 Agents that Buzz runs are never asked for these actions: do those in Buzz.
 **Settings → Security** lists paired tools and, under each one, the actions
 it is allowed for now and until when; **Stop** ends one early. **Revoke** asks
