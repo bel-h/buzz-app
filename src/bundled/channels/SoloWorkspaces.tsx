@@ -241,7 +241,7 @@ export function SoloWorkspaces({
         : rowFocus;
     document
       .querySelector<HTMLElement>(
-        `[data-solo-menu-id="${target}"]:not([inert] *) button`,
+        `[data-solo-menu-id="${target}"]:not([inert] *) button:not([data-solo-disclosure])`,
       )
       ?.focus({ preventScroll: true });
     setRowFocus(undefined);
@@ -312,7 +312,7 @@ export function SoloWorkspaces({
     if (!orderFocus) return;
     document
       .querySelector<HTMLElement>(
-        `[data-solo-menu-id="project-${CSS.escape(orderFocus)}"]:not([inert] *) button`,
+        `[data-solo-menu-id="project-${CSS.escape(orderFocus)}"]:not([inert] *) button:not([data-solo-disclosure])`,
       )
       ?.focus({ preventScroll: true });
     setOrderFocus(undefined);
@@ -722,6 +722,9 @@ export function SoloWorkspaces({
           <NavigationSectionHeading
             disclosure
             revealActions
+            reserveActionSpace={
+              accessory != null && typeof accessory !== "boolean"
+            }
             actions={
               <>
                 {overflow}
@@ -749,7 +752,7 @@ export function SoloWorkspaces({
             >
               {primary}
             </WorkspaceDragHandle>
-            {accessory != null && (
+            {accessory != null && typeof accessory !== "boolean" && (
               // Keep the accessory above the primary button's full-header hit area.
               <div
                 className="relative flex shrink-0 items-center"
@@ -1462,7 +1465,7 @@ function ChatActionsMenu({
     );
     return (
       row?.querySelector<HTMLElement>("[data-solo-destination-id]") ??
-      row?.querySelector<HTMLElement>("button") ??
+      row?.querySelector<HTMLElement>("button:not([data-solo-disclosure])") ??
       false
     );
   };

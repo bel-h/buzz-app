@@ -1661,6 +1661,10 @@
     display: none;
   }
 
+  .navigation-section-heading-actions[data-reserve-space] {
+    margin-inline-start: auto;
+  }
+
   /* A disclosure heading's trigger spans the label slot, so the inset is its
      hit area and focus ring; the actions keep a small trailing inset. */
   .navigation-section-heading[data-disclosure] {
@@ -1743,7 +1747,9 @@
     opacity: 0;
   }
 
-  .navigation-section-heading-actions[data-navigation-reveal] {
+  .navigation-section-heading-actions[data-navigation-reveal]:where(
+    :not([data-reserve-space])
+  ) {
     max-width: 0;
     overflow: hidden;
   }

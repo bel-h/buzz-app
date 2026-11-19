@@ -87,6 +87,10 @@ export function RegionChannelGroup(props: SoloChannelGroupProps) {
         }
       : undefined;
   const Icon = channelIcon(channel);
+  const accessory =
+    typeof props.headerAccessory === "boolean"
+      ? undefined
+      : props.headerAccessory;
   const openDetails = async () => {
     if (!eligible(current())) return;
     const opening = navigator.open(conversationTarget(scope, channel.id), {
@@ -117,6 +121,7 @@ export function RegionChannelGroup(props: SoloChannelGroupProps) {
         <NavigationSectionHeading
           disclosure
           revealActions
+          reserveActionSpace={accessory != null}
           actions={
             <>
               {newTask && (
@@ -144,15 +149,6 @@ export function RegionChannelGroup(props: SoloChannelGroupProps) {
           }
         >
           <div className={styles.heading}>
-            <NavigationItem
-              label={channel.name}
-              title={channel.name}
-              icon={<Icon size={14} />}
-              selected={!!props.selected}
-              onClick={() => {
-                if (eligible(current())) props.onSelect();
-              }}
-            />
             <SoloDisclosure
               label={props.disclosureLabel}
               summary=""
@@ -162,11 +158,18 @@ export function RegionChannelGroup(props: SoloChannelGroupProps) {
                 if (eligible(current())) props.onToggle();
               }}
             />
+            <NavigationItem
+              label={channel.name}
+              title={channel.name}
+              icon={<Icon size={14} />}
+              selected={!!props.selected}
+              onClick={() => {
+                if (eligible(current())) props.onSelect();
+              }}
+            />
           </div>
-          {props.headerAccessory != null && (
-            <div className="flex shrink-0 items-center">
-              {props.headerAccessory}
-            </div>
+          {accessory != null && (
+            <div className="flex shrink-0 items-center">{accessory}</div>
           )}
         </NavigationSectionHeading>
       </NavigationCard>

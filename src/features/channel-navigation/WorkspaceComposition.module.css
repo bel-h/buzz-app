@@ -5,7 +5,7 @@
   min-width: 0;
   gap: 0;
 }
-.heading > :first-child {
+.heading > [data-solo-workspace-id] {
   flex: 0 1 auto;
   width: auto;
   min-width: 0;
@@ -13,14 +13,14 @@
   margin: 0;
   overflow: visible;
 }
-/* The positioned workspace header's blank space selects the workspace too.
-   The later disclosure and actions stay above it and keep their own targets. */
-.heading > :first-child::after {
+/* The positioned workspace header's blank space selects the workspace too. */
+.heading > [data-solo-workspace-id]::after {
   content: "";
   position: absolute;
   inset: 0;
 }
-.heading > :not(:first-child) {
+.heading > [data-solo-disclosure] {
   position: relative;
   flex-shrink: 0;
+  z-index: 1;
 }

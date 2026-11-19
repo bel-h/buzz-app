@@ -76,13 +76,13 @@ export function RegionWorkspace(props: SoloWorkspaceProps) {
   );
   const primary = props.id ? (
     <div className={styles.heading}>
+      {disclosure}
       <NavigationItem
         label={title}
         selected={!!props.selected}
         data-solo-workspace-id={workspace.id}
         onClick={() => props.onSelect?.()}
       />
-      {disclosure}
     </div>
   ) : (
     disclosure

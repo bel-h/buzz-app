@@ -348,6 +348,9 @@ appTest.describe("Solo header accessories", () => {
       );
       await openPage(page, "Messages");
       const sidebar = page.getByRole("complementary", { name: "Sidebar" });
+      const resize = page.getByRole("separator", { name: "Resize sidebar" });
+      await resize.dblclick();
+      await expect(resize).toHaveAttribute("aria-valuenow", "260");
       const headers = [
         {
           group: sidebar.locator('[data-solo-workspace="work"]'),
@@ -376,12 +379,46 @@ appTest.describe("Solo header accessories", () => {
         for (const { group, title, accessory, task } of headers) {
           const disclosure = group.getByRole("button", { name: /tasks/i });
           const action = group.getByRole("button", { name: accessory });
+          const heading = group.getByRole("button", {
+            name: title,
+            exact: true,
+          });
+          const nativeMenu = group.getByRole("button", {
+            name: `Actions for ${title}`,
+            exact: true,
+          });
+          const actionPositions = async () =>
+            Promise.all(
+              [action, nativeMenu].map(
+                async (button) => (await button.boundingBox())?.x,
+              ),
+            );
           await expect(disclosure).toHaveAttribute("aria-expanded", "false");
           await expect(group.getByRole("button", { name: task })).toBeHidden();
-          await disclosure.focus();
+          await action.scrollIntoViewIfNeeded();
+          await page.mouse.move(0, 0);
+          await resize.focus();
+          await expect(nativeMenu.locator("..")).toHaveCSS("opacity", "0");
+          const restingPositions = await actionPositions();
+          expect(restingPositions).toEqual([
+            expect.any(Number),
+            expect.any(Number),
+          ]);
+          expect((await disclosure.boundingBox())?.x).toBeLessThan(
+            (await heading.boundingBox())?.x,
+          );
+          await heading.hover();
+          await expect(nativeMenu.locator("..")).toHaveCSS("opacity", "1");
+          await expect.poll(actionPositions).toEqual(restingPositions);
+
+          await page.mouse.move(0, 0);
+          await action.focus();
+          await page.keyboard.press("Shift+Tab");
+          await expect(action).not.toBeFocused();
           await page.keyboard.press("Tab");
           await expect(action).toBeFocused();
           await expect(action).toHaveCSS("outline-style", "solid");
+          await expect.poll(actionPositions).toEqual(restingPositions);
           await page.keyboard.press("Shift+F10");
           await expect(page.getByRole("menu")).toHaveCount(0);
           await page.keyboard.press("Enter");
@@ -389,10 +426,13 @@ appTest.describe("Solo header accessories", () => {
           await action.click();
           await expect(action).toHaveAttribute("aria-pressed", "false");
           await expect(disclosure).toHaveAttribute("aria-expanded", "false");
-          await expect(
-            group.getByRole("button", { name: title, exact: true }),
-          ).not.toHaveAttribute("aria-current");
+          await expect(heading).not.toHaveAttribute("aria-current");
           await expect(page.getByRole("menu")).toHaveCount(0);
+          await disclosure.press("Enter");
+          await expect(disclosure).toHaveAttribute("aria-expanded", "true");
+          await expect.poll(actionPositions).toEqual(restingPositions);
+          await disclosure.press("Enter");
+          await expect(disclosure).toHaveAttribute("aria-expanded", "false");
         }
       }
       await expect(

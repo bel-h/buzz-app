@@ -34,18 +34,20 @@ export function NavigationSection({
  * focus ring. Quiet parts, `revealActions` or any descendant marked
  * `data-navigation-reveal` such as a chevron, appear on hover, keyboard focus,
  * while a menu from the heading is open or one of them has focus, and always
- * on touch. Hidden
- * actions take no width, so the label uses that space until they appear.
+ * on touch. A heading with an accessory keeps the action space so its controls
+ * stay in place. Other headings give that space to the label until actions appear.
  */
 export function NavigationSectionHeading({
   actions,
   disclosure = false,
   revealActions = false,
+  reserveActionSpace = false,
   children,
 }: {
   actions?: ReactNode;
   disclosure?: boolean;
   revealActions?: boolean;
+  reserveActionSpace?: boolean;
   children?: ReactNode;
 }) {
   return (
@@ -58,6 +60,7 @@ export function NavigationSectionHeading({
         <div
           className="navigation-section-heading-actions"
           data-navigation-reveal={revealActions || undefined}
+          data-reserve-space={reserveActionSpace || undefined}
         >
           {actions}
         </div>

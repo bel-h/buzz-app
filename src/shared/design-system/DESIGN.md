@@ -535,8 +535,10 @@ row that must work at every sidebar width cannot depend on a fixed gap. Use
 `revealActions` or `data-navigation-reveal` for quiet parts such as the chevron.
 Revealed parts show on hover, keyboard focus, an open heading menu or while
 one of them has focus, and always show on touch; a focused control is never
-invisible. Hidden actions take no width, like a hidden auto layout
-child, so a long label keeps its words at large text sizes and narrow widths. When a host already names a list, as
+invisible. Hidden actions take no width, so a long label keeps its words at
+large text sizes and narrow widths. A heading with an accessory keeps space
+for its quiet actions beside the accessory so all controls stay in place.
+When a host already names a list, as
 the sidebar's Team and Solo tabs do, omit its heading rather than hiding or
 overlaying it; any actions it still needs take a headingless heading row.
 Top-bar pills and picker options are not sidebar rows and keep their own recipes.

@@ -158,7 +158,7 @@ focus, hidden sections, and relay signing. DOM checks do not establish those fac
 Check `ui.ChannelGroup` before using it. Older hosts omit this optional component.
 It frames a joined stream or forum channel with its current name, icon, native
 channel menu, and details entry. Sources supply selection, disclosure state and
-label, and their task content. The title calls `onSelect`; only the caret calls
+label, and their task content. The title calls `onSelect`; the caret to its left calls
 `onToggle`. `controls` identifies the body, which stays mounted while collapsed.
 Missing channels and channels without the viewer's membership render nothing.
 
@@ -208,7 +208,8 @@ never part of the signed message.
 
 `ui.Workspace` and `ui.ChannelGroup` accept an optional
 `headerAccessory: ReactNode` beside their native controls. The accessory
-stays visible when the body is collapsed. It can supply a compact, accessible
+stays in place when native actions appear or the body collapses.
+It can supply a compact, accessible
 control with its own activation, independent of selection, disclosure and
 native actions. The region supplies its accessible name and behavior.
 Hosts that predate this prop ignore it.
