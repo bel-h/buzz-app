@@ -203,3 +203,12 @@ enforces authorization and record capacity.
 Regions own their task filing; they do not add an ordinary Solo assignment for
 each task. Workspace selection in a task draft is personal metadata and is
 never part of the signed message.
+
+## Header accessories
+
+`ui.Workspace` and `ui.ChannelGroup` accept an optional
+`headerAccessory: ReactNode` beside their native controls. The accessory
+stays visible when the body is collapsed. It can supply a compact, accessible
+control with its own activation, independent of selection, disclosure and
+native actions. The region supplies its accessible name and behavior.
+Hosts that predate this prop ignore it.

@@ -327,6 +327,91 @@ appTest.describe("workspace composition", () => {
   );
 });
 
+appTest.describe("Solo header accessories", () => {
+  appTest.use({
+    productionBroker: true,
+    savedSidebar: [{ id: "other", name: "Other", order: 1 }],
+    channelIds: ["alpha", "beta", "gamma"],
+    channelNames: { alpha: "Alpha", beta: "Beta", gamma: "Gamma" },
+    soloChannels: ["beta"],
+    ownSoloChannels: ["beta"],
+    historyCounts: { alpha: 0, beta: 0, gamma: 0 },
+  });
+
+  // Real hit testing catches an accessory covered by the workspace selection
+  // target. Tab order and visible focus also depend on the rendered heading.
+  appTest(
+    "keeps optional controls usable in collapsed headings",
+    async ({ page, app }) => {
+      await page.goto(
+        `${app.origin}/?solo-region-fixture&compose-workspaces&workspace-hit-targets&header-accessories`,
+      );
+      await openPage(page, "Messages");
+      const sidebar = page.getByRole("complementary", { name: "Sidebar" });
+      const headers = [
+        {
+          group: sidebar.locator('[data-solo-workspace="work"]'),
+          title: "Work",
+          accessory: "Mark Work workspace",
+          task: "Workspace task",
+        },
+        {
+          group: sidebar.locator('[data-solo-channel-group="alpha"]'),
+          title: "Alpha",
+          accessory: "Mark Alpha channel",
+          task: "Channel task",
+        },
+      ];
+
+      const workspaceDisclosure = headers[0].group.getByRole("button", {
+        name: "Hide tasks and chats in Work",
+      });
+      await workspaceDisclosure.click();
+      for (const theme of ["light", "dark"]) {
+        await page.emulateMedia({ colorScheme: theme });
+        await expect(page.locator("html")).toHaveAttribute(
+          "data-color-mode",
+          theme,
+        );
+        for (const { group, title, accessory, task } of headers) {
+          const disclosure = group.getByRole("button", { name: /tasks/i });
+          const action = group.getByRole("button", { name: accessory });
+          await expect(disclosure).toHaveAttribute("aria-expanded", "false");
+          await expect(group.getByRole("button", { name: task })).toBeHidden();
+          await disclosure.focus();
+          await page.keyboard.press("Tab");
+          await expect(action).toBeFocused();
+          await expect(action).toHaveCSS("outline-style", "solid");
+          await page.keyboard.press("Shift+F10");
+          await expect(page.getByRole("menu")).toHaveCount(0);
+          await page.keyboard.press("Enter");
+          await expect(action).toHaveAttribute("aria-pressed", "true");
+          await action.click();
+          await expect(action).toHaveAttribute("aria-pressed", "false");
+          await expect(disclosure).toHaveAttribute("aria-expanded", "false");
+          await expect(
+            group.getByRole("button", { name: title, exact: true }),
+          ).not.toHaveAttribute("aria-current");
+          await expect(page.getByRole("menu")).toHaveCount(0);
+        }
+      }
+      await expect(
+        sidebar
+          .locator('[data-solo-workspace="other"]')
+          .getByRole("button", { name: "Other", exact: true }),
+      ).toBeVisible();
+      await expect(
+        sidebar
+          .locator('[data-solo-channel-group="gamma"]')
+          .getByRole("button", { name: "Gamma", exact: true }),
+      ).toBeVisible();
+      await expect(sidebar.getByRole("button", { name: /^Mark / })).toHaveCount(
+        2,
+      );
+    },
+  );
+});
+
 appTest.describe("Focus", () => {
   appTest.use({
     enabledPlugins: ["buzz.focus"],

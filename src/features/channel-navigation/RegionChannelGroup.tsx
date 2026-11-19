@@ -163,6 +163,11 @@ export function RegionChannelGroup(props: SoloChannelGroupProps) {
               }}
             />
           </div>
+          {props.headerAccessory != null && (
+            <div className="flex shrink-0 items-center">
+              {props.headerAccessory}
+            </div>
+          )}
         </NavigationSectionHeading>
       </NavigationCard>
     </div>

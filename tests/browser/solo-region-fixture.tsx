@@ -1,10 +1,26 @@
 import type { BundledPlugin } from "../../src/plugins/manager";
 import { useState, useSyncExternalStore } from "react";
+import { StarFilledIcon } from "../../src/shared/design-system/icons";
+import { IconButton } from "../../src/shared/design-system/ui/IconButton";
 import type {
   SoloRegionBinding,
   SoloRegionProps,
   SoloRegionSnapshot,
 } from "../../src/features/channel-navigation/solo-navigation-contract";
+
+function HeaderAccessory({ label }: { label: string }) {
+  const [marked, setMarked] = useState(false);
+  return (
+    <IconButton
+      size="compact"
+      variant={marked ? "tint" : "ghost"}
+      aria-label={label}
+      aria-pressed={marked}
+      icon={<StarFilledIcon size={15} />}
+      onClick={() => setMarked(!marked)}
+    />
+  );
+}
 
 declare global {
   interface Window {
@@ -41,6 +57,9 @@ export const soloRegionFixture: BundledPlugin = {
       const hitTargets = new URL(location.href).searchParams.has(
         "workspace-hit-targets",
       );
+      const headerAccessories = new URL(location.href).searchParams.has(
+        "header-accessories",
+      );
       function Workspaces({
         ui,
         binding,
@@ -58,10 +77,42 @@ export const soloRegionFixture: BundledPlugin = {
               selected={selected === workspace.id}
               onSelect={() => select(workspace.id)}
               onNewTask={() => select(undefined)}
+              headerAccessory={
+                headerAccessories && workspace.id === "work" ? (
+                  <HeaderAccessory label={`Mark ${workspace.name} workspace`} />
+                ) : undefined
+              }
             >
               <button type="button">Workspace task</button>
             </ui.Workspace>
           ) : null,
+        );
+      }
+      function ChannelGroup({
+        ui,
+        id,
+      }: Pick<SoloRegionProps, "ui"> & { id: string }) {
+        const [expanded, setExpanded] = useState(false);
+        const [selected, select] = useState(false);
+        if (!ui.ChannelGroup) return null;
+        return (
+          <ui.ChannelGroup
+            channelId={id}
+            selected={selected}
+            onSelect={() => select(true)}
+            expanded={expanded}
+            controls={`fixture-group-${id}`}
+            disclosureLabel={`Toggle ${id} tasks`}
+            onToggle={() => setExpanded(!expanded)}
+            onNewTask={() => select(false)}
+            headerAccessory={
+              id === "alpha" ? (
+                <HeaderAccessory label="Mark Alpha channel" />
+              ) : undefined
+            }
+          >
+            <button type="button">Channel task</button>
+          </ui.ChannelGroup>
         );
       }
       const composing = new URL(location.href).searchParams.has(
@@ -101,6 +152,12 @@ export const soloRegionFixture: BundledPlugin = {
           <>
             {stateFixture && <SavedState state={state} />}
             {hitTargets && <Workspaces ui={ui} binding={binding} />}
+            {headerAccessories && (
+              <>
+                <ChannelGroup ui={ui} id="alpha" />
+                <ChannelGroup ui={ui} id="gamma" />
+              </>
+            )}
             {[...live]
               .filter((id) => !removed.includes(id))
               .map((id) => (

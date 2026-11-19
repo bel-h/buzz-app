@@ -139,6 +139,8 @@ export type SoloChannelGroupProps = Readonly<{
   onToggle(): void;
   /** Offered only while the host permits starting a chat from this channel. */
   onNewTask?(): void;
+  /** Independent header content that stays visible when collapsed. */
+  headerAccessory?: ReactNode;
   children?: ReactNode;
 }>;
 export type SoloWorkspaceProps = Readonly<{
@@ -146,6 +148,8 @@ export type SoloWorkspaceProps = Readonly<{
   selected?: boolean;
   onSelect?(): void;
   onNewTask?(): void;
+  /** Independent header content that stays visible when collapsed. */
+  headerAccessory?: ReactNode;
   /** Reveal a moved or externally opened child; selection alone does not expand. */
   reveal?: string;
   dropTarget?: boolean;

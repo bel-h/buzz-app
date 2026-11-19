@@ -635,6 +635,7 @@ export function SoloWorkspaces({
       primary: ReactNode,
       trailing?: ReactNode,
       actions?: ReactNode,
+      accessory?: ReactNode,
     ) => (
       <ChatActionsMenu
         id={`project-${project.id}`}
@@ -748,6 +749,15 @@ export function SoloWorkspaces({
             >
               {primary}
             </WorkspaceDragHandle>
+            {accessory != null && (
+              // Keep the accessory above the primary button's full-header hit area.
+              <div
+                className="relative flex shrink-0 items-center"
+                data-solo-workspace-accessory=""
+              >
+                {accessory}
+              </div>
+            )}
           </NavigationSectionHeading>
         )}
       </ChatActionsMenu>
@@ -1443,6 +1453,9 @@ function ChatActionsMenu({
 }) {
   const [open, setOpen] = useState(false);
   const [anchor, setAnchor] = useState<HTMLElement>();
+  const inAccessory = (target: EventTarget) =>
+    target instanceof Element &&
+    target.closest("[data-solo-workspace-accessory]");
   const restoreFocus = () => {
     const row = document.querySelector(
       `[data-solo-menu-id="${id}"]:not([inert] *)`,
@@ -1495,7 +1508,14 @@ function ChatActionsMenu({
     >
       <ContextMenuTrigger
         render={<div className={className} data-solo-menu-id={id} />}
+        onContextMenu={(event) => {
+          if (inAccessory(event.target)) event.preventBaseUIHandler();
+        }}
+        onTouchStart={(event) => {
+          if (inAccessory(event.target)) event.preventBaseUIHandler();
+        }}
         onKeyDown={(event) => {
+          if (inAccessory(event.target)) return;
           if (
             event.key === "ContextMenu" ||
             (event.shiftKey && event.key === "F10")
