@@ -888,7 +888,11 @@ export function SearchChoices({
               if (event.key === "ArrowDown" || event.key === "ArrowUp") return;
               // Control's letter keys step after the person's keys, in place
               // of the text field's own Emacs keys. Group keys only take
-              // over while there are groups to show.
+              // over while there are groups to show. An app shortcut that
+              // runs inside search, such as one the person moved to one of
+              // these, comes first: the window's dispatcher sees the key
+              // after this field, so the step waits there and is skipped
+              // once a shortcut has claimed the key.
               const control =
                 native.ctrlKey &&
                 !native.metaKey &&
@@ -897,15 +901,27 @@ export function SearchChoices({
                 !native.getModifierState("AltGraph")
                   ? CONTROL_STEPS.get(event.key.toLowerCase())
                   : undefined;
-              if (control?.[0] === "result") {
-                event.preventDefault();
-                restore.current = 0;
-                highlight.move(control[1]);
-                return;
-              }
-              if (control && peek?.ranked && tabs.length) {
-                event.preventDefault();
-                stepScope(control[1]);
+              const host = event.currentTarget.ownerDocument.defaultView;
+              if (
+                host &&
+                control &&
+                (control[0] === "result" || (peek?.ranked && tabs.length))
+              ) {
+                const [kind, forward] = control;
+                const step = (later: Event) => {
+                  if (later !== native) return;
+                  host.removeEventListener("keydown", step);
+                  if (native.defaultPrevented) return;
+                  native.preventDefault();
+                  if (kind === "group") return void stepScope(forward);
+                  restore.current = 0;
+                  highlight.move(forward);
+                };
+                host.addEventListener("keydown", step);
+                // A key stopped before the window edits the text as before.
+                host.setTimeout(() =>
+                  host.removeEventListener("keydown", step),
+                );
                 return;
               }
             }
