@@ -788,8 +788,10 @@ it("lists invite links and revokes one by row or by pasted link", async () => {
 
   const [rowRevoke] = screen.getAllByRole("button", { name: /^Revoke Link/ });
   await user.click(rowRevoke as HTMLElement);
+  const dialog = await screen.findByRole("alertdialog");
+  expect(dialog).toHaveTextContent(/Link 0b9c8f7e by .+, created /);
   await user.click(
-    within(await screen.findByRole("alertdialog")).getByRole("button", {
+    within(dialog).getByRole("button", {
       name: "Revoke",
     }),
   );
@@ -802,9 +804,10 @@ it("lists invite links and revokes one by row or by pasted link", async () => {
 
   const field = screen.getByRole("textbox", { name: "Revoke a link" });
   await user.type(field, "https://other.example/invite/abc");
-  expect(screen.getByRole("alert")).toHaveTextContent(
+  expect(field).toHaveAccessibleDescription(
     "This invite link is for a different community.",
   );
+  expect(field).toHaveAttribute("aria-invalid", "true");
   await user.clear(field);
   await user.type(field, "https://primary.example/invite/abc");
   await user.click(screen.getByRole("button", { name: "Revoke" }));

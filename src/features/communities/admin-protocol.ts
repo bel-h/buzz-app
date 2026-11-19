@@ -5,6 +5,7 @@ const MIN_TTL = 60;
 const MAX_TTL = 30 * 24 * 60 * 60;
 const MAX_USES = 10_000;
 const ROLES = ["admin", "member"];
+const UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
 const KINDS: Record<string, number> = { add: 9030, remove: 9031, role: 9032 };
 
 /** Normalized `POST /api/invites` body; unknown fields are dropped. */
@@ -47,7 +48,8 @@ export function inviteListPath(value: unknown) {
   if (
     Object.keys(rest).length ||
     (before !== undefined &&
-      (typeof before !== "string" || !/^\d{1,20}_[0-9a-f-]{36}$/.test(before)))
+      (typeof before !== "string" ||
+        !new RegExp(`^\\d{1,20}_${UUID}$`).test(before)))
   )
     throw new Error("Invalid invite list request");
   return before === undefined
@@ -65,7 +67,7 @@ export function revokeRequest(value: unknown) {
     if (
       typeof id === "string" &&
       code === undefined &&
-      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id)
+      new RegExp(`^${UUID}$`).test(id)
     )
       return { id };
     if (

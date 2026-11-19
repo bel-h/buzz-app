@@ -30,6 +30,12 @@ export function inviteExpiry(expiresAt: number | null) {
   return expiresAt * 1000 <= Date.now() ? `Expired ${date}` : `Expires ${date}`;
 }
 
+const created = (at: number) =>
+  new Date(at * 1000).toLocaleString(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  });
+
 const uses = (invite: InviteSummary) =>
   invite.max_uses === null
     ? `${invite.use_count} ${invite.use_count === 1 ? "use" : "uses"}`
@@ -87,6 +93,8 @@ export function InviteLinks({
   }, [load]);
 
   const pastedCode = pasted.trim() ? pastedInviteCode(community, pasted) : null;
+  const pastedError =
+    pastedCode && "error" in pastedCode ? pastedCode.error : "";
 
   async function revoke() {
     if (!pending || !active() || locked || revoking) return;
@@ -127,6 +135,10 @@ export function InviteLinks({
             <InputGroup>
               <Input
                 id="invite-revoke-link"
+                aria-invalid={pastedError ? true : undefined}
+                aria-describedby={
+                  pastedError ? "invite-revoke-link-error" : undefined
+                }
                 placeholder="Paste an invite link"
                 value={pasted}
                 onChange={(event) => setPasted(event.currentTarget.value)}
@@ -135,9 +147,13 @@ export function InviteLinks({
                 disabled={revoking}
               />
             </InputGroup>
-            {pastedCode && "error" in pastedCode && (
-              <p role="alert" className="mt-2 mb-0 text-body-sm">
-                {pastedCode.error}
+            {pastedError && (
+              <p
+                id="invite-revoke-link-error"
+                role="alert"
+                className="mt-2 mb-0 text-body-sm"
+              >
+                {pastedError}
               </p>
             )}
           </div>
@@ -163,7 +179,8 @@ export function InviteLinks({
         ) : (
           <ul className={styles.members} aria-label="Invite links">
             {invites.map((invite) => {
-              const label = `Link by ${name(invite.created_by)}`;
+              // Creation time and a short id tell one creator's links apart.
+              const label = `Link ${invite.id.slice(0, 8)} by ${name(invite.created_by)}, created ${created(invite.created_at)}`;
               return (
                 <li key={invite.id} className={styles.member}>
                   <div className="min-w-0 flex-1">

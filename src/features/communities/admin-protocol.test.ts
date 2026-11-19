@@ -1,5 +1,10 @@
 import { expect, it } from "vitest";
-import { inviteListPath, inviteRequest, revokeRequest } from "./admin-protocol";
+import {
+  adminReason,
+  inviteListPath,
+  inviteRequest,
+  revokeRequest,
+} from "./admin-protocol";
 
 const id = "0b9c8f7e-1d2a-4b3c-9e8f-7a6b5c4d3e2f";
 
@@ -45,4 +50,9 @@ it("revokes by exactly one of id or code", () => {
     { code: "v2.abc", extra: 1 },
   ])
     expect(() => revokeRequest(body)).toThrow("Invalid revoke request");
+});
+
+it("shows only allowlisted relay refusals, never one carrying a code", () => {
+  expect(adminReason({ error: "invite_not_found" })).toBe("invite_not_found");
+  expect(adminReason({ error: "v2.leak not found" })).toBeUndefined();
 });

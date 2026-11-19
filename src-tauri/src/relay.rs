@@ -115,6 +115,12 @@ fn invite_list(path: &str) -> bool {
     })
 }
 
+/// Whether `relay_http` signs a request: every write, and the invite list,
+/// which is an owner/admin-only read.
+fn signed_http(method: &str, path: &str) -> bool {
+    method == "POST" || invite_list(path)
+}
+
 fn workflow_uuid(value: &str) -> bool {
     uuid::Uuid::parse_str(value).is_ok()
         && value.len() == 36
@@ -967,8 +973,7 @@ pub(crate) async fn relay_http(
         url,
         &method,
         body,
-        // The invite list is owner/admin-only, so its read is signed too.
-        method == "POST" || invite_list(&path),
+        signed_http(&method, &path),
         MAX_RESPONSE,
     );
     cancellable(id.as_deref(), &method, &path, request).await

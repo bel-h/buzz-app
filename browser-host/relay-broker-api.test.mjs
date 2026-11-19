@@ -3132,6 +3132,69 @@ test("invite mint forwards only bounded ttl/max_uses and returns the relay invit
   }
 });
 
+test("invite list and revoke sign their exact relay routes and never echo a code", async () => {
+  const cursor = "1795049564000000_0b9c8f7e-1d2a-4b3c-9e8f-7a6b5c4d3e2f";
+  const page = { invites: [], next_before: null };
+  const { h, post } = await communityAdmin((call) =>
+    call.url.endsWith("/api/invites/revoke")
+      ? call.body.code === "v2.leak"
+        ? Response.json({ error: "v2.leak not found" }, { status: 404 })
+        : Response.json({ id: "x", revoked_at: 1 })
+      : Response.json(page),
+  );
+  try {
+    for (const [body, url] of [
+      [{}, `${fixtureRelayUrl}/api/invites`],
+      [{ before: cursor }, `${fixtureRelayUrl}/api/invites?before=${cursor}`],
+    ]) {
+      const response = await post("invites", body);
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual(page);
+      const sent = h.calls.at(-1);
+      expect(sent.url).toBe(url);
+      expect(sent.body).toBeUndefined();
+      expect(sent.auth.tags).toContainEqual(["u", url]);
+      expect(sent.auth.tags).toContainEqual(["method", "GET"]);
+      expect(sent.auth.tags.some(([name]) => name === "payload")).toBe(false);
+    }
+    const revoked = await post("invite-revoke", { code: "v2.abc" });
+    expect(revoked.status).toBe(200);
+    const sent = h.calls.at(-1);
+    expect(sent.url).toBe(`${fixtureRelayUrl}/api/invites/revoke`);
+    expect(sent.body).toEqual({ code: "v2.abc" });
+    expect(sent.auth.tags).toContainEqual(["method", "POST"]);
+    expect(sent.auth.tags).toContainEqual([
+      "payload",
+      createHash("sha256")
+        .update(JSON.stringify({ code: "v2.abc" }))
+        .digest("hex"),
+    ]);
+
+    const calls = h.calls.length;
+    for (const body of [
+      { before: "1&limit=200" },
+      { before: `${cursor}&limit=1` },
+      { before: "1795049564000000_0b9c8f7e-1d2a-4b3c-9e8f-7a6b5c4d3e2fx" },
+      { limit: 200 },
+    ])
+      expect((await post("invites", body)).status).toBe(400);
+    for (const body of [
+      {},
+      { id: "x" },
+      { id: "a", code: "v2.a" },
+      { code: "a b" },
+    ])
+      expect((await post("invite-revoke", body)).status).toBe(400);
+    expect(h.calls).toHaveLength(calls);
+
+    const refused = await post("invite-revoke", { code: "v2.leak" });
+    expect(refused.status).toBe(404);
+    expect(await refused.text()).not.toContain("v2.leak");
+  } finally {
+    await h.close();
+  }
+});
+
 test("member changes sign exact NIP-43 admin kinds and reject malformed changes locally", async () => {
   const { h, post } = await communityAdmin((call) =>
     Response.json({ accepted: true, event_id: call.body.id, message: "" }),
