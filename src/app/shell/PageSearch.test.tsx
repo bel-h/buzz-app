@@ -1673,14 +1673,17 @@ it("lets an app shortcut that runs inside search keep a chord the field's Contro
     expect(t.field()).toHaveAttribute("aria-activedescendant", rows[1]?.id);
     await userEvent.keyboard("{Control>}p{/Control}");
     expect(t.field()).toHaveAttribute("aria-activedescendant", rows[0]?.id);
+    // From a row that could step back, the rebound Control+P only finds.
+    await userEvent.keyboard("{Control>}n{/Control}");
+    expect(t.field()).toHaveAttribute("aria-activedescendant", rows[1]?.id);
     act(() => t.bindings.set("test-find", { key: "p", mod: true }));
     expect(fireEvent.keyDown(t.field(), { key: "p", ctrlKey: true })).toBe(
       false,
     );
     expect(find).toHaveBeenCalledOnce();
-    expect(t.field()).toHaveAttribute("aria-activedescendant", rows[0]?.id);
+    expect(t.field()).toHaveAttribute("aria-activedescendant", rows[1]?.id);
     // Search Buzz's own Control+K runs nothing inside search, so it steps.
-    await userEvent.keyboard("{Control>}n{/Control}{Control>}k{/Control}");
+    await userEvent.keyboard("{Control>}k{/Control}");
     expect(t.field()).toHaveAttribute("aria-activedescendant", rows[0]?.id);
     expect(find).toHaveBeenCalledOnce();
   } finally {
