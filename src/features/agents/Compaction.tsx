@@ -18,10 +18,10 @@ const parse = (text: string) => {
   return compactAt(tokens) ? tokens : undefined;
 };
 
-const INVALID = `Enter a whole number of at least ${MIN_COMPACT_AT / 1000}K, or leave it blank for the model default.`;
+const INVALID = `Enter a whole number of at least ${MIN_COMPACT_AT / 1000}K, or leave it blank for the harness default.`;
 
 /** When the agent's session compacts its context: a size in thousands of
- * tokens, or blank for the model's own default. Only valid sizes reach
+ * tokens, or blank for the harness default. Only valid sizes reach
  * `onChange`; anything else keeps its error and stops its form submitting. */
 export function CompactionField({
   value,
@@ -57,7 +57,7 @@ export function CompactionField({
                 ref={input}
                 aria-invalid={!valid || undefined}
                 inputMode="numeric"
-                placeholder="Model default"
+                placeholder="Harness default"
                 value={text}
                 disabled={disabled}
                 onChange={(event) => {

@@ -37,7 +37,7 @@ function Harness({ saved }: { saved: string[] }) {
   );
 }
 
-it("saves only valid sizes and shows the model default when blank", async () => {
+it("saves only valid sizes and shows the harness default when blank", async () => {
   const user = userEvent.setup();
   const saved: string[] = [];
   render(<Harness saved={saved} />);
@@ -48,7 +48,7 @@ it("saves only valid sizes and shows the model default when blank", async () => 
   );
 
   await user.clear(field);
-  expect(field).toHaveAttribute("placeholder", "Model default");
+  expect(field).toHaveAttribute("placeholder", "Harness default");
   expect(saved).toEqual([""]);
 
   await user.type(field, "50");

@@ -1265,7 +1265,7 @@ export function createTabs({
       if (group === "compactAt")
         return config.compactAt
           ? `${Number(config.compactAt) / 1000}K tokens`
-          : "Model default";
+          : "Harness default";
       return config[group];
     };
     const conflict = (group: SettingGroup) =>
