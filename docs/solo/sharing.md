@@ -45,8 +45,9 @@ Where the viewer cannot add agents, a note says to mention an agent in the chat
 instead.
 Current access uses the channel groups (**People**, **Agents**) with Owner and
 Admin tags, and each row has the channel members' actions menu, so the chat owner
-can remove someone. On relays that support Solo role updates, the owner can
-confirm a lower role for any current non-owner, including people and agents.
+can remove someone. In a Private chat on a relay that supports Solo role updates,
+the owner can confirm a lower role for any current non-owner, including people
+and agents.
 **Viewing only** gives read-only access
 to the chat. A verified agent can move from **Viewing only** to **Participating**,
 and the chat owner can grant **Admin** to their own verified agents. The

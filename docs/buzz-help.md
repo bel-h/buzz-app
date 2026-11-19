@@ -472,8 +472,8 @@ and are asked to sign in again in Buzz.
   the chat; anyone else outside the chat is only named: not added and not
   notified, and the picker row says so. People already in the chat are notified
   as usual. The toolbar's agent menu lists agents only.
-  On relays that support Solo role updates, the chat owner can use a current
-  member’s menu in **Share access** to lower their access.
+  In a **Private** Solo chat on a relay that supports role updates, the owner can
+  use a current member’s menu in **Share access** to lower their access.
   The owner can restore **Participating** for a verified
   agent and grant **Admin** to their own verified agents. **Viewing only**
   gives read-only access to that chat.

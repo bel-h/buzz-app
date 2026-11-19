@@ -1197,31 +1197,61 @@ function soloAgent(
   role = "bot",
   profiles = [agentProfile()],
   soloMemberRoleUpdates = true,
+  visibilityTags = [["private"]],
 ) {
   const h = ownedAgent(actor, role, soloMemberRoleUpdates);
   h.setProfiles(profiles);
-  h.setEvents([
-    h.record(39000, [
-      ["d", id],
-      ["t", "stream"],
-      ["t", SOLO_LABEL],
-    ]),
-    ...h.events().slice(1),
-  ]);
-  return h;
+  const setVisibility = (tags: string[][]) =>
+    h.setEvents([
+      h.record(39000, [["d", id], ["t", "stream"], ["t", SOLO_LABEL], ...tags]),
+      ...h.events().slice(1),
+    ]);
+  setVisibility(visibilityTags);
+  return { ...h, setVisibility };
 }
-it("refuses a Solo role update before signing on an older relay and still allows removal", async () => {
-  const h = soloAgent("owner", "bot", [agentProfile()], false);
-  const capability = h.owner.capability;
-  await capability.refresh(id);
-  expect(capability.snapshot(id).authority.canManageSolo).toBe(false);
-  await capability.run(id, { ...change, expectedRole: "bot", role: "guest" });
-  expect(capability.snapshot(id).operation?.status).toBe("failed");
-  expect(h.sign).not.toHaveBeenCalled();
+it.each([
+  { name: "an older relay", supported: false, tags: [["private"]] },
+  {
+    name: "a View only chat",
+    supported: true,
+    tags: [["public"], ["join_role", "guest"]],
+  },
+  { name: "unknown visibility", supported: true, tags: [] },
+  {
+    name: "contradictory visibility",
+    supported: true,
+    tags: [["private"], ["public"]],
+  },
+])(
+  "refuses a Solo role update before signing with $name and still allows removal",
+  async ({ supported, tags }) => {
+    const h = soloAgent("owner", "bot", [agentProfile()], supported, tags);
+    const capability = h.owner.capability;
+    await capability.refresh(id);
+    expect(capability.snapshot(id).authority.canManageSolo).toBe(false);
+    await capability.run(id, { ...change, expectedRole: "bot", role: "guest" });
+    expect(capability.snapshot(id).operation?.status).toBe("failed");
+    expect(h.sign).not.toHaveBeenCalled();
+    expect(h.publish).not.toHaveBeenCalled();
+    await capability.run(id, removeAgent);
+    expect(capability.snapshot(id).operation?.status).toBe("confirmed");
+    expect(h.publish.mock.calls[0]?.[0].kind).toBe(9001);
+  },
+);
+it("discards a Solo role edit if the chat becomes View only during signing", async () => {
+  const h = soloAgent();
+  h.sign.mockImplementationOnce(async (template) => {
+    h.setVisibility([["public"], ["join_role", "guest"]]);
+    return finalizeEvent(structuredClone(template), key);
+  });
+  await h.owner.capability.run(id, {
+    ...change,
+    expectedRole: "bot",
+    role: "guest",
+  });
+  expect(h.sign).toHaveBeenCalledOnce();
   expect(h.publish).not.toHaveBeenCalled();
-  await capability.run(id, removeAgent);
-  expect(capability.snapshot(id).operation?.status).toBe("confirmed");
-  expect(h.publish.mock.calls[0]?.[0].kind).toBe(9001);
+  expect(h.owner.capability.snapshot(id).operation?.status).toBe("failed");
 });
 it.each([
   ["admin", "member", personProfile()],

@@ -1041,9 +1041,9 @@ to its underlying conversation/message without that panel.
 The header **Access** button opens the one access dialog every conversation uses.
 It is titled **Channel access** in channels and **Chat access** in a Solo chat (see
 [Sharing a Solo chat](solo/sharing.md)). A Solo chat owner can remove current
-non-owner members. On relays that support Solo role updates, the owner can
-lower their access, restore participation for verified agents, and grant Admin
-to their own verified agents.
+non-owner members. In a Private Solo chat on a relay that supports role updates,
+the owner can lower their access, restore participation for verified agents,
+and grant Admin to their own verified agents.
 One search field, with an accessible name but no visible label, filters current
 members and lists people, agents and Teams to invite under **Not in this channel**.
 With an empty query, channels and Solo chats show invitations only when the viewer is

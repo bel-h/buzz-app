@@ -1,5 +1,6 @@
 import type { EventTemplate } from "nostr-tools";
 import { soloLabels } from "../solo/labels.ts";
+import { channelVisibility } from "../relay/channel-details-protocol.ts";
 import { channelIdentity } from "../relay/channel-labels.ts";
 import type { RelayEvent } from "../relay/events.ts";
 import {
@@ -108,6 +109,7 @@ export function memberAuthority(
       type === "stream" &&
       activeChannel &&
       solo &&
+      channelVisibility(metadata) === "private" &&
       elevated.get(viewer) === "owner",
     canRemove: activeChannel && elevated.has(viewer),
     canRemoveOwnedAgent:

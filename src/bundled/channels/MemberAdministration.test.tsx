@@ -63,10 +63,17 @@ async function setup(
   messageNavigation = true,
   initialReads?: { names?: Promise<void>; roster?: Promise<void> },
   ownership?: "own" | "other" | "invalid",
-  visibility: "private" | "public" | "solo" = "private",
+  visibility: "private" | "public" | "solo" | "view-only-solo" = "private",
   targetPicture?: string,
   targetProfiled = true,
 ) {
+  const solo = visibility === "solo" || visibility === "view-only-solo";
+  const visibilityFlag =
+    visibility === "solo"
+      ? "private"
+      : visibility === "view-only-solo"
+        ? "public"
+        : visibility;
   const viewer = keypair(),
     relay = keypair(),
     target = keypair(),
@@ -119,8 +126,9 @@ async function setup(
       tags: [
         ["d", id],
         ["t", "stream"],
-        [visibility === "solo" ? "private" : visibility],
-        ...(visibility === "solo" ? [["t", "buzz.solo"]] : []),
+        [visibilityFlag],
+        ...(solo ? [["t", "buzz.solo"]] : []),
+        ...(visibility === "view-only-solo" ? [["join_role", "guest"]] : []),
         ["name", "Design"],
       ],
     }),
@@ -190,9 +198,7 @@ async function setup(
             memberAdministration: {
               sign: async (template) => signed(viewer, template),
               publish,
-              ...(visibility === "solo"
-                ? { soloMemberRoleUpdates: true as const }
-                : {}),
+              ...(solo ? { soloMemberRoleUpdates: true as const } : {}),
             },
           }
         : {}),
@@ -859,6 +865,28 @@ it("offers only a downgrade for a Solo participant with an unattested agent prof
   expect(
     screen.queryByRole("menuitemradio", { name: "Admin" }),
   ).not.toBeInTheDocument();
+});
+it("keeps removal in a View only Solo chat without showing role choices", async () => {
+  const t = await setup(
+    "owner",
+    "admin",
+    true,
+    undefined,
+    false,
+    undefined,
+    false,
+    true,
+    undefined,
+    undefined,
+    "view-only-solo",
+  );
+  await t.user.click(
+    screen.getByRole("button", { name: "Actions for Morgan" }),
+  );
+  expect(
+    await screen.findByRole("menuitem", { name: "Remove from chat" }),
+  ).toBeInTheDocument();
+  expect(screen.queryAllByRole("menuitemradio")).toHaveLength(0);
 });
 it("presents verified roles, protects owners/self, and confirms a separate deliberate role intent", async () => {
   const t = await setup();
