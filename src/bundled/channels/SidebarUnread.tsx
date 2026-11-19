@@ -143,11 +143,7 @@ export function SidebarUnread({
           2 * Math.max(center - actionRect.right, actionRect.left - center) -
           2 * gap;
         cue.removeAttribute("data-preview-limit");
-        if (
-          actionRect.width > 0 &&
-          available > 0 &&
-          cue.offsetWidth > available
-        ) {
+        if (actionRect.width > 0 && cue.offsetWidth > available) {
           // Try the widest option first and drop the farthest avatars first.
           const previews = cue.querySelectorAll("[data-unread-dm]").length;
           for (
@@ -159,7 +155,6 @@ export function SidebarUnread({
           }
         }
         const lifted = actionRect.width > 0 && cue.offsetWidth > available;
-        if (lifted) cue.removeAttribute("data-preview-limit");
         cue.toggleAttribute("data-lifted", lifted);
 
         // Measure in the list frame so the entrance animation cannot change fit.

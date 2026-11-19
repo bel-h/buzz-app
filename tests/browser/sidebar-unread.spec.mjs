@@ -800,7 +800,9 @@ test.describe("DM preview wiring", () => {
     await page.evaluate(() => {
       document.documentElement.style.fontSize = "200%";
     });
-    await expect(visibleAvatars).toHaveCount(3);
+    const lowerWrapper = below.locator("..");
+    await expect(lowerWrapper).toHaveAttribute("data-lifted", "");
+    const narrowPreviews = await visibleAvatars.count();
     await expectCentered();
     await expect
       .poll(async () => (await geometry()).verticalGap)
@@ -808,10 +810,17 @@ test.describe("DM preview wiring", () => {
     await expectReadable();
     await action.click({ trial: true });
     await below.click({ trial: true });
+
+    for (let step = 0; step < 4; step++) await resize.press("Shift+ArrowRight");
+    await expect(resize).toHaveAttribute("aria-valuenow", "412");
+    await expect(lowerWrapper).not.toHaveAttribute("data-lifted");
+    expect(await visibleAvatars.count()).toBeGreaterThanOrEqual(narrowPreviews);
+    await resize.press("End");
+    await expect(visibleAvatars).toHaveCount(3);
+
     await page.evaluate(() => {
       document.documentElement.style.fontSize = "";
     });
-    await resize.press("End");
     await expectCentered();
     await expect(below.locator("..")).toHaveCSS("bottom", "12px");
     await expect(visibleAvatars).toHaveCount(3);
@@ -886,6 +895,6 @@ test.describe("DM preview wiring", () => {
     await page.setViewportSize({ width: 568, height: 500 });
     await expect(below).toBeInViewport({ ratio: 1 });
     await expect(below.getByText(/^\d+ unread$/)).toBeVisible();
-    await expect(below.locator("[data-unread-dm]:visible")).toHaveCount(3);
+    await below.click({ trial: true });
   });
 });
