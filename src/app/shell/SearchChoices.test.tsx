@@ -330,6 +330,50 @@ it("moves Tab through Peek's groups, then on past the last and before the first"
   expect(shown()).toMatch(/^Channels/);
 });
 
+it("moves through Peek's groups with Control+L/F and H/B, staying in the field at either end", () => {
+  render(
+    <SearchChoices
+      query="channel"
+      onQueryChange={() => {}}
+      input={createRef<HTMLElement>()}
+      groups={[{ label: "Channels", destinations: destinations.slice(0, 2) }]}
+      peek={{ ranked: true, preview: () => null }}
+    />,
+  );
+  const field = screen.getByRole("combobox");
+  const shown = () =>
+    screen.getByRole("button", { pressed: true }).textContent ?? "";
+  const control = (key: string) =>
+    fireEvent.keyDown(field, { key, ctrlKey: true });
+  const pairs = [
+    ["l", "h"],
+    ["f", "b"],
+  ] as const;
+  for (const [next, previous] of pairs) {
+    expect(control(next)).toBe(false);
+    expect(shown()).toMatch(/^Channels/);
+    expect(control(next)).toBe(false);
+    expect(shown()).toMatch(/^Channels/);
+    expect(control(previous)).toBe(false);
+    expect(shown()).toMatch(/^Top results/);
+    expect(control(previous)).toBe(false);
+    expect(shown()).toMatch(/^Top results/);
+  }
+  // Command and other modifiers keep their own meaning.
+  expect(fireEvent.keyDown(field, { key: "l", metaKey: true })).toBe(true);
+  expect(
+    fireEvent.keyDown(field, { key: "L", ctrlKey: true, shiftKey: true }),
+  ).toBe(true);
+  expect(shown()).toMatch(/^Top results/);
+});
+
+it("leaves Control's group keys to the text without groups to show", () => {
+  render(choices({ top: 0, key: "" }));
+  const field = screen.getByRole("combobox");
+  for (const key of ["l", "f", "h", "b"])
+    expect(fireEvent.keyDown(field, { key, ctrlKey: true })).toBe(true);
+});
+
 it("keeps an action-only group in place when Peek's order freezes", () => {
   const row = (key: string) => ({ key, label: key, icon: ChatCircleIcon, run });
   const palette = (labels: string[]) => (
@@ -692,4 +736,46 @@ it("gives the person's result keys precedence over the field's other keys, consu
   expect(fireEvent.keyDown(combobox(), { key: "k", ctrlKey: true })).toBe(
     false,
   );
+});
+
+it("steps through results with Control+J/N and K/P after the person's own keys", () => {
+  const view = render(choices({ top: 0, key: "" }, destinations.slice(0, 3)));
+  const field = () => screen.getByRole("combobox");
+  const highlighted = () =>
+    screen.getByRole("option", { selected: true }).textContent;
+  const control = (key: string, init: KeyboardEventInit = {}) =>
+    fireEvent.keyDown(field(), { key, ctrlKey: true, ...init });
+  expect(highlighted()).toContain("channel-0");
+  expect(control("j")).toBe(false);
+  expect(highlighted()).toContain("channel-1");
+  expect(control("n")).toBe(false);
+  expect(highlighted()).toContain("channel-2");
+  expect(control("k")).toBe(false);
+  expect(highlighted()).toContain("channel-1");
+  expect(control("p")).toBe(false);
+  expect(highlighted()).toContain("channel-0");
+  // Command, Shift, Alt, AltGr and composition never step.
+  for (const init of [
+    { metaKey: true },
+    { shiftKey: true },
+    { altKey: true },
+    { modifierAltGraph: true },
+    { isComposing: true },
+    { keyCode: 229 },
+  ] as KeyboardEventInit[])
+    expect(control("j", init)).toBe(true);
+  expect(highlighted()).toContain("channel-0");
+  // A key the person chose for the other step wins (jsdom is not a Mac,
+  // so Mod is Control).
+  view.rerender(
+    <SearchStepsContext.Provider
+      value={{ previous: { key: "j", mod: true }, next: { key: "ArrowDown" } }}
+    >
+      {choices({ top: 0, key: "" }, destinations.slice(0, 3))}
+    </SearchStepsContext.Provider>,
+  );
+  fireEvent.keyDown(field(), { key: "ArrowDown" });
+  expect(highlighted()).toContain("channel-1");
+  expect(control("j")).toBe(false);
+  expect(highlighted()).toContain("channel-0");
 });

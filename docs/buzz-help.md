@@ -797,14 +797,15 @@ and are asked to sign in again in Buzz.
   phrase. Each message shows the words around the match. A panel beside the
   results previews the highlighted row: the message with the ones just before
   and after it, or a channel's or person's latest messages. Up and Down move
-  the highlight; add your own keys under **Previous search result** and
-  **Next search result** in Settings → Shortcuts, for example ⌃K and ⌃J on a
-  Mac, and the key hints show them. Up and Down keep working. Tab and Shift+Tab,
-  or the group filter buttons above the results, show one group whole, as
-  does choosing a group's heading when it has more; Escape goes back. Groups
-  reorder as slower results arrive until you move the highlight; after that
-  they stay put and later groups join at the end. The panel and key hints hide
-  in narrow windows.
+  the highlight, as do Control+J or Control+N and Control+K or Control+P on
+  every platform, a Mac included; add your own keys under **Previous search
+  result** and **Next search result** in Settings → Shortcuts, and the key
+  hints show them. Up and Down keep working. Tab and Shift+Tab, Control+L or
+  Control+F and Control+H or Control+B, or the group filter buttons above the
+  results, show one group whole, as does choosing a group's heading when it
+  has more; Escape goes back. Groups reorder as slower results arrive until
+  you move the highlight; after that they stay put and later groups join at
+  the end. The panel and key hints hide in narrow windows.
 - **Ask an agent**: start with `ask:` to write a question for your default
   agent, or choose **Ask** under a long query. Enter opens New chat with the
   question addressed to that agent; press Enter again to send it. If New chat
