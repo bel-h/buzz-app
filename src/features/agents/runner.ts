@@ -9,6 +9,7 @@ import { onAutomatic } from "./recommended";
 // host run each agent. It knows nothing of where it runs: everything it needs
 // of the device, community and storage comes through its RunnerHost, so the
 // desktop app and a standalone host run agents with the same code.
+import type { PublishOptions } from "../../buzz-mcp/client";
 import { bytesToHex } from "nostr-tools/utils";
 import type { ProtectionAction } from "../agent-protection/service";
 import type {
@@ -65,6 +66,7 @@ import {
 } from "./attention";
 import {
   checkedWrite,
+  AttentionError,
   interestIds,
   show,
   watchSummaries,
@@ -462,6 +464,12 @@ export type RunnerHost = {
    * channel is public; undefined as for `member`. Only a member may be
    * delivered to. */
   reads(agent: Agent, event: Pick<RelayEvent, "tags">): boolean | undefined;
+  /** Resolves listening metadata before an enabled watch is admitted. */
+  resolveChannels?(
+    agent: Agent,
+    channels: readonly string[],
+    signal: AbortSignal,
+  ): Promise<void>;
   /** Whether the event's channel is a DM between the agent and one other. */
   dm(agent: Agent, event: RelayEvent): boolean;
   /** Whether the event came as it would have with no watch keeping channels
@@ -2712,6 +2720,9 @@ export class AgentRunners {
         ...(wake
           ? {
               syntheticMessage: true,
+              ...(trigger.type === "timer"
+                ? { attentionTimerId: trigger.slug }
+                : {}),
               ...(wake.text ? { requestText: wake.text } : {}),
             }
           : {}),
@@ -3238,7 +3249,11 @@ export class AgentRunners {
         owner: agent.owner,
         // What acts as the agent stops with it: a turn still working once it
         // is deleted, removed from this community or retyped can't.
-        publish: async (event: AgentEventTemplate, check?: () => void) => {
+        publish: async (
+          event: AgentEventTemplate,
+          check?: () => void,
+          options?: PublishOptions,
+        ) => {
           lifetime.throwIfAborted();
           const destination = event.tags?.find((tag) => tag[0] === "h")?.[1];
           const ownReply =
@@ -3259,6 +3274,7 @@ export class AgentRunners {
               event,
               lifetime,
               check,
+              options,
             );
             confirmed = true;
             if (workspaces && event.kind === 9007) {
@@ -3754,6 +3770,56 @@ export class AgentRunners {
             );
             lifetime.throwIfAborted();
             check?.();
+            if (value && value.type !== "interest" && value.enabled) {
+              const agent = this.host.agent(key);
+              if (!agent) throw new Error("This agent is no longer running");
+              const previous = before.attention[slug]?.value;
+              const prior =
+                previous?.type === "interest" ? undefined : previous;
+              const enabling = !prior?.enabled;
+              const channels =
+                value.type === "event" && value.channels !== "all"
+                  ? value.channels.filter(
+                      (channel) =>
+                        enabling ||
+                        prior?.type !== "event" ||
+                        prior.channels === "all" ||
+                        !prior.channels.includes(channel),
+                    )
+                  : [];
+              if (channels.length) {
+                await this.host.resolveChannels?.(agent, channels, lifetime);
+                lifetime.throwIfAborted();
+                check?.();
+                for (const channel of channels)
+                  if (
+                    this.host.reads(agent, { tags: [["h", channel]] }) !== true
+                  )
+                    throw new AttentionError(
+                      "invalid-operation",
+                      `Cannot receive events from channel ${channel}. Check channel access and retry this write after metadata is confirmed.`,
+                    );
+              }
+              // An enabled source write replaces its producer, even if the
+              // destination is unchanged and the previous run failed.
+              if (
+                value.channel &&
+                (enabling ||
+                  value.type === "source" ||
+                  prior?.channel !== value.channel)
+              ) {
+                const member = this.host.member(agent, {
+                  tags: [["h", value.channel]],
+                });
+                if (member !== true)
+                  throw new AttentionError(
+                    "invalid-operation",
+                    member === undefined
+                      ? `Membership of delivery channel ${value.channel} is unconfirmed. Retry this write after the relay confirms membership.`
+                      : `Agent is not a member of the delivery channel ${value.channel}. Choose a joined channel or join it before retrying this write.`,
+                  );
+              }
+            }
             return next;
           });
           return show(after, slug, seconds());
@@ -3773,6 +3839,7 @@ export class AgentRunners {
     event: AgentEventTemplate,
     lifetime: AbortSignal,
     check?: () => void,
+    options?: PublishOptions,
   ) {
     const channel = event.tags?.find((tag) => tag[0] === "h")?.[1];
     const agent = this.host.agent(runner.key);
@@ -3783,7 +3850,9 @@ export class AgentRunners {
       lifetime.throwIfAborted();
     }
     check?.();
-    return this.require().publish(runner.member, event);
+    return options
+      ? this.require().publish(runner.member, event, options)
+      : this.require().publish(runner.member, event);
   }
 }
 

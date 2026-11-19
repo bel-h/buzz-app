@@ -40,8 +40,10 @@ native agent session before execution. The argument type is
 The host verifies the request and selects the native conversation first.
 The hook receives both the source message's channel/thread and that native
 conversation. It cannot change session scope, reply placement or access.
-Solo keeps each agent's existing channel conversation. Thread-scoped agents
-keep their existing thread conversations.
+Community-scoped agents use one logical lifetime across their conversations,
+including DMs, Solo chats and huddles. The admission's `conversation.community`
+identifies it; `source` still names the current request. Other scopes retain
+Solo and DM channel conversations and their existing thread/channel selection.
 
 `ready()` opens only the plugin's local keyed storage. It must not wait for
 relay publication or sidebar loading. `matches()` selects the sources the
@@ -1068,7 +1070,7 @@ not native execution.
 
 ## Creating a Solo chat in a personal workspace
 
-Locally hosted agent runs can call `solo_workspace_list` for the host-bound
+Only locally hosted agent runs can call `solo_workspace_list` for the host-bound
 owner's personal workspace IDs and names in that community. Pass an exact ID as
 `workspace` to `channel_create` with `solo: true`, and name the owner explicitly
 in `members`. This files only that new confirmed Solo chat. It does not enroll
@@ -1079,8 +1081,6 @@ result preserves its ID. A known refusal before assignment says “created, not
 filed”; after assignment starts, failure says placement is unconfirmed and may
 have completed. Inspect or refresh the chat before using **Move to**; never
 create a duplicate. Omit `workspace` for unchanged creation.
-External/standalone tools, Nexus worker requests, and plugin agent handles do
-not gain this host-private capability or a general move operation.
 
 ## Exact channel-member mentions
 
@@ -2068,7 +2068,7 @@ Event watches and timers accept an optional delivery `channel` and thread `root`
 
 Without an address, the subscription runs an independent turn in its Interest's lane. Timers retain their occurrence and expiry budgets. An addressed timer waits without spending an occurrence while destination membership is unconfirmed or absent. `watch_show` reports delivery as held or blocked with a reason; delivery resumes once membership is confirmed. Expiry still applies while held. Membership checks never join channels. The Attention panel shows listening channels separately from the delivery destination.
 
-Event matches wait for confirmation of both listening and destination rosters. Confirmed destination nonmembership discards the match. Addressed wakes refresh the Interest instructions after harness startup and queue waits, immediately before submission, while retaining cancellation checks.
+When an agent creates or enables a watch, adds listening channels or changes its delivery channel, it needs confirmed access under the same policy used for event delivery. Removing or reordering an explicit listening list checks no unchanged channels; changing from all channels to an explicit list checks the full list. Other edits on active watches and timer rearms remain available if an unchanged channel later becomes unreachable or unconfirmed. An agent's write to an enabled completed source restarts it and requires confirmed destination membership. Disabled watches remain editable and removable. Event matches wait for confirmation of both listening and destination rosters. Confirmed destination nonmembership discards the match. Addressed wakes refresh the Interest instructions after harness startup and queue waits, immediately before submission, while retaining cancellation checks.
 
 Conversation wakes are local, have no signed message to resume, and never publish their synthetic anchor ids. Pi saves an Attention wake's reply destination separately from its tool context so a recovered answer keeps its destination. Ordinary plugin wakes retain the separate contract above.
 
@@ -2082,7 +2082,7 @@ Source return or failure, cancellation, Attention off, agent stop, plugin unload
 
 ## Tools for the user's other local agents
 
-A plugin can offer MCP tools to agents Buzz did not start, such as Claude Code, Codex, Pi or Nexus sessions. It serves a dedicated `host.serveMcp` server and declares the bundled helper as a process, for example `{ "id": "agent-access", "program": "buzz-agent-command", "bundled": true, "args": ["--advertise"] }`. `spawn("agent-access", { mcp: server })` lets the helper claim that server's one session and save it to `~/.buzz-foundation/agent-connections`, then exit. The plugin keeps the server open after the helper exits and spawns it once per server: a second spawn on the same server stops it. Every local agent of this user can then call that server's tools. On macOS and Linux the directory and files are private to the user and the helper ignores files others could have written; on Windows they rely on the profile's inherited permissions. The plugin handler must not assume a particular caller, and protected workers that must not reach these tools need that directory in `hiddenPaths`.
+A plugin can offer MCP tools to agents that run outside Buzz, such as standalone Claude Code, Codex, or Pi sessions. It serves a dedicated `host.serveMcp` server and declares the bundled helper as a process, for example `{ "id": "agent-access", "program": "buzz-agent-command", "bundled": true, "args": ["--advertise"] }`. `spawn("agent-access", { mcp: server })` lets the helper claim that server's one session and save it to `~/.buzz-foundation/agent-connections`, then exit. The plugin keeps the server open after the helper exits and spawns it once per server: a second spawn on the same server stops it. Every local agent of this user can then call that server's tools. On macOS and Linux the directory and files are private to the user and the helper ignores files others could have written; on Windows they rely on the profile's inherited permissions. The plugin handler must not assume a particular caller, and protected workers that must not reach these tools need that directory in `hiddenPaths`.
 
 An agent runs the installed helper by absolute path, with no inherited connection, configuration or token: `/Applications/Buzz.app/Contents/Resources/bin/buzz-agent-command tools` on macOS (inside the app's installed name, such as `Buzz Foundation.app`), `…\bin\buzz-agent-command.exe` on Windows and `/usr/lib/Buzz Foundation/bin/buzz-agent-command` on Linux. `tools`, `<tool> --field value` and `call <tool> '<JSON object>'` behave as `buzz` does inside an agent command, and `--help` prints that usage with the path it was run as. The agent's own sandbox must allow loopback connections: Codex's read-only and workspace-write modes, for example, block them unless network access is enabled, and the helper then reports `Could not reach Buzz` and leaves the advertisement in place. The helper uses the newest advertised session that still answers and offers the tool, so a second Buzz window's tools are still reached; when two plugins offer the same tool name, the newer advertisement wins. A tool call stops asking older advertisements once it finds that session, so a stalled older server does not delay it; `tools` asks every advertisement. Before sending a saved session, the helper connects and confirms, by numeric user ID, that a process of this user has accepted that same connection (`lsof` on macOS, `/proc/net/tcp` on Linux), then sends the request on it. If that is not confirmed within about a second, as when another user's process holds a closed server's port, the server receives nothing and the advertisement stays. Windows does not support advertised sessions; the helper reports that instead. An advertisement lasts as long as its server. Closing the server, reloading the page, unloading the plugin or quitting Buzz ends it, and the next caller that asks it removes the file once its server refuses the connection or the session. An inherited `BUZZ_AGENT_CONNECTION` always takes precedence.
 

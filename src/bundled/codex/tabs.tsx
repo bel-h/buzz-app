@@ -1,3 +1,4 @@
+import { sessionScope } from "../../features/agent-harness/session-scope";
 import type { AgentExecutionBinding } from "../../features/agents/execution";
 import {
   readModelSettings,
@@ -85,8 +86,10 @@ import {
   type PreviewHost,
 } from "./voice-preview";
 
-const label = ({ channelId, name, root }: SavedConversation) =>
-  `${name || channelId.slice(0, 8)} · ${root ? `thread ${root.slice(0, 8)}` : "channel"}`;
+const label = ({ channelId, name, root, community }: SavedConversation) =>
+  community
+    ? "Community session"
+    : `${name || channelId.slice(0, 8)} · ${root ? `thread ${root.slice(0, 8)}` : "channel"}`;
 
 type Catalog = {
   previews?: Record<string, string> | undefined;
@@ -468,6 +471,7 @@ const SCOPES = [
     options: [
       { value: "thread", label: "One session per thread" },
       { value: "channel", label: "One session per channel" },
+      { value: "community", label: "One session per community" },
     ],
   },
 ];
@@ -1269,8 +1273,14 @@ export function createTabs(
       conversations,
       conversation,
       (place, signal) =>
-        runtime.find({ key: agent.key, name: agent.name }, place, signal),
+        runtime.find(
+          { key: agent.key, name: agent.name },
+          place,
+          signal,
+          readConfig(agent.config).scope === "community",
+        ),
       (channelId) => runtime.channelLabel(agent.key, channelId),
+      readConfig(agent.config).scope,
     );
     const recent = conversations
       .filter((item) => item.key !== here?.key)
@@ -1619,7 +1629,7 @@ export function createTabs(
               onValueChange={(value) =>
                 setDraft({
                   ...draft,
-                  scope: value === "channel" ? "channel" : "thread",
+                  scope: sessionScope(value),
                 })
               }
             />
