@@ -65,7 +65,7 @@ function fixture({
       ? [{ ...next, key: "local/third", id: "third", title: "Third" }]
       : []),
   ];
-  const previewRetype = vi.fn(() => ({
+  const previewRetype = vi.fn<Agents["previewRetype"]>(() => ({
     config: {},
     moved: [],
     dropped: [],
@@ -219,6 +219,36 @@ it("keeps the existing local migration flow available", async () => {
   expect(screen.getByLabelText("Pending change")).toHaveTextContent("true");
   expect(retype).not.toHaveBeenCalled();
 });
+
+it.each(["dropped", "moved"] as const)(
+  "only warns about Sessions when scope is dropped (%s)",
+  async (outcome) => {
+    const user = userEvent.setup();
+    const { previewRetype } = fixture({ hosted: false });
+    previewRetype.mockReturnValue({
+      config: {},
+      moved: outcome === "moved" ? ["sessionScope"] : [],
+      dropped: outcome === "dropped" ? ["sessionScope"] : [],
+      settings: [],
+    });
+    await user.click(
+      screen.getByRole("button", { name: "Change harness from Echo" }),
+    );
+    await user.click(
+      await screen.findByRole("menuitemradio", { name: "Next" }),
+    );
+    const dialog = within(
+      await screen.findByRole("dialog", { name: "Move Ada to Next?" }),
+    );
+    if (outcome === "dropped") {
+      expect(dialog.getByText("Sessions").nextElementSibling).toHaveTextContent(
+        /^Dropped$/,
+      );
+    } else {
+      expect(dialog.queryByText("Sessions")).not.toBeInTheDocument();
+    }
+  },
+);
 
 it("does not offer local migration for an agent on another device", () => {
   fixture({ place: "elsewhere" });
