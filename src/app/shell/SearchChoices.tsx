@@ -195,7 +195,8 @@ export type SearchInputProps = {
   onQueryChange: (query: string) => void;
   input: RefObject<HTMLElement | null>;
   label?: string;
-  scope?: { label: string; onRemove: () => void } | undefined;
+  /** One conversation the search is narrowed to, by `id`. */
+  scope?: { id: string; label: string; onRemove: () => void } | undefined;
   /** A control that refines the results, inside the field after Clear. */
   fieldAction?: ReactNode;
   chips?: readonly SearchChip[] | undefined;
@@ -258,6 +259,7 @@ export function SearchChoices({
   peek,
   completing = false,
   completionPending = false,
+  conversationShortcut,
 }: SearchInputProps & {
   groups: readonly SearchGroup[];
   children?: ReactNode;
@@ -284,6 +286,9 @@ export function SearchChoices({
   /** The suggestions that would complete the filter are still loading, so
    * Tab stays in the field rather than leaving before they arrive. */
   completionPending?: boolean;
+  /** Hinted with the keys below: the chord that searches the current
+   * conversation instead. */
+  conversationShortcut?: KeyBinding | undefined;
 }) {
   const palette = useRef<HTMLDivElement>(null);
   // A hidden preview would still read; it mounts only where it shows.
@@ -370,7 +375,10 @@ export function SearchChoices({
   // while its source hasn't searched the text as typed, shown by its own
   // status until it has rows. It's let go once its source has searched and
   // settled without it. Shown or not, the choice is never kept out of sight.
-  const chosen = ranked.find((group) => group.label === peekScope);
+  // With nothing typed, the first group is the view search opens on, so
+  // there is no Top results above it.
+  const home = needle ? undefined : ranked[0]?.label;
+  const chosen = ranked.find((group) => group.label === (peekScope ?? home));
   const awaited =
     !!peekScope &&
     (!!peek?.busy || Object.hasOwn(peek?.unsearched ?? {}, peekScope));
@@ -429,10 +437,13 @@ export function SearchChoices({
     if (resultsContent.current) resultsContent.current.scrollTop = 0;
     if (focusInput) input.current?.focus();
   };
-  /** Shows the group after or before the one shown, Top results first; false
-   * past either end. */
+  /** Shows the group after or before the one shown, Top results (or an empty
+   * search's first group) first; false past either end. */
   const stepScope = (forward: boolean) => {
-    const order = [undefined, ...tabs.map(({ label }) => label)];
+    const order = [
+      ...(home ? [] : [undefined]),
+      ...tabs.map(({ label }) => label),
+    ];
     const next = order.indexOf(scoped?.label) + (forward ? 1 : -1);
     if (next < 0 || next >= order.length) return false;
     showScope(order[next]);
@@ -457,6 +468,7 @@ export function SearchChoices({
     isAction,
     highlightEmpty,
     followFirst: !!peek?.ranked,
+    within: scope?.id,
     // A kept place keeps its row: Enter never chooses a row scrolled away.
     ...(place?.key && keys.includes(place.key)
       ? { initial: place.key }
@@ -988,8 +1000,9 @@ export function SearchChoices({
                 event.preventDefault();
               return;
             }
-            // Escape from one group returns to Top results, not out of search.
-            if (event.key === "Escape" && scoped) {
+            // Escape from one group returns to Top results, or the first
+            // group, not out of search.
+            if (event.key === "Escape" && scoped && scoped.label !== home) {
               event.preventDefault();
               event.stopPropagation();
               showScope(undefined);
@@ -1008,13 +1021,14 @@ export function SearchChoices({
             className="search-peek-rail"
             aria-label="Result groups"
             onKeyDown={(event) => {
-              if (event.key !== "Escape" || !scoped) return;
+              if (event.key !== "Escape" || !scoped || scoped.label === home)
+                return;
               event.preventDefault();
               event.stopPropagation();
               showScope(undefined);
             }}
           >
-            {[undefined, ...tabs].map((group, index) => (
+            {(home ? tabs : [undefined, ...tabs]).map((group, index) => (
               <Button
                 key={group?.label ?? ""}
                 id={`${peekPanelId(group?.label)}-filter`}
@@ -1037,10 +1051,7 @@ export function SearchChoices({
                 />
                 {group?.label === "Direct messages"
                   ? "DMs"
-                  : group?.label === "Recent searches"
-                    ? "Recents"
-                    : (group?.label ??
-                      (query.trim() ? "Top results" : "Jump back in"))}
+                  : (group?.label ?? "Top results")}
                 {/* A landing group has no count yet. */}
                 {(!group || group !== landing) && (
                   <span className="search-peek-count">
@@ -1297,8 +1308,17 @@ export function SearchChoices({
           <span>
             <kbd>↵</kbd> Open
           </span>
+          {conversationShortcut && (
+            <span>
+              <kbd>{formatBinding(conversationShortcut, apple).text}</kbd> This
+              conversation
+            </span>
+          )}
           <span>
-            <kbd>esc</kbd> {scoped ? "Back to top" : "Close"}
+            <kbd>esc</kbd>{" "}
+            {scoped && scoped.label !== home
+              ? `Back to ${home ?? "top"}`
+              : "Close"}
           </span>
         </div>
       )}
