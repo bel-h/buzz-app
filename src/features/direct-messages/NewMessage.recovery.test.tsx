@@ -806,6 +806,39 @@ it.each(["", "Please review these fixes"])(
   },
 );
 
+it("retries an unchanged failed DM saved with legacy chat attachments", async () => {
+  const t = setup();
+  const link = "[Session: Fix](buzz://channel/session-id)";
+  const text = "Please review these fixes";
+  const event = message(viewer, channel, `${link}\n\n${text}`, 1_700_000_001);
+  await t.storage.save([
+    {
+      event,
+      signed: event,
+      delivery: "failed",
+      error: "Not sent",
+      recovery: {
+        key: "direct-message:new",
+        value: JSON.stringify({
+          people: [{ pubkey: other.pubkey, name: "Avery" }],
+          draft: { text, recipients: [], chatCards: [link] },
+        }),
+      },
+    },
+  ]);
+  t.mount(t.create());
+  await waitFor(() => expect(send()).toBeEnabled());
+  expect(screen.getByRole("textbox")).toHaveTextContent("Session: Fix");
+  expect(screen.getByRole("textbox")).toHaveTextContent(text);
+  await t.user.click(send());
+  await waitFor(() =>
+    expect(t.onStarted).toHaveBeenCalledWith(channel, event.id),
+  );
+  expect(t.openDirectMessage).not.toHaveBeenCalled();
+  expect(t.publish).toHaveBeenCalledOnce();
+  expect(t.publish.mock.calls[0]?.[0]).toEqual(event);
+});
+
 it("loads matching DM history inline and keeps the draft while recipients change", async () => {
   const t = setup();
   t.events.unshift(
