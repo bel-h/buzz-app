@@ -1194,7 +1194,7 @@ function Composer({
     if (result === "saved") {
       revision.current = nextRevision;
       // Saved text has no unsaved edits left to protect: a later change made
-      // elsewhere is loaded unless the user is in this editor.
+      // elsewhere is loaded unless the user is in this composer.
       dirty.current = false;
     }
     setConflict(result === "changed");
@@ -1579,7 +1579,12 @@ function Composer({
   // Message-local picks return with their recovered draft. Solo preferences
   // remain the chat's current choices, including edits made during an upload.
   const reconcileDraft = useEffectEvent(
-    (restored?: MentionDraft, recoveredPicks?: DraftPicks) => {
+    (
+      restored?: MentionDraft,
+      recoveredPicks?: DraftPicks,
+      // The draft was hidden until now, behind a message edit.
+      hidden = false,
+    ) => {
       traceDraft(scope, draftKey, "reconcile", diagnosticEditor);
       if (submission || editing.target || writing.current) return;
       if (accepted) {
@@ -1606,24 +1611,29 @@ function Composer({
           setPicks(recoveredPicks ?? {});
         return;
       }
+      const empty =
+        !valueRef.current.text.trim() &&
+        !valueRef.current.recipients.length &&
+        !composerMarkdown(valueRef.current).trim();
       // An explicit successful recovery may replace only the cleared follow-up,
       // never a meaningful unsaved edit. Ordinary external revisions keep their
       // conflict behavior.
-      if (
-        recovering &&
-        !valueRef.current.text.trim() &&
-        !valueRef.current.recipients.length &&
-        !composerMarkdown(valueRef.current).trim() &&
-        !sendAttempt.current
-      )
-        loadSaved(current);
+      if (recovering && empty && !sendAttempt.current) loadSaved(current);
       else if (
         dirty.current ||
         sendAttempt.current ||
         // Text typed here is never replaced under the user: storage can lose
-        // a save that read back, and another window can write mid-typing.
+        // a save that read back, and another window can write mid-typing. The
+        // user is here while focus is in this composer, its controls included.
+        // A composer holding nothing has nothing to offer back.
         (edited.current &&
-          document.activeElement === input.current &&
+          !(
+            empty &&
+            !valueRef.current.forward &&
+            !valueRef.current.gifs?.length
+          ) &&
+          !hidden &&
+          form.current?.contains(document.activeElement) &&
           document.hasFocus())
       ) {
         diagnose("changed", revision.current, current);
@@ -1635,14 +1645,19 @@ function Composer({
   );
   const editingDraft = !!editing.target;
   const deferredRecovery = useRef<RecoveredSend | undefined>(undefined);
+  const wasEditing = useRef(false);
   useEffect(() => {
     if (submission) return;
     const stop = subscribeView(scope, () => reconcileDraft());
     // Reconcile changes while message-edit mode or mounting paused this listener.
+    // The draft restored on leaving an edit was hidden throughout it, so a
+    // fully saved one follows wherever focus lands afterwards.
     reconcileDraft(
       deferredRecovery.current?.draft,
       deferredRecovery.current?.picks,
+      wasEditing.current && !editingDraft,
     );
+    wasEditing.current = editingDraft;
     if (!editingDraft && deferredRecovery.current) {
       takeMissedRecovery(session, recoveryKey);
       setError(errorForRecovery(deferredRecovery.current.preparationError));

@@ -1177,6 +1177,16 @@ again. Remove is unavailable once delivery owns the message; use its delivery
 recovery controls instead. A save or recovery error keeps the draft or queued row
 available rather than silently discarding it.
 
+A conversation's draft is shared by every message box open on it, including
+other windows. A message box you are not working in follows a draft that was
+edited, sent or cleared elsewhere. **This draft changed elsewhere** appears
+instead when replacing the text could lose work: you have typed text and focus
+is still in that message box or its controls, the text was never saved, or a
+send was under way. **Keep my draft** saves the text you see; **Load saved
+draft** replaces it. An empty message box always follows. A draft set aside
+while you edit a message follows changes made during the edit unless it had
+unsaved text.
+
 ## Choosing and customizing agents
 
 - An optional plugin can attach context to a native session. Follow-ups and
