@@ -1665,6 +1665,20 @@
     margin-inline-start: auto;
   }
 
+  @container (max-width: 7rem) {
+    .navigation-section-heading:has(> [data-reserve-space])
+      > .navigation-section-heading-label {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .navigation-section-heading:has(> [data-reserve-space])
+      > .navigation-section-heading-label
+      > :not(:first-child) {
+      justify-self: end;
+    }
+  }
+
   /* A disclosure heading's trigger spans the label slot, so the inset is its
      hit area and focus ring; the actions keep a small trailing inset. */
   .navigation-section-heading[data-disclosure] {
