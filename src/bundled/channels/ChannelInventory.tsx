@@ -305,11 +305,18 @@ export function ChannelInventory({
   );
   // A new message from someone else resurfaces a DM the viewer hid: the relay
   // clears the hide before it fans the message out, so read from its writer.
+  // Agent-only coordination leaves the hide in place, so it needs no read.
   useEffect(
     () =>
       queries.subscribeIncoming((messages) => {
         const { hidden } = lifecycle.snapshot();
-        if (messages.some((message) => hidden.includes(message.channelId)))
+        if (
+          messages.some(
+            (message) =>
+              message.audience !== "agents" &&
+              hidden.includes(message.channelId),
+          )
+        )
           void lifecycle.refreshVisibility(visibilityRequest.current?.signal, {
             trailing: true,
             strong: true,

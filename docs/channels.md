@@ -700,7 +700,8 @@ rejects older snapshots. Live cross-device visibility updates are deferred; any
 confirmed `41010` open, including New message Send, unhides the DM, and its row
 returns when visibility next refreshes. A new message from another member also
 unhides it on the relay, which republishes the snapshot before the message fans
-out, so its arrival in a hidden DM refreshes visibility and the row returns.
+out, so its arrival in a hidden DM refreshes visibility and the row returns. A
+message only for agents (`audience: agents`) leaves the DM hidden.
 
 A definitive rejection offers retry without optimistic removal. If publication or
 confirmation has an uncertain outcome, the dialog warns that the command may have
