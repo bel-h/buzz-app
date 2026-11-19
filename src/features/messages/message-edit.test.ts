@@ -147,6 +147,32 @@ describe("message edit attachments", () => {
     expect(edited.attachments.map(({ url }) => url)).toEqual([file]);
   });
 
+  it("keeps image Markdown that places no attachment in the prose", () => {
+    const row = firstRow([
+      {
+        ...sent,
+        content: `Hello ![x](http://example.org/a.png)\n\n${sent.content}`,
+      },
+    ]);
+    expect(messageEditDraft(row, profiles).text).toBe(
+      "Hello ![x](http://example.org/a.png)\n\nHello",
+    );
+  });
+
+  it("removes a Markdown-only image by dropping its Markdown", () => {
+    const gif = "![party](https://example.com/party.gif)";
+    const row = firstRow([
+      { ...original, content: `Hi\n\n${gif}`, tags: [["h", "room"]] },
+    ]);
+    const draft = messageEditDraft(row, profiles);
+    expect(draft.text).toBe("Hi");
+    expect(draft.attachments.map(({ markdown }) => markdown)).toEqual([[gif]]);
+    expect(messageEditContent(draft.text, draft.attachments)).toBe(
+      `Hi\n\n${gif}`,
+    );
+    expect(messageEditContent(draft.text, [])).toBe("Hi");
+  });
+
   it("treats an edit's empty attachment set as authoritative", () => {
     const edited = firstRow([sent, editOf("Hello", [])]);
     expect(edited.attachments).toEqual([]);

@@ -222,18 +222,35 @@ it.each([9, 40002])(
     expect(after).toEqual(
       foldMessages(channel, relay.pubkey, [original, media, text, spoof]),
     );
-    const deleted = signed(alice, {
+    const latestDeleted = signed(alice, {
       kind: 5,
       content: "",
       created_at: 14,
       tags: [
         ["h", channel],
-        ["e", media.id],
         ["e", text.id],
       ],
     });
+    const previous = projection.reconcile(
+      [original, media, text, spoof, latestDeleted],
+      [],
+    );
+    expect(previous[0]).toMatchObject({
+      content: "Current",
+      attachmentSourceId: media.id,
+    });
+    expect(previous[0]?.attachments).toEqual(before[0]?.attachments);
+    const deleted = signed(alice, {
+      kind: 5,
+      content: "",
+      created_at: 15,
+      tags: [
+        ["h", channel],
+        ["e", media.id],
+      ],
+    });
     const restored = projection.reconcile(
-      [original, media, text, spoof, deleted],
+      [original, media, text, spoof, latestDeleted, deleted],
       [],
     );
     expect(restored[0]?.attachmentSourceId).toBeUndefined();

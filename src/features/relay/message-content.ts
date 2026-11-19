@@ -184,8 +184,8 @@ export function projectMarkdownAttachments(
   seams: readonly number[];
   urls: readonly string[];
   names: readonly ProjectedAttachmentLinkName[];
-  /** The stripped source of each attachment, in order. */
-  snippets: readonly Readonly<{ url: string; markdown: string }>[];
+  /** Source ranges of attachment Markdown with a safe URL, in order. */
+  sources: readonly Readonly<{ url: string; start: number; end: number }>[];
 } {
   const { tooDeep, definitions, images, links } = scanMarkdown(content);
   if (tooDeep)
@@ -194,7 +194,7 @@ export function projectMarkdownAttachments(
       seams: Object.freeze([]),
       urls: Object.freeze([]),
       names: Object.freeze([]),
-      snippets: Object.freeze([]),
+      sources: Object.freeze([]),
     };
 
   const urls: string[] = [];
@@ -236,13 +236,10 @@ export function projectMarkdownAttachments(
     ...stripRanges(content, ranges),
     urls: Object.freeze(urls),
     names: Object.freeze(names),
-    snippets: Object.freeze(
-      ranges
-        .filter((range) => range.url)
-        .sort((a, b) => a.start - b.start)
-        .map(({ url = "", start, end }) =>
-          Object.freeze({ url, markdown: content.slice(start, end) }),
-        ),
+    sources: Object.freeze(
+      ranges.flatMap(({ url, start, end }) =>
+        url ? [Object.freeze({ url, start, end })] : [],
+      ),
     ),
   };
 }

@@ -56,7 +56,8 @@ export type EditAttachment = Readonly<{
   markdown: readonly string[];
 }>;
 
-/** Editable prose without attachment Markdown; attachments are kept separately. */
+/** Editable prose without attachment Markdown; attachments are kept separately.
+ * Only Markdown that places a row attachment leaves the prose, outermost first. */
 export function messageEditDraft(
   row: ChannelMessage,
   profiles: ReadonlyMap<string, Profile>,
@@ -64,14 +65,25 @@ export function messageEditDraft(
 ) {
   const body = messageEditText(row, profiles, agents);
   const urls = new Set(row.attachments.map(({ url }) => url));
-  const { content, snippets } = projectMarkdownAttachments(body, urls);
+  const ranges: { url: string; start: number; end: number }[] = [];
+  for (const range of [...projectMarkdownAttachments(body, urls).sources].sort(
+    (a, b) => a.start - b.start || b.end - a.end,
+  ))
+    if (urls.has(range.url) && !(range.start < (ranges.at(-1)?.end ?? 0)))
+      ranges.push(range);
+  let text = "";
+  let offset = 0;
+  for (const { start, end } of ranges) {
+    text += body.slice(offset, start);
+    offset = end;
+  }
   return {
-    text: content.trim(),
+    text: (text + body.slice(offset)).trim(),
     attachments: row.attachments.map((attachment) => ({
       attachment,
-      markdown: snippets
+      markdown: ranges
         .filter(({ url }) => url === attachment.url)
-        .map(({ markdown }) => markdown),
+        .map(({ start, end }) => body.slice(start, end)),
     })),
   };
 }
