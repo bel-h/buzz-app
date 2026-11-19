@@ -726,6 +726,13 @@ function paragraphMarkdown(
         value = value.replace(/[`\\]+$/, (tail) =>
           tail.replace(/[\\`]/g, "\\$&"),
         );
+      // The ATX parser strips a closing hash run after whitespace.
+      if (
+        parent?.type === "heading" &&
+        state.stack.includes("headingAtx") &&
+        info.after === "\n"
+      )
+        value = value.replace(/(^|[ \t])(#+)(?=[ \t]*$)/, "$1\\$2");
       // An odd authored slash must not escape the generated hard-break slash.
       if (
         mode === "document" &&

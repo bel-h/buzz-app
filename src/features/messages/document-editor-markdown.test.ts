@@ -142,6 +142,24 @@ it("loads editable H1–H6 headings and preserves them on save", () => {
   expect(documentEditorMarkdown(draft)).toBe(markdown);
 });
 
+it.each(["C #", "C ###", "###", "C#"])(
+  "preserves typed heading text ending in hashes: %s",
+  (text) => {
+    const heading = schema.nodes.heading.create(
+      { level: 2 },
+      schema.text(text),
+    );
+    const doc = schema.nodes.doc.create(null, heading);
+    const markdown = documentEditorMarkdown(projectComposerDocument(doc).draft);
+    const reopened = readComposerSnapshot(
+      documentEditorDraft(markdown).document,
+      "document",
+    );
+    expect(reopened?.firstChild?.type).toBe(schema.nodes.heading);
+    expect(reopened?.firstChild?.textContent).toBe(text);
+  },
+);
+
 it.each([
   "Setext heading\n===\n\nSecond\n---",
   "> ## Quoted heading\n>\n> Text",

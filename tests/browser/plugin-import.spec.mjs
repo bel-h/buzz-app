@@ -2802,8 +2802,8 @@ test("formatted documents create, reopen, and paste headings", async ({
   await rich.press("ControlOrMeta+z");
   await expect(rich.locator("p")).toHaveText("##");
   await rich.press("ControlOrMeta+Shift+z");
-  await page.keyboard.type("Typed heading");
-  await expect(heading).toHaveText("Typed heading");
+  await page.keyboard.type("Typed heading #");
+  await expect(heading).toHaveText("Typed heading #");
   await page.keyboard.press("Enter");
   await page.keyboard.type("Following paragraph");
   await expect(rich.locator("p")).toHaveText("Following paragraph");
@@ -2811,7 +2811,7 @@ test("formatted documents create, reopen, and paste headings", async ({
   await expect(reader.getByRole("status")).toHaveText("Saved 1");
   await reader.getByRole("button", { name: "Read Guide" }).click();
   await reader.getByRole("button", { name: "Edit Guide" }).click();
-  await expect(heading).toHaveText("Typed heading");
+  await expect(heading).toHaveText("Typed heading #");
 
   await rich.press("ControlOrMeta+a");
   await tableClipboard(rich, "paste", { text: "### Pasted heading" });
