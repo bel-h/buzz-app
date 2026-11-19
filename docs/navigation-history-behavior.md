@@ -135,14 +135,13 @@ once while the page stays open, and a reconnect neither opens it nor reports
 it missing again. It waits while the page's channel list is still loading, or
 a channel awaits its metadata or, after a start from the saved channel list,
 the roster's confirmation, and reports the workflow missing only once that
-list has settled. A workflow the reader selects, or a filter they
+list has settled, including when it settles with no channel for the page. On a
+list that is read but partial it reports the workflow missing and still opens
+it if its channel is listed later. A workflow the reader selects, or a filter they
 change, before the linked workflow has been read stands until a reconnect
 resets the page, which then opens the linked workflow. Retiring those visits
 after a reload is not claimed. While the Workflows plugin is turned off the
-action is still offered, and its visit shows the turned-off page: Back returns
-to the message and Forward to that page. Enabling Workflows from that page's
-Manage plugins and closing Settings opens the linked workflow in the same
-visit, and Back from it still returns to the message.
+action is not offered, so no such visit starts from a message.
 
 ## History and lifetime boundaries
 

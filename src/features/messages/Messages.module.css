@@ -3826,6 +3826,9 @@ html[data-keyboard-navigation]
 .workflowAction {
   margin: var(--space-2) 0 0;
 }
+.workflowActionPending {
+  visibility: hidden;
+}
 .composerSoloCards {
   container-type: inline-size;
   container-name: message-row;

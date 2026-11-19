@@ -2063,18 +2063,18 @@ and opens the workflow once its channel appears. Right after Buzz starts or
 reconnects, **Workflows** shows **Reading channels…** until it has confirmed
 your channels with the community, and lists your workflows, or opens the
 linked one, after that. If **Workflows** can’t find
-it after that, nothing opens and a notice reads **“Couldn’t find that workflow
-here. It may have been deleted, or its channel may not be listed on this
-page.”** The card has no such action when the
-workflow was deleted, when it belongs to a channel you aren’t in, when Buzz
-couldn’t check, or when the message is older than this feature. Seeing a
+it after that, or has no channel of yours to list, nothing opens and a notice
+reads **“Couldn’t find this workflow. It may have been deleted.”** On a very
+long channel list that is still arriving, the notice can come first; the
+workflow still opens if its channel then appears. The card has no such action
+when the workflow was deleted, when it belongs to a channel you aren’t in, when
+Buzz couldn’t check, or when the message is older than this feature. Seeing a
 workflow’s message does not give you access to the workflow.
 
-If you can view the workflow, **View workflow** appears even when the
-**Workflows** plugin is turned off, as it is on a fresh install. It then opens
-a page that says **Workflows is turned off**, and **Back** returns you to the
-message. To see the workflow from that page, choose **Manage plugins**, choose
-**Enable** for Workflows and close Settings: Buzz opens the linked workflow.
+**View workflow** needs the **Workflows** plugin, which is turned off on a
+fresh install. While it is off, the card has no such action and Buzz does not
+check the workflow; the message itself looks the same. Turn **Workflows** on
+under **Manage plugins** in Settings, then open the card again.
 
 ## Deleting an agent’s workflow
 
