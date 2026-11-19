@@ -91,6 +91,7 @@ export function SidebarUnread({
   const ownList = useRef<HTMLElement>(null);
   const list = listRef ?? ownList;
   const content = useRef<HTMLDivElement>(null);
+  const upperCue = useRef<HTMLDivElement>(null);
   const lowerCue = useRef<HTMLDivElement>(null);
   const [edges, setEdges] = useState<Edges>({ above: [], below: [] });
   useEffect(() => {
@@ -120,15 +121,19 @@ export function SidebarUnread({
       if (!frame) frame = requestAnimationFrame(measure);
     };
     const cue = lowerCue.current;
+    const upper = upperCue.current;
     const action = floatingAction?.current;
     let positionFrame = 0;
     const schedulePosition = () => {
-      if (!cue || !action || positionFrame) return;
+      if (!cue || !upper || !action || positionFrame) return;
       // The adjustments below change an observed width. Do them outside the
       // ResizeObserver delivery so each pass settles before another runs.
       positionFrame = requestAnimationFrame(() => {
         positionFrame = 0;
+        upper.removeAttribute("data-beside-action");
+        upper.removeAttribute("data-share-action-row");
         cue.removeAttribute("data-beside-action");
+        cue.removeAttribute("data-share-action-row");
         const cueRect = cue.getBoundingClientRect();
         const actionRect = action.getBoundingClientRect();
         const center = cueRect.left + cueRect.width / 2;
@@ -156,13 +161,28 @@ export function SidebarUnread({
         const lifted = actionRect.width > 0 && cue.offsetWidth > available;
         if (lifted) cue.removeAttribute("data-preview-limit");
         cue.toggleAttribute("data-lifted", lifted);
-        // The stacked cue must fit inside the list frame that clips it.
-        if (
-          lifted &&
-          cue.offsetHeight + Number.parseFloat(getComputedStyle(cue).bottom) >
-            viewport.clientHeight
-        ) {
+
+        // Measure in the list frame so the entrance animation cannot change fit.
+        const upperVisible = upper.dataset.visible === "true";
+        const lowerVisible = cue.dataset.visible === "true";
+        const upperEnd = upperVisible
+          ? upper.offsetTop + upper.offsetHeight + gap
+          : 0;
+        if (lifted && cue.offsetTop < upperEnd) {
           cue.dataset.besideAction = "";
+        }
+        const actionTop = actionRect.top - viewport.getBoundingClientRect().top;
+        if (
+          upperVisible &&
+          actionRect.width > 0 &&
+          (upperEnd > actionTop || (lowerVisible && upperEnd > cue.offsetTop))
+        ) {
+          upper.dataset.besideAction = "";
+          if (lowerVisible) {
+            cue.dataset.besideAction = "";
+            cue.dataset.shareActionRow = "";
+            upper.dataset.shareActionRow = "";
+          }
         }
       });
     };
@@ -172,13 +192,18 @@ export function SidebarUnread({
     });
     resize.observe(viewport);
     resize.observe(rows);
-    if (cue && action) {
+    if (cue && upper && action) {
       resize.observe(cue);
+      resize.observe(upper);
       resize.observe(action);
       schedulePosition();
     }
     const mutations = new MutationObserver((records) => {
-      if (cue && records.some(({ target }) => cue.contains(target)))
+      if (
+        records.some(
+          ({ target }) => cue?.contains(target) || upper?.contains(target),
+        )
+      )
         schedulePosition();
       if (records.some(({ target }) => rows.contains(target))) schedule();
     });
@@ -197,12 +222,15 @@ export function SidebarUnread({
         "data-moving",
       ],
     });
-    if (cue && action) {
-      mutations.observe(cue, {
-        subtree: true,
-        childList: true,
-        characterData: true,
-      });
+    if (cue && upper && action) {
+      for (const edge of [cue, upper]) {
+        mutations.observe(edge, {
+          subtree: true,
+          childList: true,
+          characterData: true,
+          attributeFilter: ["data-visible"],
+        });
+      }
     }
     viewport.addEventListener("scroll", schedule, { passive: true });
     schedule();
@@ -212,7 +240,10 @@ export function SidebarUnread({
       resize.disconnect();
       mutations.disconnect();
       viewport.removeEventListener("scroll", schedule);
-      cue?.removeAttribute("data-beside-action");
+      for (const edge of [cue, upper]) {
+        edge?.removeAttribute("data-beside-action");
+        edge?.removeAttribute("data-share-action-row");
+      }
       cue?.removeAttribute("data-lifted");
       cue?.removeAttribute("data-preview-limit");
     };
@@ -259,7 +290,7 @@ export function SidebarUnread({
     const attention = edges[edge].some((target) => target.attention);
     return (
       <div
-        ref={edge === "below" ? lowerCue : undefined}
+        ref={edge === "below" ? lowerCue : upperCue}
         className={styles.unreadEdge}
         data-edge={edge}
         key={edge}

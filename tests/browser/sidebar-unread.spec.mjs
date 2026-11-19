@@ -816,7 +816,7 @@ test.describe("DM preview wiring", () => {
     await expect(below.locator("..")).toHaveCSS("bottom", "12px");
     await expect(visibleAvatars).toHaveCount(3);
   });
-  test("the lower unread cue is reachable in a short drawer at 200% interface size", async ({
+  test("both unread cues and New are reachable in a short drawer at 200% interface size", async ({
     page,
     app,
   }) => {
@@ -866,6 +866,20 @@ test.describe("DM preview wiring", () => {
     await page.keyboard.press("Shift+Tab");
     await expect(below).toBeFocused();
     await page.keyboard.press("Enter");
+    await expect(firstUnread).toBeFocused();
+
+    const above = cue(page, "above");
+    for (const height of [340, 240]) {
+      await page.setViewportSize({ width: 568, height });
+      await scrollRowAbove(page, "beta");
+      await expect(above).toHaveAccessibleName("1 unread conversation above");
+      await expect(below).toHaveAccessibleName("6 unread conversations below");
+      for (const control of [above, below, action]) {
+        await expect(control).toBeInViewport({ ratio: 1 });
+        await control.click({ trial: true });
+      }
+    }
+    await above.click();
     await expect(firstUnread).toBeFocused();
 
     await scroll(page, 0);
