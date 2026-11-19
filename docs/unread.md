@@ -269,8 +269,9 @@ timeline and the thread being read, without reading unopened threads' replies.
   for markers. Marker failure stays visible separately in `sync()` even when
   evidence succeeds. Concurrent `ensure()` calls share active work; a failed attempt
   needs explicit `refresh()` or reconnect, not an unlimited automatic retry loop.
-- `attentionCount` is a separate observed subset: DMs, mentions, broadcasts and
-  replies in the viewer's conversations. It does not trigger notifications or
+- `attentionCount` is a separate observed subset: DMs, mentions and replies in
+  the viewer's conversations, including those also sent to the channel. A
+  broadcast outside them counts as ordinary unread. It does not trigger notifications or
   implement mute policy.
 - `markThrough(target, messageId)` is explicit prefix intent through verified
   evidence. It can mark unloaded earlier messages read; do not use it for viewport
@@ -329,8 +330,9 @@ the dots from retained unread evidence. The promoted Bestie DM also hides muted
 unread dots; its label follows the same mute rule.
 Solo chat labels strengthen for any observed unread message, including mentions,
 broadcasts and relevant replies, even when muted, so Solo rows omit the attention dot.
-Ordinary unread renders no row marker. Unmuted DMs, mentions, broadcasts, and
-relevant thread replies add one accent dot; non-DM row numerals are omitted and DM
+Ordinary unread renders no row marker. Unmuted DMs, mentions and relevant thread
+replies add one accent dot; a broadcast from a thread the viewer is not part of
+only strengthens the label, like a top-level post; non-DM row numerals are omitted and DM
 avatars are reserved for promoted offscreen cues. Thread activity reuses that dot:
 its hover/focus/click popover groups unread replies by canonical thread root and
 opens the existing thread panel. Above the threads it lists unread top-level messages that
@@ -413,7 +415,8 @@ channel. A conversation is the set of direct replies to one parent message. The
 viewer is part of it when the viewer wrote the parent or also replied to that
 parent, or wrote or replied anywhere under the same canonical thread root, as in
 the reference client. A thread the viewer has not posted in therefore stays
-quiet, apart from mentions and broadcasts. Explicit per-message unread intent still
+quiet, apart from mentions and broadcasts; such a broadcast counts as ordinary
+unread, without attention or thread activity. Explicit per-message unread intent still
 applies to any reply. The same rule feeds channel and thread counts, thread
 activity, per-message attention and the `thread` notification category.
 

@@ -847,9 +847,10 @@ export function createUnread({
       joined.has(conversationKey(channelId, parentId))
     );
   };
-  /** A reply that lights its thread in channel activity. */
+  /** A reply that lights its thread in channel activity. Also sending a reply
+   * to the channel shows it in the timeline, not in the viewer's threads. */
   const activityEvidence = (entry: Evidence) =>
-    entry.mentioned || entry.broadcast || conversation(entry);
+    entry.mentioned || conversation(entry);
   /** Top-level posts always count. A reply counts only in the viewer's own
    * conversations, or when it is a DM, mentions the viewer, or is broadcast.
    * Quiet agent messages never count. */
@@ -860,11 +861,14 @@ export function createUnread({
       entry.mentioned ||
       entry.broadcast ||
       conversation(entry));
-  /** Retained evidence cannot decide this reply's conversation yet. */
+  /** Retained evidence cannot decide this reply's conversation yet. A
+   * broadcast counts either way, but only its conversation earns attention. */
   const undecided = (entry: Evidence, dm: boolean) =>
     !entry.quiet &&
     !!entry.parentId &&
-    !relevant(entry, dm) &&
+    !dm &&
+    !entry.mentioned &&
+    !conversation(entry) &&
     chosen(entry) === undefined &&
     !lookups.get(conversationKey(entry.channelId, entry.parentId))?.done;
   /** `seen` is the row's `seen:` cut: only a channel row passes one. */
@@ -1095,6 +1099,8 @@ export function createUnread({
           ? "thread"
           : undefined;
   }
+  /** Read by its own receipt, never by a timestamp cut: attention, and
+   * broadcasts, which the timeline shows apart from their thread. */
   function priority(entry: Evidence, dm: boolean) {
     return !!category(entry, dm) || entry.broadcast;
   }
@@ -1214,7 +1220,7 @@ export function createUnread({
       want(entry, dm);
       if (!isUnread(entry, state, dm)) continue;
       count++;
-      if (priority(entry, dm)) attention++;
+      if (category(entry, dm)) attention++;
       if (
         target.kind === "channel" &&
         (!entry.parentId || entry.broadcast) &&
@@ -1227,7 +1233,7 @@ export function createUnread({
       )
         continue;
       rowCount++;
-      if (priority(entry, dm)) rowAttention++;
+      if (category(entry, dm)) rowAttention++;
       if (entry.rootId && activityEvidence(entry)) rowThreads.add(entry.rootId);
     }
     const manual = reads.localUnread(key)
@@ -1914,8 +1920,7 @@ export function createUnread({
     const structuralRootId =
       !entry.rootId &&
       (chosen(entry) === true ||
-        ((entry.mentioned || entry.broadcast || conversation(entry)) &&
-          isUnread(entry, reads.state(), dm)))
+        (activityEvidence(entry) && isUnread(entry, reads.state(), dm)))
         ? threadRootId
         : undefined;
     const structuralRecovery = structuralRootId !== undefined;

@@ -459,7 +459,7 @@ it("a deletion cannot use revoked unread evidence to delete an accessible target
   expect(h.snapshot().observedCount).toBe(1);
 });
 
-it("promotes mentions, broadcasts and participating-thread replies without promoting ordinary unread", () => {
+it("promotes mentions and participating-thread replies, broadcasts only in the viewer's threads, without promoting ordinary unread", () => {
   const h = setup();
   h.grant("room");
   const root = message(h.viewer, "room", "root", 10);
@@ -487,12 +487,47 @@ it("promotes mentions, broadcasts and participating-thread replies without promo
       ["broadcast", "1"],
     ],
   );
-  h.emit([mentioned, broadcast, participatingReply, missingRootBroadcast]);
-  expect(h.snapshot()).toMatchObject({ observedCount: 5, attentionCount: 4 });
+  const otherRoot = message(h.alice, "room", "someone else's root", 16);
+  const otherBroadcast = message(h.alice, "room", "broadcast elsewhere", 17, [
+    ["e", otherRoot.id, "", "reply"],
+    ["broadcast", "1"],
+  ]);
+  h.emit([
+    mentioned,
+    broadcast,
+    participatingReply,
+    missingRootBroadcast,
+    otherRoot,
+    otherBroadcast,
+  ]);
+  // Broadcasts outside the viewer's threads count as ordinary unread: bold,
+  // no dot, and no thread activity.
+  expect(h.snapshot()).toMatchObject({ observedCount: 7, attentionCount: 3 });
   expect(h.session.unread.activity("room").items).toHaveLength(1);
+  expect(h.session.unread.attention("room", otherBroadcast.id)).toMatchObject({
+    unread: true,
+  });
   expect(
     h.session.unread.attention("room", missingRootBroadcast.id),
   ).toMatchObject({ status: "unknown", unread: true });
+});
+
+it("a broadcast in a thread the viewer started outside the retained window earns its dot once the lookup finds the root", async () => {
+  const h = setup();
+  h.grant("room");
+  const root = message(h.viewer, "room", "older own root", 10);
+  h.query.mockImplementation(async (filters) =>
+    filters.some((filter) => filter.ids?.includes(root.id)) ? [root] : [],
+  );
+  const broadcast = message(h.alice, "room", "broadcast reply", 12, [
+    ["e", root.id, "", "reply"],
+    ["broadcast", "1"],
+  ]);
+  h.emit([broadcast]);
+  expect(h.snapshot()).toMatchObject({ observedCount: 1, attentionCount: 0 });
+  await vi.waitFor(() =>
+    expect(h.snapshot()).toMatchObject({ observedCount: 1, attentionCount: 1 }),
+  );
 });
 
 it("the channel snapshot names the oldest unread message its timeline shows", async () => {
