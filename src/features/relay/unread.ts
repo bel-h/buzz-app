@@ -111,6 +111,11 @@ export type ThreadActivityItem = Readonly<{
   createdAt: number;
   preview: string;
   unreadCount: number;
+  /** An unread reply is in a conversation of the viewer's own, rather than
+   * counting only as a mention or broadcast. */
+  participating?: true;
+  /** The newest unread reply that mentions the viewer. */
+  mention?: MentionActivityItem;
 }>;
 export type MentionActivityItem = Readonly<{
   channelId: string;
@@ -192,6 +197,20 @@ export interface UnreadCapability {
     target: ReadTarget,
     messageId: string,
   ): Promise<ReadMutationResult>;
+  /** An Activity row's `readThrough` steps as one explicit intent, saved in
+   * order. Local unread intent is cut once, at the call: a newer Mark as
+   * unread on a later step's target, even one queued behind an earlier step,
+   * rejects that step and stops the rest. */
+  markReadThrough(
+    steps: readonly Readonly<{ target: ReadTarget; messageId: string }>[],
+  ): Promise<readonly ReadMutationResult[]>;
+  /** `markReadThrough`'s steps, each saved when its caller runs it, so a
+   * caller can check between steps and retry one. The cut is still the
+   * preparing call's: running a step again cannot clear a newer Mark as
+   * unread on its target. Run them in order. */
+  prepareReadThrough(
+    steps: readonly Readonly<{ target: ReadTarget; messageId: string }>[],
+  ): readonly (() => Promise<ReadMutationResult>)[];
   /** Explicit read of these verified top-level messages in one save, as the
    * reader's catch-up reads a channel bottom: the channel catch-up mark reads
    * ordinary messages through the newest, and still-unread mentions,
@@ -270,6 +289,23 @@ const EVIDENCE_LOW_EVENTS = 3072;
 const EVIDENCE_LOW_BYTES = 6 * 1024 * 1024;
 const eventBytes = (event: RelayEvent) =>
   new TextEncoder().encode(JSON.stringify(event)).byteLength;
+/** A row's preview text: its body, or a plain description of its attachments
+ * when attachment presentation left no text, so the row is never blank. */
+const previewText = (message: ChannelMessage) => {
+  if (message.content.trim() || !message.attachments.length)
+    return message.content;
+  const count = message.attachments.length;
+  const [first] = message.attachments;
+  const kind = message.attachments.every((item) => item.kind === first?.kind)
+    ? first?.kind
+    : undefined;
+  const noun =
+    kind === "image" ? "image" : kind === "video" ? "video" : "attachment";
+  return count === 1
+    ? `${noun[0]?.toUpperCase()}${noun.slice(1)}`
+    : `${count} ${noun}s`;
+};
+
 /** Rendered message order: effective ms, then event id. */
 const order = (a: RelayEvent, b: RelayEvent) =>
   eventMs(a) - eventMs(b) || a.id.localeCompare(b.id);
@@ -1291,7 +1327,7 @@ export function createUnread({
     let presented: Map<string, string> | undefined;
     const previewOf = (event: RelayEvent) => {
       presented ??= new Map(
-        folded(channelId).map((message) => [message.id, message.content]),
+        folded(channelId).map((message) => [message.id, previewText(message)]),
       );
       return presented.get(event.id) ?? event.content;
     };
@@ -1325,6 +1361,28 @@ export function createUnread({
         continue;
       const current = grouped.get(rootId);
       const preview = previewOf(event);
+      const participating = conversation(evidence)
+        ? true
+        : current?.participating;
+      const mention =
+        category(evidence, dm) === "mention" &&
+        (!current?.mention ||
+          event.created_at > current.mention.createdAt ||
+          (event.created_at === current.mention.createdAt &&
+            event.id < current.mention.messageId))
+          ? Object.freeze({
+              channelId,
+              messageId: event.id,
+              authorId: event.pubkey,
+              workflowOwnerId: workflowOwner(event, workflowAuthority),
+              createdAt: event.created_at,
+              preview,
+            })
+          : current?.mention;
+      const marks = {
+        ...(participating ? { participating } : {}),
+        ...(mention ? { mention } : {}),
+      };
       if (!current) {
         grouped.set(
           rootId,
@@ -1337,6 +1395,7 @@ export function createUnread({
             createdAt: event.created_at,
             preview,
             unreadCount: 1,
+            ...marks,
           }),
         );
         continue;
@@ -1358,6 +1417,7 @@ export function createUnread({
           createdAt: latest ? event.created_at : current.createdAt,
           preview: latest ? preview : current.preview,
           unreadCount: current.unreadCount + 1,
+          ...marks,
         }),
       );
     }
@@ -1401,7 +1461,11 @@ export function createUnread({
             item.workflowOwnerId === other.workflowOwnerId &&
             item.createdAt === other.createdAt &&
             item.preview === other.preview &&
-            item.unreadCount === other.unreadCount
+            item.unreadCount === other.unreadCount &&
+            item.participating === other.participating &&
+            item.mention?.messageId === other.mention?.messageId &&
+            item.mention?.authorId === other.mention?.authorId &&
+            item.mention?.preview === other.mention?.preview
           );
         }))) &&
     (a.mentions?.length ?? 0) === (b.mentions?.length ?? 0) &&
@@ -1484,7 +1548,7 @@ export function createUnread({
         }
         if (!groups.size) continue;
         const rows = folded(channel.id);
-        const content = new Map(rows.map((row) => [row.id, row.content]));
+        const content = new Map(rows.map((row) => [row.id, previewText(row)]));
         // A session's top-level row shows its newest message from someone
         // else, unless that message is the root of its own thread row. This
         // mostly matches its newest evidence, but follows a relay-signed row's
@@ -3004,6 +3068,40 @@ export function createUnread({
           true,
         ),
       );
+    },
+    async markReadThrough(steps) {
+      const results: ReadMutationResult[] = [];
+      for (const save of capability.prepareReadThrough(steps))
+        results.push(await save());
+      return results;
+    },
+    prepareReadThrough(steps) {
+      const generation = epoch;
+      const admitted = steps.map(({ target, messageId }) => ({
+        target,
+        messageId,
+        event: requireMessage(target, messageId),
+      }));
+      // Reserve one saved cut at the click, before any newer manual action.
+      const cut = reads.captureLocalUnreadRevision();
+      return admitted.map(({ target, messageId, event }) => {
+        const fence = reads.captureLocalUnread([targetKey(target)], cut);
+        return () =>
+          serialize(target.channelId, () =>
+            reads.read(
+              targetKey(target),
+              event.created_at,
+              () =>
+                !closed &&
+                generation === epoch &&
+                requireMessage(target, messageId) === event,
+              true,
+              undefined,
+              undefined,
+              fence,
+            ),
+          );
+      });
     },
     async markTimelineRead(channelId, messageIds) {
       const target = { kind: "channel" as const, channelId };
