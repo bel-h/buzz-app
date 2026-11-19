@@ -2181,15 +2181,17 @@ test("a Git-installed plugin reviews its URL self-update and survives requester 
     .poll(() => page.evaluate(() => typeof window.requestMigration))
     .toBe("function");
   await page.evaluate(() => window.requestMigration());
-  const review = page
+  const migrationReview = page
     .getByRole("dialog", { name: "Update Artifact", exact: true })
-    .filter({ has: page.getByRole("button", { name: "Update", exact: true }) });
-  await expect(review).toContainText(
-    "This update switches this plugin from Git to a packaged download.",
-  );
-  await expect(review).toContainText(artifactUrl);
-  await review.getByRole("button", { name: "Update", exact: true }).click();
-  await expect(review).toBeHidden();
+    .filter({
+      hasText:
+        "This update switches this plugin from Git to a packaged download.",
+    });
+  await expect(migrationReview).toContainText(artifactUrl);
+  await migrationReview
+    .getByRole("button", { name: "Update", exact: true })
+    .click();
+  await expect(migrationReview).toBeHidden();
   await expect
     .poll(() => page.evaluate(() => window.migrationOutcome))
     .toBe("updated");
