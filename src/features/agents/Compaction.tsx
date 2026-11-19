@@ -18,8 +18,7 @@ const parse = (text: string) => {
   return compactAt(tokens) ? tokens : undefined;
 };
 
-/** What the field does, which a harness can add to. */
-export const COMPACTION =
+const COMPACTION =
   "Compacts at this many tokens, or sooner if the model's context window fills first.";
 
 const INVALID = `Enter a whole number of at least ${MIN_COMPACT_AT / 1000}K, or leave it blank for the harness default.`;
@@ -29,12 +28,10 @@ const INVALID = `Enter a whole number of at least ${MIN_COMPACT_AT / 1000}K, or 
  * `onChange`; anything else keeps its error and stops its form submitting. */
 export function CompactionField({
   value,
-  description = COMPACTION,
   disabled = false,
   onChange,
 }: {
   value: string | undefined;
-  description?: string;
   disabled?: boolean;
   onChange(value: string): void;
 }) {
@@ -53,7 +50,7 @@ export function CompactionField({
             <span className="sr-only">(thousands of tokens)</span>
           </>
         }
-        subtitle={description}
+        subtitle={COMPACTION}
         trailing={(label) => (
           <div className="w-40">
             <InputGroup
