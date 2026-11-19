@@ -221,7 +221,7 @@ it("keeps the existing local migration flow available", async () => {
 });
 
 it.each(["dropped", "moved"] as const)(
-  "only warns about Sessions when scope is dropped (%s)",
+  "omits session scope from the migration confirmation (%s)",
   async (outcome) => {
     const user = userEvent.setup();
     const { previewRetype } = fixture({ hosted: false });
@@ -240,13 +240,9 @@ it.each(["dropped", "moved"] as const)(
     const dialog = within(
       await screen.findByRole("dialog", { name: "Move Ada to Next?" }),
     );
-    if (outcome === "dropped") {
-      expect(dialog.getByText("Sessions").nextElementSibling).toHaveTextContent(
-        /^Dropped$/,
-      );
-    } else {
-      expect(dialog.queryByText("Sessions")).not.toBeInTheDocument();
-    }
+    expect(
+      dialog.queryByText(/^(Sessions|Session scope)$/i),
+    ).not.toBeInTheDocument();
   },
 );
 
