@@ -3303,8 +3303,13 @@ html[data-keyboard-navigation] .rawDiff:focus-visible {
   opacity: 0;
   pointer-events: none;
 }
+/* Standalone :focus-within: compounded with :is() or :not(), WebKit
+   restyles the whole document on every focus change. */
 :where(html[data-message-density="compact"])
-  .message:is(:hover, :focus-within, [data-actions-revealed])
+  .message:is(:hover, [data-actions-revealed])
+  .continuationTime,
+:where(html[data-message-density="compact"])
+  .message:focus-within
   .continuationTime {
   opacity: 1;
   pointer-events: auto;
