@@ -704,7 +704,15 @@ export class PiRuntime {
         key,
       });
       const noteRoot = key === channel ? undefined : root;
-      let notes: readonly string[] = [];
+      // Pi asks for the prompt just before it submits the turn, once it has
+      // found no earlier submission of this request and set the turn up.
+      // Plugins' notes are taken only then, once, so a turn that fails, is
+      // withdrawn, or is answered by an earlier submission leaves them for
+      // the next. An Attention wake's or an accepted turn's text is built
+      // again then, so it reads what is current.
+      const refresh = !!(attention || accepted);
+      let turned: string | undefined;
+      let notes: readonly string[] | undefined;
       const turn = async () =>
         turnPrompt({
           ...(await this.turn(
@@ -722,8 +730,6 @@ export class PiRuntime {
             ? { wake: { ...wake, text: (await wakeText?.()) ?? wake.text } }
             : {}),
         });
-      const prompt = async () =>
-        this.review(entry, await turn(), notes, channel, noteRoot);
       // A conversation's tools default to its thread; a conversation shared
       // by several threads is told which to reply in instead.
       const context: Context = topLevel
@@ -736,28 +742,23 @@ export class PiRuntime {
         key,
         scope: topLevel ? channel : root,
         where,
-        ...(attention || accepted
-          ? {
-              prompt: async () => {
-                const text = await prompt();
-                if (interrupted || (current && !current())) return;
-                accepted?.();
-                return { text, steer: steerPrompt(text) };
-              },
-            }
-          : {}),
+        prompt: async () => {
+          const base = refresh || turned === undefined ? await turn() : turned;
+          if (refresh && (interrupted || (current && !current()))) return;
+          accepted?.();
+          notes ??= agent.notes?.(channel, noteRoot) ?? [];
+          const text = this.review(entry, base, notes, channel, noteRoot);
+          return { text, steer: steerPrompt(text) };
+        },
         ...(step ? { step } : {}),
         ...(acknowledged ? { acknowledged } : {}),
         ...(superseded ? { superseded } : {}),
       });
       const picked = await this.turnOf(entry, agent.key, model, effort, key);
-      const turned = await turn();
+      turned = await turn();
       this.live(entry, agent.key);
       if (interrupted || (wake && current && !current())) return;
-      // Plugins' notes wait until the turn is handed over, so one that fails
-      // or is cancelled before then leaves them for the next.
-      notes = agent.notes?.(channel, noteRoot) ?? [];
-      const text = this.review(entry, turned, notes, channel, noteRoot);
+      const text = this.review(entry, turned, [], channel, noteRoot);
       submitted = await this.deliver(
         entry,
         agent.key,
@@ -770,7 +771,7 @@ export class PiRuntime {
           steer: steerPrompt(text),
           request,
           ...(attention ? { reply: where } : {}),
-          ...(attention || accepted ? { refresh: true } : {}),
+          refresh: true,
           // A mention's request row notes how it ran; a wake has none, so
           // its turn in this conversation's Activity does.
           ...(wake && gatewayFallback
@@ -783,8 +784,11 @@ export class PiRuntime {
         },
         () => !interrupted && (!wake || !current || current()),
       );
-      // Pi answered that it did not take the turn.
-      if (submitted === false) agent.restoreNotes?.(channel, notes, noteRoot);
+      // Pi answered that it did not take the turn. Notes taken for one whose
+      // outcome is unknown, as when it threw, stay taken: a lost note rather
+      // than one given twice.
+      if (submitted === false && notes)
+        agent.restoreNotes?.(channel, notes, noteRoot);
       if (!submitted) return;
       if (submitted.session !== undefined)
         void this.prompts(agent.key).save(

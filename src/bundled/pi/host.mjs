@@ -2334,6 +2334,23 @@ export function serve({
           // A `new` session a host stopped partway through is done first.
           if (opened.recorded.resets.has(key))
             await resetPending(opened, conversation, key);
+          // A request Pi has already is answered by its own submission, in
+          // the mode it ran in: asked again, it binds and configures nothing,
+          // and its prompt is not built again, so notes it would take stay
+          // for the next turn. Its run, continuing, reads the memory and
+          // messages it was given.
+          const held = await opened.storage.submissionByRequest(
+            conversation.id,
+            turn.request,
+            context,
+          );
+          if (held) {
+            opened.cores.set(conversation.id, turn.core?.text);
+            return placed({
+              submission: held.id,
+              conversation: conversation.id,
+            });
+          }
           // An ordinary turn, in a conversation with no gateway work, runs
           // as on main.
           if (
@@ -2365,21 +2382,6 @@ export function serve({
             if (!submitted) return false;
             if (session !== undefined) Object.assign(submitted, { session });
             return placed(submitted);
-          }
-          // A request Pi has already is answered by its own submission, in
-          // the mode it ran in: asked again, it binds and configures nothing.
-          // Its run, continuing, reads the memory and messages it was given.
-          const held = await opened.storage.submissionByRequest(
-            conversation.id,
-            turn.request,
-            context,
-          );
-          if (held) {
-            opened.cores.set(conversation.id, turn.core?.text);
-            return placed({
-              submission: held.id,
-              conversation: conversation.id,
-            });
           }
           bound = await bind(opened, turn, {
             key,
