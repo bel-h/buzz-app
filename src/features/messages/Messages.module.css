@@ -4059,12 +4059,17 @@ html[data-keyboard-navigation] .activityExpansion {
   padding: calc(var(--space-1) + var(--space-half) / 2)
     calc(var(--space-1h) + var(--space-half) / 2);
 }
-/* Compact removes the bubble inset. A settled outcome ("Stopped") has no
-   trigger inset, so its outlined box takes the activity bubble's inset. */
+/* Compact removes the bubble inset. A collapsed activity disclosure ("Stopped",
+   or a standalone failure reply inside its notice) has no trigger inset, so its
+   outlined box takes the activity bubble's inset. */
 :where(html[data-message-density="compact"])
   .message[data-agent-response-preview]
   .messageBubble:has(
-    > .standaloneActivity > .activityGroupHeader:not([data-expanded])
+    > .standaloneActivity > .activityGroupHeader:not([data-expanded]),
+    > .standaloneActivity
+      > [data-message-notice]
+      > .standaloneActivity
+      > .activityGroupHeader:not([data-expanded])
   ) {
   padding: calc(var(--space-1) + var(--space-half) / 2)
     calc(var(--space-1h) + var(--space-half) / 2);
