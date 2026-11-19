@@ -17,11 +17,13 @@ the plugin changes the agent tool list on this device. Existing sessions that
 cannot accept a changed tool list may need to start a new session.
 
 The only argument is optional `duration_ms`: an integer from 1000 to 10000,
-default 5000. A second concurrent capture fails. The capture stops when the
-plugin unloads or the host cancels the call or ends its owning turn or
-connection. External MCP supports connection cancellation. It does not cancel
-individual requests. No recorder runs between calls. A blocked or throttled page
-can delay completion. Use the reported `elapsedMs`, not the requested duration.
+default 5000. A second concurrent capture fails. Plugin unload stops the capture.
+Call, turn, and connection cancellation stop it when the adapter passes a
+cancellation signal. The exported harness kit passes no signal, so an ended
+turn can leave the capture active until its deadline. External MCP passes a
+connection signal and supports cancellation at that scope. No recorder runs
+between calls. A blocked or throttled page can delay completion. Use the
+reported `elapsedMs` to compare captures.
 
 | Report field | Meaning |
 | --- | --- |
@@ -30,8 +32,8 @@ can delay completion. Use the reported `elapsedMs`, not the requested duration.
 | `requestedMs`, `elapsedMs`, `visibility` | Requested and actual duration; visible and hidden milliseconds; final page visibility. |
 | `mainThread.timerLag` | Timer lateness of at least 50 ms, sampled every 100 ms while visible, including an overdue sample at completion: count, total/max milliseconds and visible sample count. Hidden time and visibility transitions reset its baseline. This is delay, not CPU use. |
 | `mainThread.longTasks` | Unbuffered long-task entries delivered during capture, when supported. Includes hidden-page work. Unsupported engines, including WebKit, return `supported:false` and a reason, not a zero count. |
-| `work` | Existing `fold`, `verify.read` and `verify.restore` batch instrumentation: batch count, item count and total/max batch milliseconds. Includes all retained relay sessions and visibility states. Native signature work outside these timers is not included. |
-| `reads` | Completed finite reads across relay sessions: count, total/max request milliseconds, decoded UTF-16 code units, failed count and background count. Reads started before capture can finish inside it. |
+| `work` | Existing `fold`, `verify.read` and `verify.restore` counters for batches, items, and total/max batch milliseconds. Includes all retained relay sessions and visibility states. `verify.read` includes JavaScript preparation for native stored-event verification. `verify.restore` measures the JavaScript fallback for head hydration. Native signature verification runs outside these timers. |
+| `reads` | Settled attempts on instrumented finite relay read routes. Reports count, total/max request milliseconds, decoded UTF-16 code units, failed count and background count. Reads started before capture can finish inside it. Native read-state snapshots and presence snapshot requests are outside this count. |
 | `agentUpdates` | Calls to the agents service's existing change subscription. This is update frequency, not recipient or listener count. |
 | `mcpReplies` | Plugin `Host.serveMcp` JSON encoding attempts: count, total/max synchronous encoding milliseconds, UTF-16 code units and encoding failures. Excludes native IPC and handler work. Counts successful encoding even if transport later fails. |
 | `unsupported` | Explicit gaps: process CPU, heap, layout, style, all-JavaScript time, JSON outside plugin MCP replies, and subscriber count. |
