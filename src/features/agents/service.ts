@@ -5347,10 +5347,10 @@ export class AgentsService extends Service implements Agents {
   save(
     key: AgentKey,
     change: AgentChange,
-    onRevision?: (side: Side, revision: string) => void,
+    ...revision: [onRevision?: (side: Side, revision: string) => void]
   ) {
     if (!change.config || typeof change.config !== "object")
-      return this.saveAs(key, change, onRevision);
+      return this.saveAs(key, change, ...revision);
     const { pluginNotes: _, ...config } = change.config as {
       pluginNotes?: unknown;
     };
@@ -5358,7 +5358,7 @@ export class AgentsService extends Service implements Agents {
     return this.saveAs(
       key,
       { ...change, config: notes ? { ...config, pluginNotes: notes } : config },
-      onRevision,
+      ...revision,
     );
   }
   private liveAgent(key: AgentKey) {
