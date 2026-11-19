@@ -378,8 +378,9 @@ and are asked to sign in again in Buzz.
   replies to read or reply in its thread, including after reloading the app.
   Editing and reacting to forum posts and comments are unavailable while mobile
   does not display those changes.
-  Mark unread, Send to channel, and deleting an agent's forum content as its owner
-  are unavailable.
+  Mark unread, Follow/Unfollow thread, Send to channel, and deleting an agent's
+  forum content as its owner are unavailable. Forum rows do not count as chat
+  reading evidence.
   You can still delete your own forum posts and comments.
 - Each reaction emoji has its own capsule. Hover or focus it to see everyone
   who reacted. Large lists scroll within the preview. With a keyboard, Tab into

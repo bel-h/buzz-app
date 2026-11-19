@@ -1046,6 +1046,25 @@ it.each([9, 45001, 45003])(
     expect(!!screen.queryByRole("menuitem", { name: /^Mark (un)?read$/ })).toBe(
       kind === 9,
     );
+    for (const following of [false, true]) {
+      await act(async () =>
+        session.unread.follow("room", row.threadRootId ?? row.id, following),
+      );
+      expect(session.unread.following("room", row.threadRootId ?? row.id)).toBe(
+        following,
+      );
+      expect(
+        !!screen.queryByRole("menuitem", {
+          name: /^(Unfollow|Follow) thread$/,
+        }),
+      ).toBe(kind === 9);
+      if (kind === 9)
+        expect(
+          screen.getByRole("menuitem", {
+            name: following ? "Unfollow thread" : "Follow thread",
+          }),
+        ).toBeVisible();
+    }
     expect(lastEditableMessage(session, rows)?.id).toBe(
       kind === 9 ? row.id : undefined,
     );

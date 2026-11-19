@@ -1486,6 +1486,7 @@ function MessageRowContent({
       data-message-id={renderMessage ? undefined : row.id}
       aria-current={!renderMessage && threadOpen ? true : undefined}
       data-huddle-row={row.huddle ? "" : undefined}
+      data-forum-row={row.forum ? "" : undefined}
     >
       {day && <DayDivider createdAt={row.createdAt} />}
       <div
@@ -2002,7 +2003,11 @@ function AgentsMessageRow(props: MessageRowProps & { failure?: boolean }) {
       stackNext
       renderMessage={(message, trigger) =>
         failure ? (
-          <div data-message-id={row.id} data-message-notice="execution-failure">
+          <div
+            data-message-id={row.id}
+            data-forum-row={row.forum ? "" : undefined}
+            data-message-notice="execution-failure"
+          >
             <ActivityDisclosure
               expanded={open}
               onToggle={() => setOpen((value) => !value)}
@@ -2061,6 +2066,7 @@ function AgentsMessageRow(props: MessageRowProps & { failure?: boolean }) {
               // One stable anchor survives both animation directions. Not the
               // button: revealing an anchor takes it out of the Tab order.
               data-message-id={row.id}
+              data-forum-row={row.forum ? "" : undefined}
               // Open, a click anywhere in the box folds it, except on its own
               // controls and links or at the end of a text selection.
               onClick={(event) => {

@@ -2644,6 +2644,11 @@ it.each([
           screen.getByRole("menuitem", { name: "Copy message" }),
         ).toBeVisible(),
       );
+      expect(
+        document
+          .querySelector(`[data-message-id="${reply.id}"]`)
+          ?.hasAttribute("data-forum-row"),
+      ).toBe(!!reply.forum);
       const item = screen.queryByRole("menuitem", { name: "Send to channel" });
       expect(!!item).toBe(scenario === "own");
       expect(getThreadRoot).not.toHaveBeenCalled();

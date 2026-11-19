@@ -676,7 +676,7 @@ function ManagedMessageItems({
           Delete message
         </MenuItem>
       )}
-      {!dm && (
+      {!dm && !row.forum && (
         <MenuItem
           onClick={() => {
             management.report(undefined);
