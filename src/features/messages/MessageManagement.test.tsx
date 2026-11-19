@@ -503,12 +503,11 @@ it.each(
         h.owner.session.viewer,
       ),
     );
-    await waitFor(() =>
-      expect(
-        screen.getByRole("menuitem", { name: /follow thread/i }),
-      ).toBeVisible(),
-    );
+    await waitFor(() => expect(screen.getByRole("menu")).toBeVisible());
     if (kind === 45001 || kind === 45003) {
+      expect(
+        screen.queryByRole("menuitem", { name: /follow thread/i }),
+      ).toBeNull();
       expect(
         screen.queryByRole("menuitem", { name: "Delete message" }),
       ).toBeNull();
@@ -1043,9 +1042,9 @@ it.each([9, 45001, 45003])(
     expect(!!screen.queryByRole("menuitem", { name: "Edit message" })).toBe(
       kind === 9,
     );
-    expect(!!screen.queryByRole("menuitem", { name: /^Mark (un)?read$/ })).toBe(
-      kind === 9,
-    );
+    expect(
+      !!screen.queryByRole("menuitem", { name: /^Mark as (un)?read$/ }),
+    ).toBe(kind === 9);
     for (const following of [false, true]) {
       await act(async () =>
         session.unread.follow("room", row.threadRootId ?? row.id, following),
