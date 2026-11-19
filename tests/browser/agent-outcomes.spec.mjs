@@ -222,13 +222,14 @@ test("a standalone failure reply keeps its inset in every density", async ({
   const reply = history.locator(
     `[data-message-notice="execution-failure"][data-message-id="${failure.id}"]`,
   );
-  const outcome = reply.getByText("Couldn’t finish", { exact: true });
-  await expect(outcome).toBeVisible();
-  for (const density of ["default", "compact"]) {
-    await page.evaluate((density) => {
-      document.documentElement.dataset.messageDensity = density;
-    }, density);
-    const inset = await reply.evaluate((notice) => {
+  const toggle = reply.getByRole("button", {
+    name: /^(Show|Collapse) activity history:/,
+  });
+  await expect(toggle).toContainText("Couldn’t finish");
+  // The bubble's content keeps an inset inside its outline, collapsed and open.
+  const inset = () =>
+    reply.evaluate((notice) => {
+      const content = notice.getBoundingClientRect();
       const line = notice
         .querySelector("[data-activity-summary]")
         .getBoundingClientRect();
@@ -238,9 +239,25 @@ test("a standalone failure reply keeps its inset in every density", async ({
       return Math.min(
         line.left - bubble.left,
         line.top - bubble.top,
-        bubble.bottom - line.bottom,
+        bubble.right - content.right,
+        bubble.bottom - content.bottom,
       );
     });
-    expect(inset, density).toBeGreaterThanOrEqual(4);
+  for (const expanded of [false, true]) {
+    if (expanded) {
+      await toggle.click();
+      await expect(
+        reply.getByText(failure.content, { exact: true }),
+      ).toBeVisible();
+    }
+    for (const density of ["default", "compact"]) {
+      await page.evaluate((density) => {
+        document.documentElement.dataset.messageDensity = density;
+      }, density);
+      expect(
+        await inset(),
+        `${density}, expanded: ${expanded}`,
+      ).toBeGreaterThanOrEqual(4);
+    }
   }
 });

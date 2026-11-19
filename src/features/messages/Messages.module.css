@@ -4110,7 +4110,11 @@ html[data-keyboard-navigation] .activityExpansion {
   gap: var(--space-2);
 }
 .messageBubble:has(
-  > .standaloneActivity > .activityGroupHeader[data-expanded]
+  > .standaloneActivity > .activityGroupHeader[data-expanded],
+  > .standaloneActivity
+    > [data-message-notice]
+    > .standaloneActivity
+    > .activityGroupHeader[data-expanded]
 ) {
   padding: var(--space-4);
 }
