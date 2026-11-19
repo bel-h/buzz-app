@@ -224,7 +224,6 @@ test.describe("thread activity", () => {
       .locator('[data-sidebar-section="starred"]')
       .locator('button[data-channel-id="alpha"]');
     await page.locator('button[data-channel-id="beta"]').first().click();
-    await expect(alpha.locator("[data-channel-unread-title]")).toHaveCount(0);
     const root = app.histories
       .get("primary/alpha")
       .find((event) => event.content === "Thread root 1");
@@ -244,7 +243,11 @@ test.describe("thread activity", () => {
         generateSecretKey(),
       ),
     );
-    await expect(alpha.locator("[data-channel-unread-title]")).toHaveCount(1);
+    // Bold, like a new top-level post.
+    await expect(alpha.getByText("Alpha", { exact: true })).toHaveCSS(
+      "font-weight",
+      "600",
+    );
     await expect(alpha.locator("[data-channel-activity]")).toHaveCount(0);
     await expect(
       alpha.locator('[data-channel-unread][data-priority="true"]'),
