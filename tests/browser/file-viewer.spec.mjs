@@ -289,14 +289,14 @@ test("reads a long file in parts, and jumps into one not yet shown without movin
   await outline.evaluate((nav) => {
     nav.scrollTop = (nav.scrollHeight * 45) / 81;
   });
-  // Rows scrolled to programmatically are still being measured and can move
-  // under the first click.
-  await expect(async () => {
-    await outline
-      .getByRole("button", { name: "Section 45", exact: true })
-      .click({ timeout: 2_000 });
-    await expect(outline).toBeHidden({ timeout: 1_000 });
-  }).toPass();
+  // Rows scrolled to programmatically are still being measured and can move.
+  // The click waits until this row is the one under the pointer, so it
+  // can't land on a neighbour. Don't retry it: the click that lands closes
+  // the outline, and a retry would then wait for a row that's gone.
+  await outline
+    .getByRole("button", { name: "Section 45", exact: true })
+    .click();
+  await expect(outline).toBeHidden();
   await expect(heading(45)).toBeInViewport();
   const offset = (locator) =>
     locator.evaluate(
