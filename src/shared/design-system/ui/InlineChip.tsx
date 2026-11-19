@@ -1,4 +1,10 @@
-import { ChatCircleIcon, CircleNotchIcon, LinkIcon } from "../icons/index";
+import {
+  AtIcon,
+  ChatCircleIcon,
+  CircleNotchIcon,
+  LinkIcon,
+  RobotIcon,
+} from "../icons/index";
 import { useSyncExternalStore } from "react";
 
 import type { ChipAddress, ChipKind } from "../chips/address";
@@ -71,15 +77,26 @@ export function InlineChip({
       {Icon ? <Icon className="inline-chip-icon" aria-hidden="true" /> : null}
       <span className="inline-chip-label">
         {avatar ? (
-          <span className="inline-chip-avatar">
-            <Avatar
-              src={avatar}
-              alt=""
-              fallback={face.label}
-              size="fill"
-              shape={address.kind === "agent" ? "squircle" : "circle"}
-            />
-          </span>
+          <>
+            {/* The sigil stays in the chip's text, as without an avatar. */}
+            <span className="sr-only">{trigger}</span>
+            <span className="inline-chip-avatar">
+              <Avatar
+                src={avatar}
+                alt=""
+                fallback={face.label}
+                fallbackContent={
+                  address.kind === "agent" ? (
+                    <RobotIcon aria-hidden="true" />
+                  ) : (
+                    <AtIcon aria-hidden="true" />
+                  )
+                }
+                size="fill"
+                shape={address.kind === "agent" ? "squircle" : "circle"}
+              />
+            </span>
+          </>
         ) : trigger ? (
           // While the face resolves, a spinner borrows the sigil's box: the
           // glyph stays in the flow (painted transparent) so nothing shifts

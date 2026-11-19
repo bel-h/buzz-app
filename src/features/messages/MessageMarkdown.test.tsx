@@ -1164,6 +1164,53 @@ it.each(["@Mic", `[@Mic](${profileTarget(mic)})`])(
   },
 );
 
+it.each([
+  ["an http picture", "http://example.org/mic.png", (url: string) => url],
+  ["an SVG data picture", "data:image/svg+xml,<svg/>", (url: string) => url],
+  [
+    "a picture with credentials",
+    "https://user:pass@example.org/mic.png",
+    (url: string) => url,
+  ],
+  ["no media path", "https://example.org/mic.png", () => undefined],
+])("keeps the chip icon for %s", (_, picture, media) => {
+  const view = renderDom(
+    <MessageMarkdown
+      {...props("Hello @Mic", {
+        media,
+        participantProfiles: new Map([[mic, { name: "Mic", picture }]]),
+      })}
+    />,
+  );
+  const lead = view.container.querySelector(
+    "[data-mention-kind]",
+  )?.firstElementChild;
+  expect(lead?.querySelector("img")).toBeNull();
+  expect(lead?.querySelector("svg")).not.toBeNull();
+});
+
+it("shows the chip icon, not a letter, while a mention's avatar fails", () => {
+  const view = renderDom(
+    <MessageMarkdown
+      {...props("Hello @Mic", {
+        media: (url) => url,
+        participantProfiles: new Map([
+          [mic, { name: "Mic", picture: "https://example.org/missing.png" }],
+        ]),
+      })}
+    />,
+  );
+  const chip = view.container.querySelector("[data-mention-kind]");
+  const image = chip?.querySelector("img");
+  if (!image) throw new Error("No avatar image");
+  act(() => {
+    image.dispatchEvent(new Event("error"));
+  });
+  const fallback = chip?.querySelector("[data-avatar-fallback]");
+  expect(fallback?.querySelector("svg")).not.toBeNull();
+  expect(chip?.textContent).toBe("Mic");
+});
+
 it("draws an agent mention's avatar as a squircle", () => {
   const directory = {
     profiles: new Map([

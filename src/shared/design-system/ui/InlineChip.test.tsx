@@ -201,3 +201,29 @@ it("shows a resolved identity's avatar in place of the sigil", () => {
     "@",
   );
 });
+
+it("keeps the sigil in the chip text and shows the kind's icon when the avatar fails", () => {
+  const { container } = render(
+    <InlineChip
+      address={address}
+      interactive={false}
+      face={{
+        label: "Alice",
+        avatarUrl: "https://example.org/missing.png",
+        loading: false,
+        resolved: true,
+      }}
+    />,
+  );
+  const chip = screen.getByRole("img", { name: "Person Alice" });
+  expect(chip).toHaveTextContent("@Alice");
+  const image = container.querySelector("img");
+  if (!image) throw new Error("No avatar image");
+  act(() => {
+    image.dispatchEvent(new Event("error"));
+  });
+  const fallback = container.querySelector("[data-avatar-fallback]");
+  expect(fallback?.querySelector("svg")).not.toBeNull();
+  expect(fallback).toHaveTextContent("");
+  expect(chip).toHaveTextContent("@Alice");
+});

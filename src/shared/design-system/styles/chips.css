@@ -134,6 +134,12 @@
     vertical-align: -0.125em;
   }
 
+  /* A slow or failed picture shows the kind's icon, as a chip without one does. */
+  .inline-chip-avatar [data-avatar-fallback] svg {
+    width: 0.8em;
+    height: 0.8em;
+  }
+
   .inline-chip-label {
     min-width: 0;
     overflow: hidden;
