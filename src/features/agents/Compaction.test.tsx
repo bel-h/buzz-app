@@ -44,7 +44,7 @@ it("saves only valid sizes and shows the model default when blank", async () => 
   const field = screen.getByRole("textbox", { name: "Auto-compact at" });
   expect(field).toHaveValue("200");
   expect(field).toHaveAccessibleDescription(
-    "Compacts at this many tokens, or sooner if the model's context window is smaller.",
+    "Compacts at this many tokens, or sooner if the model's context window fills first.",
   );
 
   await user.clear(field);
