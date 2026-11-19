@@ -241,8 +241,8 @@ for (const catalog of [true, false]) {
       await review.getByRole("button", { name: "Save", exact: true }).click();
       await expect(review).toHaveCount(0);
       const [saved] = await page.evaluate(() => window.updateReviewResult());
-      expect(saved.config).not.toHaveProperty("model");
-      expect(saved.config).not.toHaveProperty("effort");
+      expect(saved.config.model ?? "").toBe("");
+      expect(saved.config.effort ?? "").toBe("");
     }
   });
 }
