@@ -15,6 +15,7 @@ import { readUsage } from "./usage";
 import { reviewModel } from "./security-review";
 import { followRecommended } from "../../features/agents/recommended";
 import { AppServer, listModels } from "./rpc";
+import { CODEX_ROUTES, HARNESS } from "./gateway";
 /** How often Buzz's copy of Codex looks for a new release. */
 const UPDATE_MS = 6 * 60 * 60_000;
 export const inject = ["agents", "host", "agentProtection"];
@@ -80,6 +81,7 @@ export const apply: PluginModule["apply"] = (ctx) => {
     ctx.host.resolveDirectory?.bind(ctx.host),
     (agent, signal, channelId) =>
       readyOwnerReads(ctx.agents.relay(agent.key), agent, signal, channelId),
+    CODEX_ROUTES,
   );
   // Failed turns' notices link to where Codex signs in.
   runtime.explain = (notice) =>
@@ -184,6 +186,7 @@ export const apply: PluginModule["apply"] = (ctx) => {
     hooks: { events: CODEX_HOOK_EVENTS },
     retire: (pubkey) => runtime.retire(pubkey),
     protection: true,
+    gateway: { harness: HARNESS, mode: "attribution" },
     title: "Codex",
     icon: CodexLogoIcon,
     description:
