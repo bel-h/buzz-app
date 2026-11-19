@@ -2858,6 +2858,43 @@ test("joining text into a single-line heading preserves the following lines", as
   await expect(paragraph.locator("br")).toHaveCount(1);
 });
 
+test("joined list items retain paragraphs after nested blocks on reopen", async ({
+  page,
+  app,
+}) => {
+  const { reader, rich, source, markdown, formatted } = await openTableEditor(
+    page,
+    app,
+  );
+  for (const [nested, content] of [
+    ["ul", "- Nested"],
+    ["blockquote", "> Nested"],
+  ]) {
+    await markdown.click();
+    await source.fill(`- First\n  ${content}\n- Second`);
+    await formatted.click();
+    const items = rich.locator("ul").first().locator(":scope > li");
+    await rich.focus();
+    await items
+      .last()
+      .locator("p")
+      .evaluate((element) => {
+        element.ownerDocument.getSelection()?.collapse(element, 0);
+      });
+    await page.keyboard.press("Backspace");
+    await expect(items).toHaveCount(1);
+    await expect(items.locator(":scope > p")).toHaveText(["First", "Second"]);
+    await rich.press("ControlOrMeta+Enter");
+    await expect(reader.getByRole("status")).toHaveText(
+      nested === "ul" ? "Saved 1" : "Saved 2",
+    );
+    await reader.getByRole("button", { name: "Read Guide" }).click();
+    await reader.getByRole("button", { name: "Edit Guide" }).click();
+    await expect(items.locator(":scope > p")).toHaveText(["First", "Second"]);
+    await expect(items.locator(`:scope > ${nested}`)).toHaveText("Nested");
+  }
+});
+
 const smallTable = "| Cell | Value |\n| --- | --- |\n| cellword | 2 |";
 
 async function selectCellText(page, cell) {

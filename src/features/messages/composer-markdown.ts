@@ -274,14 +274,21 @@ function blocksMarkdown(
         mode === "document" && block.attrs.spread ? "\n\n" : "\n",
       );
     } else output = paragraphMarkdown(block, authored.get(offset), mode);
-    // Empty lists and ordered lists starting at a number other than 1 cannot interrupt a
-    // paragraph. A setext underline would pull that paragraph into the heading.
+    const setextHeading =
+      block.type.name === "heading" && /\n(?:=+|-+)$/.test(output);
+    const previousType = previous?.type.name;
+    // Empty and non-1 ordered lists cannot interrupt a paragraph. A Setext
+    // heading starts with prose, which can also continue a nested container.
     const needsBlankLine =
-      previous?.type.name === "paragraph" &&
-      previous.content.size > 0 &&
-      ((list && block.firstChild?.firstChild?.content.size === 0) ||
-        (block.type.name === "ordered_list" && block.attrs.order !== 1) ||
-        (block.type.name === "heading" && /\n(?:=+|-+)$/.test(output)));
+      (previous?.type.name === "paragraph" &&
+        previous.content.size > 0 &&
+        ((list && block.firstChild?.firstChild?.content.size === 0) ||
+          (block.type.name === "ordered_list" && block.attrs.order !== 1) ||
+          setextHeading)) ||
+      ((block.type.name === "paragraph" || setextHeading) &&
+        (previousType === "bullet_list" ||
+          previousType === "ordered_list" ||
+          previousType === "blockquote"));
     if (previous)
       blocks.push(
         (mode === "chat" && paragraphs) ||
