@@ -8,6 +8,7 @@ import type {
   AgentCreateProps,
   Agents,
   AgentUpdateRequest,
+  AgentViewProps,
   RegisteredAgentType,
 } from "../../features/agents/service";
 import { UpdateReview } from "./UpdateReview";
@@ -31,6 +32,18 @@ const kind = (key: string, title: string) => ({
     reply: instructions ?? config.reply,
   }),
   Create,
+  tabs: [
+    {
+      id: "settings",
+      title: "Settings",
+      role: "settings",
+      component: ({ agent, save }: AgentViewProps) => (
+        <button type="button" onClick={() => void save(agent.config)}>
+          Save
+        </button>
+      ),
+    },
+  ],
   settingsProposal: {
     resolveRecommended: async () => ({
       harness: "goose",
@@ -241,6 +254,37 @@ it.each([
     expect(agents.approveUpdate).not.toHaveBeenCalled();
   },
 );
+
+it("saves against the agent revision that opened the settings review", async () => {
+  const user = userEvent.setup();
+  const agents = fixture(
+    { name: "Reviewer", settings: { model: "proposed-model" } },
+    false,
+    {
+      configBase: { settings: "opened-settings" },
+    },
+  );
+  await screen.findByDisplayValue("Reviewer");
+  act(() =>
+    agents.connect([
+      {
+        ...agents.agent,
+        config: { reply: "Be brief.", model: "new-model" },
+        configBase: { settings: "new-settings" },
+      },
+    ]),
+  );
+  await user.click(screen.getByRole("button", { name: /^Save$/ }));
+  await waitFor(() =>
+    expect(agents.approveUpdate).toHaveBeenCalledWith(
+      "draft",
+      expect.objectContaining({
+        config: expect.objectContaining({ model: "proposed-model" }),
+      }),
+      agents.agent,
+    ),
+  );
+});
 
 it("hides proposed settings when the owner chooses a different harness", async () => {
   const user = userEvent.setup();
