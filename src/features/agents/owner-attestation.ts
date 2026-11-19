@@ -23,9 +23,29 @@ export async function attestedOwner(
   return authTagOwner(event.pubkey, tag);
 }
 
+// The same agents' tags arrive on every profile, message and archive read, and
+// the check is pure: keep each settled result, bounded, instead of verifying again.
+// A real tag's key is ~300 characters; longer ones are verified but not kept, so
+// the cache holds at most ~4 MB.
+const verified = new Map<string, string | undefined>();
+const MAX_KEY = 512;
+
 /** NIP-IA ownership: exact tag shape, clause syntax, target binding and signature.
  * Clauses are not evaluated here; archive requests check time bounds separately. */
 export async function authTagOwner(
+  target: string,
+  tag: readonly string[],
+): Promise<string | undefined> {
+  const key = JSON.stringify([target, ...tag]);
+  if (verified.has(key)) return verified.get(key);
+  const owner = await verifyAuthTag(target, tag);
+  if (key.length > MAX_KEY) return owner;
+  if (verified.size >= 4096) verified.clear();
+  verified.set(key, owner);
+  return owner;
+}
+
+async function verifyAuthTag(
   target: string,
   tag: readonly string[],
 ): Promise<string | undefined> {
