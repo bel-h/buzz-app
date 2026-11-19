@@ -9,7 +9,6 @@ import type { AgentProtection } from "../../features/agent-protection/service";
 import { nativeProtectionBridge } from "../../features/agent-protection/native-bridge";
 import {
   GooseProcess,
-  gooseLimit,
   type GooseHost,
   type ServeMcp,
 } from "./goose";
@@ -61,7 +60,7 @@ export class AgentProcess {
     drained: (process: GooseProcess) => boolean = () => false,
   ): Promise<GooseProcess> {
     this.protection?.assertAvailable();
-    const limit = gooseLimit(this.compactAt());
+    const limit = this.compactAt();
     if (this.current && limit === this.limit) return this.current.ready;
     this.limit = limit;
     const old = this.current?.process;

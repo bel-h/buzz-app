@@ -192,15 +192,6 @@ export const GOOSE: AcpHooks = {
   },
 };
 
-/** goose's own token limit, which it compacts by when given none:
- * `DEFAULT_AUTO_COMPACT_TOKEN_LIMIT`, below OpenAI's long-context price tier. */
-export const GOOSE_TOKEN_LIMIT = 225_000;
-
-/** The token limit to give goose for `tokens`: none unless it is below
- * goose's own, which a higher one would replace. */
-export const gooseLimit = (tokens: number | undefined) =>
-  tokens && tokens < GOOSE_TOKEN_LIMIT ? tokens : undefined;
-
 /** Starts `goose-acp` and checks it can reach the Buzz tools. */
 export const GooseProcess = {
   start: async (

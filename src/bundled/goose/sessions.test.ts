@@ -733,12 +733,10 @@ describe("AgentSessions", () => {
     expect(fake.geese[1]?.env.GOOSE_AUTO_COMPACT_TOKEN_LIMIT).toBe("200000");
   });
 
-  it("leaves goose its own token limit for a threshold above it", async () => {
-    const { fake, sessions } = setup({}, false, { compactAt: () => 400000 });
+  it("gives goose a threshold above its own token limit", async () => {
+    const { fake, sessions } = setup({}, false, { compactAt: () => 1000000 });
     await sessions.runOnce("watch/x", () => "look");
-    expect(fake.geese[0]?.env).not.toHaveProperty(
-      "GOOSE_AUTO_COMPACT_TOKEN_LIMIT",
-    );
+    expect(fake.geese[0]?.env.GOOSE_AUTO_COMPACT_TOKEN_LIMIT).toBe("1000000");
   });
 
   it("reports a failed immediate compaction", async () => {

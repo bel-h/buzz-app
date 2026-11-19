@@ -25,7 +25,7 @@ const INVALID = `Enter a whole number of at least ${MIN_COMPACT_AT / 1000}K, or 
  * `onChange`; anything else keeps its error and stops its form submitting. */
 export function CompactionField({
   value,
-  description = "Compacts at this many tokens, or sooner if the harness would on its own.",
+  description = "Compacts at this many tokens, or sooner if the model's context window is smaller.",
   disabled = false,
   onChange,
 }: {
