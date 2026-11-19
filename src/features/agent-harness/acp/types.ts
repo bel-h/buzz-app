@@ -40,8 +40,9 @@ export type Settled = Readonly<{
 
 export type ActivityReceipt = Readonly<{
   current?: () => boolean;
-  /** Rebuilds an Attention prompt after startup or queue waits. */
-  refresh?: (fresh?: boolean) => Promise<string>;
+  /** Rebuilds an Attention prompt after startup or queue waits; `steers`
+   * when it joins the running turn. */
+  refresh?: (fresh?: boolean, steers?: boolean) => Promise<string>;
   /** The prompt was handed to the harness, after cancellation and provider
    * checks. */
   delivered?: () => void;
