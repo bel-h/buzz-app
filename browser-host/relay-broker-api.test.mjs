@@ -89,6 +89,7 @@ async function harness(
       }
       const call = {
         url: upstreamUrl,
+        method: init?.method ?? "GET",
         body: init?.body ? JSON.parse(init.body) : undefined,
         signal: init?.signal,
         headers: init?.headers,
@@ -3152,6 +3153,7 @@ test("invite list and revoke sign their exact relay routes and never echo a code
       expect(await response.json()).toEqual(page);
       const sent = h.calls.at(-1);
       expect(sent.url).toBe(url);
+      expect(sent.method).toBe("GET");
       expect(sent.body).toBeUndefined();
       expect(sent.auth.tags).toContainEqual(["u", url]);
       expect(sent.auth.tags).toContainEqual(["method", "GET"]);
@@ -3161,7 +3163,12 @@ test("invite list and revoke sign their exact relay routes and never echo a code
     expect(revoked.status).toBe(200);
     const sent = h.calls.at(-1);
     expect(sent.url).toBe(`${fixtureRelayUrl}/api/invites/revoke`);
+    expect(sent.method).toBe("POST");
     expect(sent.body).toEqual({ code: "v2.abc" });
+    expect(sent.auth.tags).toContainEqual([
+      "u",
+      `${fixtureRelayUrl}/api/invites/revoke`,
+    ]);
     expect(sent.auth.tags).toContainEqual(["method", "POST"]);
     expect(sent.auth.tags).toContainEqual([
       "payload",

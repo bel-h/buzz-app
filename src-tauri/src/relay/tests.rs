@@ -296,70 +296,6 @@ async fn native_http_signs_exact_bytes_and_never_follows_redirects() {
 }
 
 #[tokio::test]
-async fn native_http_signs_the_invite_list_query_and_revoke_payload() {
-    let cursor = "?before=1795049564000000_0b9c8f7e-1d2a-4b3c-9e8f-7a6b5c4d3e2f";
-    let revoke = r#"{"code":"v2.abc"}"#;
-    for (method, path, body) in [
-        ("GET", "/api/invites".to_owned(), None),
-        ("GET", format!("/api/invites{cursor}"), None),
-        ("POST", "/api/invites/revoke".to_owned(), Some(revoke)),
-    ] {
-        // The command's own allowlist and signing decision for this route.
-        assert!(request_url("https://relay.test", &path, method).is_ok());
-        assert!(signed_http(method, &path));
-        let (base, task) = fixture_server(
-            "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}".into(),
-        );
-        let url = base.join(&path).unwrap();
-        send(
-            &IdentityHost::fixture(),
-            None,
-            url.clone(),
-            method,
-            body.map(str::to_owned),
-            signed_http(method, &path),
-            MAX_RESPONSE,
-        )
-        .await
-        .unwrap();
-        let (headers, sent) = task.join().unwrap();
-        assert!(headers.starts_with(&format!("{method} {path} ")));
-        assert_eq!(sent, body.unwrap_or(""));
-        let encoded = headers
-            .lines()
-            .find_map(|line| line.strip_prefix("authorization: Nostr "))
-            .unwrap();
-        let event: serde_json::Value =
-            serde_json::from_slice(&STANDARD.decode(encoded).unwrap()).unwrap();
-        verify(&event);
-        assert_eq!(event["tags"][0], serde_json::json!(["u", url.as_str()]));
-        assert_eq!(event["tags"][1], serde_json::json!(["method", method]));
-        let payload = event["tags"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|tag| tag[0] == "payload");
-        match body {
-            Some(body) => assert_eq!(
-                payload.unwrap()[1],
-                format!("{:x}", Sha256::digest(body.as_bytes()))
-            ),
-            None => assert!(payload.is_none()),
-        }
-    }
-    // Other reads stay unsigned, and no other invite path or query is reachable.
-    assert!(!signed_http("GET", "/api/join-policy"));
-    for path in [
-        "/api/invites?limit=200",
-        "/api/invites?before=1_x",
-        &format!("/api/invites{cursor}&limit=1"),
-        "/api/invites/revoke",
-    ] {
-        assert!(request_url("https://relay.test", path, "GET").is_err());
-    }
-}
-
-#[tokio::test]
 async fn memory_response_limit_rejects_before_generic_transport_budget() {
     // The advertised size alone must be rejected. A multi-megabyte server write
     // blocks the fixture thread after the client closes on this header.
@@ -4442,6 +4378,85 @@ mod federated_header {
             "{head}"
         );
         community.assert_carried(head);
+    }
+    /// The invite list and revoke go through `relay_http` itself: both list
+    /// forms are signed GETs over their full URL, revoke binds its body.
+    #[tokio::test]
+    async fn relay_http_signs_invite_list_and_revoke() {
+        use tauri::Manager;
+        let community = community(false).await;
+        let app = tauri::test::mock_builder()
+            .manage(community.host.clone())
+            .manage(community.fi.clone())
+            .build(crate::app_context())
+            .unwrap();
+        let cursor = "?before=1795049564000000_0b9c8f7e-1d2a-4b3c-9e8f-7a6b5c4d3e2f";
+        let revoke = r#"{"code":"v2.abc"}"#;
+        let routes = [
+            ("GET", "/api/invites".to_owned(), None),
+            ("GET", format!("/api/invites{cursor}"), None),
+            ("POST", "/api/invites/revoke".to_owned(), Some(revoke)),
+        ];
+        let server = community.serve(routes.iter().map(|_| reply("200 OK", "{}")).collect());
+        for (method, path, body) in &routes {
+            let response = relay_http(
+                app.state(),
+                app.state(),
+                community.origin.to_string(),
+                path.clone(),
+                (*method).into(),
+                body.map(str::to_owned),
+                None,
+            )
+            .await
+            .unwrap();
+            assert_eq!(response.status, 200);
+        }
+        let heads = server.heads().await;
+        for ((method, path, body), head) in routes.iter().zip(&heads) {
+            assert!(head.starts_with(&format!("{method} {path} ")), "{head}");
+            let encoded = head
+                .lines()
+                .find_map(|line| line.strip_prefix("authorization: Nostr "))
+                .unwrap_or_else(|| panic!("unsigned: {head}"));
+            let event: serde_json::Value =
+                serde_json::from_slice(&STANDARD.decode(encoded).unwrap()).unwrap();
+            verify(&event);
+            let url = community.origin.join(path).unwrap();
+            assert_eq!(event["tags"][0], serde_json::json!(["u", url.as_str()]));
+            assert_eq!(event["tags"][1], serde_json::json!(["method", method]));
+            let payload = event["tags"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|tag| tag[0] == "payload");
+            match body {
+                Some(body) => assert_eq!(
+                    payload.unwrap()[1],
+                    format!("{:x}", Sha256::digest(body.as_bytes()))
+                ),
+                None => assert!(payload.is_none()),
+            }
+        }
+        // No other invite path or query is reachable through the command.
+        for path in [
+            "/api/invites?limit=200",
+            "/api/invites?before=1_x",
+            &format!("/api/invites{cursor}&limit=1"),
+            "/api/invites/revoke",
+        ] {
+            assert!(relay_http(
+                app.state(),
+                app.state(),
+                community.origin.to_string(),
+                path.into(),
+                "GET".into(),
+                None,
+                None,
+            )
+            .await
+            .is_err());
+        }
     }
     #[tokio::test]
     async fn http_attaches_for_required_discovery() {
