@@ -167,7 +167,10 @@ export function useMessageEdit(session: ComposerSession, restore: () => void) {
         setError("This message is no longer available to edit.");
         return;
       }
-      if (source(current) !== source(target)) {
+      if (
+        source(current) !== source(target) ||
+        current.attachmentSourceId !== target.attachmentSourceId
+      ) {
         setError(
           "This message changed while you were editing. Copy your changes, then cancel and reopen it.",
         );

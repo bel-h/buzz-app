@@ -10072,6 +10072,44 @@ it.each(["failed", "unknown"] as const)(
   },
 );
 
+const photo = "https://example.org/photo.png";
+const attachedMessage = () =>
+  editableMessage({
+    content: "Caption",
+    sourceContent: `Caption\n\n![photo](<${photo}>)`,
+    attachments: [{ url: photo, kind: "image", name: "photo.png" }],
+  });
+
+it("saves an attachment-only edit without a delete handler", () => {
+  const h = mount({}, undefined, first.pubkey);
+  h.setRows([attachedMessage()]);
+  fireEvent.keyDown(h.input(), { key: "ArrowUp" });
+  expect(h.input()).toHaveValue("Caption");
+  h.fill("");
+  expect(screen.getByRole("button", { name: "Save changes" })).toBeEnabled();
+  h.submit();
+  expect(h.messages.edit).toHaveBeenCalledExactlyOnceWith(
+    "c".repeat(64),
+    `![photo](<${photo}>)`,
+    "c".repeat(64),
+    [photo],
+  );
+});
+
+it("refuses to overwrite a target whose attachments changed elsewhere", () => {
+  const h = mount({}, undefined, first.pubkey);
+  const row = attachedMessage();
+  h.setRows([row]);
+  fireEvent.keyDown(h.input(), { key: "ArrowUp" });
+  h.fill("My changes");
+  h.setRows([{ ...row, attachmentSourceId: "e".repeat(64) }]);
+  h.submit();
+  expect(screen.getByRole("alert")).toHaveTextContent(
+    "changed while you were editing",
+  );
+  expect(h.messages.edit).not.toHaveBeenCalled();
+});
+
 it.each(["changed", "deleted"])(
   "preserves text and refuses to overwrite a %s target",
   (state) => {
