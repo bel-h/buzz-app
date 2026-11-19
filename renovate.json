@@ -2,6 +2,16 @@
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": ["config:recommended", "helpers:pinGitHubActionDigests"],
   "rebaseWhen": "conflicted",
+  "ignorePaths": [
+    "**/node_modules/**",
+    "**/bower_components/**",
+    "**/vendor/**",
+    "**/examples/**",
+    "**/__tests__/**",
+    "**/test/**",
+    "tests/**",
+    "**/__fixtures__/**"
+  ],
   "packageRules": [
     {
       "description": "Tauri 2 requires the GTK 0.18 native-link and type family.",
