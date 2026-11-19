@@ -736,6 +736,23 @@ const read = async (page, app, name) => {
       app.histories.get(`primary/${channel}`).at(-1).created_at,
     );
 };
+// Back to Alpha, and wait for its own catch-up read. That read lands after
+// Alpha's dwell, and a visit settles with no line when any read intent is
+// saved after it begins. So a read still in flight when Beta is opened, or
+// one replayed after a reload, would settle Beta's visit early. Beta would
+// then be read before the boundary these tests wait for.
+const returnToAlpha = async (page, app) => {
+  await go(page, "Alpha");
+  await settle(page);
+  await expect
+    .poll(
+      async () =>
+        (await readJournal(page))?.state.frontiers["activity:alpha"] ?? 0,
+    )
+    .toBeGreaterThanOrEqual(
+      app.histories.get("primary/alpha").at(-1).created_at,
+    );
+};
 const arrive = (app, channel, deliver) =>
   [1, 2, 3].map((index) =>
     app.append("primary", channel, `Later message ${index}`, deliver, false),
@@ -780,8 +797,7 @@ appTest.describe("a visit that begins before its first verified page", () => {
       await open(page, app);
       await go(page, "Beta");
       await read(page, app, "Beta");
-      await go(page, "Alpha");
-      await settle(page);
+      await returnToAlpha(page, app);
       // A full reload is a new app session: no window is loaded yet.
       await open(page, app);
       const arrivals = await arriveUnloaded(page, app);
@@ -905,8 +921,7 @@ appTest.describe("a head read that outlasts the reading dwell", () => {
       await open(page, app);
       await go(page, "Beta");
       await read(page, app, "Beta");
-      await go(page, "Alpha");
-      await settle(page);
+      await returnToAlpha(page, app);
       const arrivals = arrive(app, "beta", true);
       await expect
         .poll(() => unreadIn(page, "beta", arrivals))
@@ -943,8 +958,7 @@ appTest.describe("a head read that outlasts the reading dwell", () => {
       await open(page, app);
       await go(page, "Beta");
       await read(page, app, "Beta");
-      await go(page, "Alpha");
-      await settle(page);
+      await returnToAlpha(page, app);
       // A full reload is a new app session: no window is loaded yet.
       await open(page, app);
       const arrivals = await arriveUnloaded(page, app);
