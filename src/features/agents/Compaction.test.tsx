@@ -41,7 +41,9 @@ it("saves only valid sizes and shows the harness default when blank", async () =
   const user = userEvent.setup();
   const saved: string[] = [];
   render(<Harness saved={saved} />);
-  const field = screen.getByRole("textbox", { name: "Auto-compact at" });
+  const field = screen.getByRole("textbox", {
+    name: "Auto-compact at (thousands of tokens)",
+  });
   expect(field).toHaveValue("200");
   expect(field).toHaveAccessibleDescription(
     "Compacts at this many tokens, or sooner if the model's context window fills first.",
@@ -58,6 +60,11 @@ it("saves only valid sizes and shows the harness default when blank", async () =
   expect(field).toHaveValue("50");
   expect(field).toBeInvalid();
   expect(screen.getByRole("alert")).toBeInTheDocument();
+  // Back on the field, a screen reader hears what is wrong.
+  await user.click(field);
+  expect(field).toHaveAccessibleDescription(
+    "Compacts at this many tokens, or sooner if the model's context window fills first. Enter a whole number of at least 100K, or leave it blank for the harness default.",
+  );
 
   await user.clear(field);
   await user.type(field, "150");
@@ -83,7 +90,9 @@ it("keeps a form from saving while the size is invalid", async () => {
     );
   }
   render(<Form />);
-  const field = screen.getByRole("textbox", { name: "Auto-compact at" });
+  const field = screen.getByRole("textbox", {
+    name: "Auto-compact at (thousands of tokens)",
+  });
   await user.clear(field);
   await user.type(field, "50");
   await user.click(screen.getByRole("button", { name: "Save" }));

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { Input } from "../../shared/design-system/ui/Input";
 import { InputGroup } from "../../shared/design-system/ui/InputGroup";
 import { PreferenceRow } from "../../shared/design-system/ui/PreferenceRow";
@@ -38,11 +38,17 @@ export function CompactionField({
   useEffect(() => setText(shown(value)), [value]);
   const valid = parse(text) !== undefined;
   const input = useRef<HTMLInputElement>(null);
+  const error = useId();
   useEffect(() => input.current?.setCustomValidity(valid ? "" : INVALID));
   return (
     <>
       <PreferenceRow
-        title="Auto-compact at"
+        title={
+          <>
+            Auto-compact at{" "}
+            <span className="sr-only">(thousands of tokens)</span>
+          </>
+        }
         subtitle={description}
         trailing={(label) => (
           <div className="w-40">
@@ -54,6 +60,11 @@ export function CompactionField({
             >
               <Input
                 {...label}
+                aria-describedby={
+                  valid
+                    ? label["aria-describedby"]
+                    : `${label["aria-describedby"] ?? ""} ${error}`.trim()
+                }
                 ref={input}
                 aria-invalid={!valid || undefined}
                 inputMode="numeric"
@@ -72,7 +83,7 @@ export function CompactionField({
         )}
       />
       {!valid && (
-        <p role="alert" className="buzz-field-error">
+        <p id={error} role="alert" className="buzz-field-error">
           {INVALID}
         </p>
       )}
