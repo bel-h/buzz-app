@@ -343,6 +343,15 @@ appTest.describe("Solo header accessories", () => {
   appTest(
     "keeps optional controls usable in collapsed headings",
     async ({ page, app }) => {
+      // The layout must fit the New task button when the relay admits chat starts.
+      await page.route("**/api/relay/*/session", async (route) => {
+        const response = await route.fetch();
+        const session = await response.json();
+        await route.fulfill({
+          response,
+          json: { ...session, writeKinds: [...session.writeKinds, 9007] },
+        });
+      });
       await page.goto(
         `${app.origin}/?solo-region-fixture&compose-workspaces&workspace-hit-targets&header-accessories`,
       );
@@ -448,6 +457,24 @@ appTest.describe("Solo header accessories", () => {
       await expect(sidebar.getByRole("button", { name: /^Mark / })).toHaveCount(
         2,
       );
+      const channelGroup = headers[1].group;
+      await page.evaluate(() => {
+        document.documentElement.style.fontSize = "24px";
+      });
+      await channelGroup
+        .getByRole("button", { name: "Alpha", exact: true })
+        .hover();
+      await expect(
+        channelGroup.getByRole("button", { name: "New task in Alpha" }),
+      ).toBeVisible();
+      const channelTitle = channelGroup.getByText("Alpha", { exact: true });
+      await expect
+        .poll(() =>
+          channelTitle.evaluate(
+            (label) => label.clientWidth >= label.scrollWidth,
+          ),
+        )
+        .toBe(true);
     },
   );
 });

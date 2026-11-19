@@ -6,7 +6,9 @@
   .group [data-solo-channel-new-task] {
     display: none;
   }
+}
 
+@container solo-channel-group (max-width: 12rem) {
   .group [class~="navigation-section-heading"]:has(> [data-reserve-space]) {
     flex-wrap: wrap;
   }

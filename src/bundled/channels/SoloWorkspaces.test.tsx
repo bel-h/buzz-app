@@ -10,6 +10,7 @@ import {
   within,
 } from "@testing-library/react";
 import { useState } from "react";
+import { createPortal } from "react-dom";
 import {
   WorkspaceCompositionContext,
   RegionWorkspace,
@@ -476,6 +477,10 @@ it("shares a workspace frame while keeping selection, disclosure and chat creati
               select(true);
             }}
             onNewTask={onTask}
+            headerAccessory={createPortal(
+              <button type="button">Accessory popup action</button>,
+              document.body,
+            )}
           >
             <button type="button">Workspace task</button>
           </RegionWorkspace>
@@ -514,6 +519,15 @@ it("shares a workspace frame while keeping selection, disclosure and chat creati
     );
     await user.click(screen.getByRole("button", { name: "New task in Work" }));
     expect(onTask).toHaveBeenCalledOnce();
+    const popupAction = screen.getByRole("button", {
+      name: "Accessory popup action",
+    });
+    popupAction.focus();
+    expect(popupAction).toHaveFocus();
+    await user.keyboard("{Shift>}{F10}{/Shift}");
+    expect(screen.queryByRole("menu", { name: "Actions for Work" })).toBeNull();
+    fireEvent.contextMenu(popupAction);
+    expect(screen.queryByRole("menu", { name: "Actions for Work" })).toBeNull();
     await user.click(screen.getByRole("button", { name: "Actions for Work" }));
     expect(screen.queryByRole("menuitem", { name: "New task" })).toBeNull();
     await user.keyboard("{Escape}");

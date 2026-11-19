@@ -44,6 +44,7 @@ import {
   type ReactNode,
   type ReactElement,
   type RefObject,
+  type SyntheticEvent,
 } from "react";
 import type { RelaySession } from "../../features/relay/session";
 import { readView, writeView } from "../../shared/view-state";
@@ -1456,9 +1457,11 @@ function ChatActionsMenu({
 }) {
   const [open, setOpen] = useState(false);
   const [anchor, setAnchor] = useState<HTMLElement>();
-  const inAccessory = (target: EventTarget) =>
+  // React bubbles events from portalled content through this trigger.
+  const ownsContextTarget = ({ target, currentTarget }: SyntheticEvent) =>
     target instanceof Element &&
-    target.closest("[data-solo-workspace-accessory]");
+    currentTarget.contains(target) &&
+    !target.closest("[data-solo-workspace-accessory]");
   const restoreFocus = () => {
     const row = document.querySelector(
       `[data-solo-menu-id="${id}"]:not([inert] *)`,
@@ -1512,13 +1515,13 @@ function ChatActionsMenu({
       <ContextMenuTrigger
         render={<div className={className} data-solo-menu-id={id} />}
         onContextMenu={(event) => {
-          if (inAccessory(event.target)) event.preventBaseUIHandler();
+          if (!ownsContextTarget(event)) event.preventBaseUIHandler();
         }}
         onTouchStart={(event) => {
-          if (inAccessory(event.target)) event.preventBaseUIHandler();
+          if (!ownsContextTarget(event)) event.preventBaseUIHandler();
         }}
         onKeyDown={(event) => {
-          if (inAccessory(event.target)) return;
+          if (!ownsContextTarget(event)) return;
           if (
             event.key === "ContextMenu" ||
             (event.shiftKey && event.key === "F10")
