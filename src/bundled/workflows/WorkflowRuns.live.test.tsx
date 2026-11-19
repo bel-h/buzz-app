@@ -272,6 +272,52 @@ it("appends older runs and updates an active run on a later page in place", asyn
   ]);
 });
 
+it("rereads at most two older pages with active runs per poll, taking turns", async () => {
+  // A newest page and three older ones, each older one holding an active run.
+  const relay = relayOf([
+    run("h"),
+    run("g"),
+    run("f", "running"),
+    run("e"),
+    run("d", "waiting_approval"),
+    run("c"),
+    run("b", "pending"),
+    run("a"),
+  ]);
+  show(relay);
+  await advance(0);
+  for (const _ of ["g", "e", "c"]) {
+    fireEvent.click(olderButton());
+    await advance(0);
+  }
+  expect(rows()).toHaveLength(8);
+  expect(relay.reads).toEqual([NEWEST, "g", "e", "c"]);
+
+  /** The pages one poll read below the newest page. */
+  const poll = async () => {
+    const from = relay.reads.length;
+    await advance(RUNS_ACTIVE_POLL_MS);
+    const reads = relay.reads.slice(from);
+    // One poll, and it read the newest page once.
+    expect(reads.filter((page) => page === NEWEST)).toEqual([NEWEST]);
+    const older = reads.filter((page) => page !== NEWEST);
+    expect(new Set(older).size).toBe(older.length);
+    expect(older.length).toBeLessThanOrEqual(2);
+    return older;
+  };
+  const skippedBy = (older: string[]) =>
+    ["g", "e", "c"].filter((page) => !older.includes(page));
+  let last = await poll();
+  expect(last).toHaveLength(2);
+  // No page waits more than one poll: the one a poll left out is in the next.
+  for (let turn = 0; turn < 4; turn++) {
+    const [skipped] = skippedBy(last);
+    last = await poll();
+    expect(last).toHaveLength(2);
+    expect(last).toContain(skipped);
+  }
+});
+
 it("reads nothing while hidden and catches up at once when shown again", async () => {
   const relay = relayOf([run("b", "running"), run("a")]);
   show(relay);

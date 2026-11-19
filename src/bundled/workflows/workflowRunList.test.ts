@@ -148,4 +148,12 @@ it("names the page to re-read for an active run below the newest page", () => {
   // Once "c" itself is active, the page after "d" is the one that holds it.
   const active = withPage(pushed, page([run("c", "running")]));
   expect(activePages(active)).toEqual([cursor("d"), cursor("c")]);
+  // A newest page that reaches "c" covers it, though "d" still has a cursor
+  // above it. Only the page after "c", with "b" and "a", is left to re-read.
+  const covered = withNewest(
+    active,
+    page([run("e"), run("d", "running"), run("c", "running")]),
+  );
+  expect(ids(covered)).toEqual(["e", "d", "c", "b", "a"]);
+  expect(activePages(covered)).toEqual([cursor("c")]);
 });
