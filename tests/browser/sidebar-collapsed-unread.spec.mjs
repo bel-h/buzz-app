@@ -164,7 +164,10 @@ test.describe("thread activity", () => {
     // followed thread lights it again.
     await page.locator('button[data-channel-id="beta"]').first().click();
     await expect(alpha.locator("[data-channel-activity]")).toHaveCount(0);
-    const root = app.histories.get("primary/alpha").at(-2);
+    // The viewer's own thread: a broadcast in a peer's thread is only bold.
+    const root = app.histories
+      .get("primary/alpha")
+      .find((event) => event.content === "Thread root 0");
     app.relay.publish(
       "primary",
       finalizeEvent(
