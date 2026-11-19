@@ -349,6 +349,10 @@ test("closing a profile beside a main thread preserves the thread destination", 
   const main = page.locator("[data-main-workspace]");
   const thread = main.locator('[role="tab"][data-tab-value^="thread:"]');
   await expect(thread).toHaveAttribute("aria-selected", "true");
+  // The thread pane pushes in over 300 ms, carrying Pinky's mention ~400 px
+  // sideways. Playwright hit-tests only the first event of a click, so a
+  // mouseup after the slide misses the mention and no profile opens.
+  await animationsSettled(main, { subtree: true });
   await page
     .getByRole("button", { name: "View Pinky profile", exact: true })
     .click();
