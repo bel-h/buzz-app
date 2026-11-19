@@ -54,6 +54,10 @@ const noSubscribe = () => () => {};
 const empty: readonly PluginUpdate[] = [];
 const noUpdates = () => empty;
 const noQueueRevision = () => 0;
+type PendingNotificationAction = {
+  update: PluginUpdate;
+  queueId?: string;
+};
 
 export function PluginUpdates({
   plugins,
@@ -71,6 +75,10 @@ export function PluginUpdates({
   const [store, setStore] = useState<Updates>();
   const [action, setAction] = useState<PluginUpdate>();
   const [actionQueueId, setActionQueueId] = useState<string>();
+  const pendingAction = useRef<PendingNotificationAction | undefined>(
+    undefined,
+  );
+  const [pendingActionId, setPendingActionId] = useState<string>();
   const reviewLeaseRevision = useRef<number | undefined>(undefined);
   const returnFocus = useRef<HTMLElement | null>(null);
   const state = useSyncExternalStore(plugins.subscribe, plugins.snapshot);
@@ -88,6 +96,16 @@ export function PluginUpdates({
   );
   const authorizeGit = async (repository: string) =>
     (await relay.snapshot().session.authorizeGit?.(repository)) ?? null;
+  const openPluginSettings = useCallback(
+    (pluginId: string) =>
+      void navigation.open({
+        version: 1,
+        kind: "settings",
+        section: "plugins",
+        pluginId,
+      }),
+    [navigation],
+  );
   useEffect(() => {
     const updates = createPluginUpdates(
       plugins,
@@ -150,11 +168,77 @@ export function PluginUpdates({
   const configuration = state.configuration;
   const catalog =
     configuration.status === "ready" ? configuration.catalog : undefined;
+  const clearPendingAction = useCallback(
+    (intent: NonNullable<typeof pendingAction.current>) => {
+      if (pendingAction.current !== intent) return false;
+      pendingAction.current = undefined;
+      setPendingActionId(undefined);
+      return true;
+    },
+    [],
+  );
+  const continueNotificationAction = async (
+    intent: NonNullable<typeof pendingAction.current>,
+  ) => {
+    if (!store) return;
+    try {
+      const checking = store.capability.getSnapshot().status === "checking";
+      await store.check(!checking);
+      if (pendingAction.current !== intent) return;
+      const current = store
+        .snapshot()
+        .find((item) => item.id === intent.update.id);
+      if (
+        !current?.candidate ||
+        !current.token ||
+        current.installedEnabled !== intent.update.installedEnabled ||
+        current.updateChoice !== intent.update.updateChoice ||
+        updateSourceKey(current.source) !==
+          updateSourceKey(intent.update.source)
+      ) {
+        clearPendingAction(intent);
+        openPluginSettings(intent.update.id);
+        return;
+      }
+      const queued = store.capability.queueUpdates([current.token]);
+      if (queued) {
+        intent.queueId = queued.id;
+        return;
+      }
+    } catch {
+      // The notification remains a route to the plugin's actionable settings state.
+    }
+    if (clearPendingAction(intent)) openPluginSettings(intent.update.id);
+  };
   const open = (update: PluginUpdate) => {
-    if (state.busy || action || !update.token) return;
+    if (state.busy || action || pendingAction.current) return;
     returnFocus.current = document.activeElement as HTMLElement;
-    if (!store?.capability.queueUpdates([update.token]))
-      void store?.check(true);
+    if (!store || !update.token) {
+      openPluginSettings(update.id);
+      return;
+    }
+    const intent: PendingNotificationAction = { update };
+    pendingAction.current = intent;
+    setPendingActionId(update.id);
+    const queued = store.capability.queueUpdates([update.token]);
+    if (queued) {
+      intent.queueId = queued.id;
+      return;
+    }
+    if (store.isCurrentToken(update.token)) {
+      if (clearPendingAction(intent)) openPluginSettings(update.id);
+      return;
+    }
+    void continueNotificationAction(intent);
+  };
+  const dismiss = (update: PluginUpdate) => {
+    const intent = pendingAction.current;
+    if (intent?.update.id === update.id) {
+      pendingAction.current = undefined;
+      setPendingActionId(undefined);
+      if (intent.queueId) store?.capability.cancelQueue(intent.queueId);
+    }
+    store?.later(update);
   };
   useEffect(() => {
     if (
@@ -167,8 +251,16 @@ export function PluginUpdates({
       return;
     const review = store.startNextReview(installRequests.tryHoldReview);
     if (!review) return;
+    const notificationReview =
+      pendingAction.current?.queueId === review.queueId;
+    if (notificationReview) {
+      pendingAction.current = undefined;
+      setPendingActionId(undefined);
+    }
     reviewLeaseRevision.current = installRequests.reviewRevision();
-    returnFocus.current = document.activeElement as HTMLElement;
+    // Disabling a pending notice can move keyboard focus before its review starts.
+    if (!notificationReview)
+      returnFocus.current = document.activeElement as HTMLElement;
     setAction(review.update);
     setActionQueueId(review.queueId);
   }, [
@@ -179,6 +271,26 @@ export function PluginUpdates({
     reviewRevision,
     installRequests,
   ]);
+  const pendingQueueId = pendingAction.current?.queueId;
+  const pendingQueue = pendingQueueId
+    ? store?.capability.getQueue(pendingQueueId)
+    : undefined;
+  useEffect(() => {
+    const intent = pendingAction.current;
+    if (!intent?.queueId || action) return;
+    if (!pendingQueue) {
+      if (clearPendingAction(intent)) openPluginSettings(intent.update.id);
+      return;
+    }
+    if (
+      !["failed", "cancelled", "completed", "partial"].includes(
+        pendingQueue.status,
+      )
+    )
+      return;
+    if (pendingQueue.status === "failed") openPluginSettings(intent.update.id);
+    clearPendingAction(intent);
+  }, [action, pendingQueue, openPluginSettings, clearPendingAction]);
   const activeReview = store?.getActiveReview();
   const endReview = useCallback(
     (review: NonNullable<typeof activeReview>, error?: string) =>
@@ -357,13 +469,7 @@ export function PluginUpdates({
           const name = plugin?.manifest.name ?? update.id;
           const manage = {
             label: `Manage ${name} update checks`,
-            open: () =>
-              void navigation.open({
-                version: 1,
-                kind: "settings",
-                section: "plugins",
-                pluginId: update.id,
-              }),
+            open: () => openPluginSettings(update.id),
           };
           const review = needsReview(update);
           return (
@@ -372,18 +478,22 @@ export function PluginUpdates({
               title={`Update ${name}`}
               description="Save unfinished forms and stop active plugin workers first. Updating an enabled plugin reloads it immediately."
               tone="info"
-              onDismiss={() => store?.later(update)}
+              onDismiss={() => dismiss(update)}
               closeLabel="Dismiss plugin update notice"
               navigation={manage}
             >
               <Button
                 size="sm"
-                disabled={state.busy || !!action}
+                disabled={state.busy || !!action || !!pendingActionId}
                 onClick={() => open(update)}
               >
-                {review ? "Review permissions" : "Update and reload"}
+                {pendingActionId === update.id
+                  ? "Preparing update…"
+                  : review
+                    ? "Review permissions"
+                    : "Update and reload"}
               </Button>
-              <Button size="sm" onClick={() => store?.later(update)}>
+              <Button size="sm" onClick={() => dismiss(update)}>
                 Later
               </Button>
             </ToastNotice>
