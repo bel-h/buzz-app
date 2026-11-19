@@ -768,7 +768,10 @@ and are asked to sign in again in Buzz.
 - **Message search** treats the last word you type as the start of a word, so
   it searches only once that word has at least three characters, even with
   `from:` or `in:`. A shorter last word shows how many characters to type, not
-  "no results". Filters narrow it, alone or with text:
+  "no results". Filters narrow it, alone or with text. **Filters** in the
+  search field, or `?` typed in an empty field, lists them in plain words
+  with examples: choose one to add it and open its picker, or try an example
+  from the preview. Escape goes back to the results.
   - `from:me`, `from:@name`: messages by you or someone else.
   - `in:#channel`, `in:@person`: one channel, or your DM with someone
     (`in:@me` is your own). A name that matches several conversations, or
@@ -1039,9 +1042,11 @@ and are asked to sign in again in Buzz.
   on the right. Compact avatars sit before the name on the left; Solo chats show
   the included agents.
 - **App navigation**: use the left dock to switch apps. Bestie is first,
-  followed by Messages and the other apps. Activity is the first row of the
-  Messages sidebar. Community and profile controls
-  sit at the bottom of the dock. Search stays wide in the top bar.
+  followed by Messages and the other apps. Activity and other enabled sidebar
+  pages stay at the top of the Messages sidebar while you scroll conversations.
+  Scroll the pinned area if the window is too short to show every page.
+  Community and profile controls sit at the bottom of the dock. Search stays
+  wide in the top bar.
   Messages shows your workspaces, Starred and unfiled conversations together.
   Other apps can provide their own sidebar. Pages listed in the Messages
   sidebar, such as the Drafts & sent plugin, keep Messages selected in the dock. The
