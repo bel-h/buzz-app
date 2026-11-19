@@ -704,27 +704,28 @@ export function NoteDocument({
         )}
         <div className={styles.actions}>
           {(loading || (note && canEdit && !note.deleted)) && (
-            <Select
-              label="Doc mode"
-              variant="compact"
-              size="sm"
-              value={loading ? "" : editing ? "editing" : "viewing"}
-              placeholder="Doc mode"
-              disabled={loading || busy || saving}
-              groups={[
-                {
-                  label: "Doc mode",
-                  options: [
-                    { value: "viewing", label: "Viewing" },
-                    { value: "editing", label: "Editing" },
-                  ],
-                },
-              ]}
-              onValueChange={(mode) => {
-                setStatus("");
-                setEditing(mode === "editing");
-              }}
-            />
+            <div className="min-w-20">
+              <Select
+                label="Doc mode"
+                variant="compact"
+                size="sm"
+                value={loading ? "" : editing ? "editing" : "viewing"}
+                disabled={loading || busy || saving}
+                groups={[
+                  {
+                    label: "Doc mode",
+                    options: [
+                      { value: "viewing", label: "Viewing" },
+                      { value: "editing", label: "Editing" },
+                    ],
+                  },
+                ]}
+                onValueChange={(mode) => {
+                  setStatus("");
+                  setEditing(mode === "editing");
+                }}
+              />
+            </div>
           )}
           <NoteSaveAction
             shown={

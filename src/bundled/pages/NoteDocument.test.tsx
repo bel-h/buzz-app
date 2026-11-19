@@ -47,7 +47,9 @@ it.each([false, true])(
     try {
       const article = screen.getByRole("article", { name: "Loading doc" });
       expect(within(article).queryByRole("heading")).not.toBeInTheDocument();
-      expect(screen.getByRole("combobox", { name: "Doc mode" })).toBeDisabled();
+      const mode = screen.getByRole("combobox", { name: "Doc mode" });
+      expect(mode).toBeDisabled();
+      expect(mode).toHaveTextContent(/^$/);
       for (const name of ["Refresh doc", "Share doc", "Doc actions"]) {
         expect(screen.getByRole("button", { name })).toBeDisabled();
       }
