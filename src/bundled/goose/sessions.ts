@@ -7,11 +7,7 @@ import {
 } from "../../features/agent-harness/acp/agent-sessions";
 import type { AgentProtection } from "../../features/agent-protection/service";
 import { nativeProtectionBridge } from "../../features/agent-protection/native-bridge";
-import {
-  GooseProcess,
-  type GooseHost,
-  type ServeMcp,
-} from "./goose";
+import { GooseProcess, type GooseHost, type ServeMcp } from "./goose";
 import type {
   SavedConversation,
   SessionStore,
