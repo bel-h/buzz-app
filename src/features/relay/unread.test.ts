@@ -459,7 +459,7 @@ it("a deletion cannot use revoked unread evidence to delete an accessible target
   expect(h.snapshot().observedCount).toBe(1);
 });
 
-it("promotes mentions and participating-thread replies, broadcasts only in the viewer's threads, without promoting ordinary unread", () => {
+it("promotes mentions and participating-thread replies, broadcasts only in the viewer's threads, without promoting ordinary unread", async () => {
   const h = setup();
   h.grant("room");
   const root = message(h.viewer, "room", "root", 10);
@@ -503,9 +503,22 @@ it("promotes mentions and participating-thread replies, broadcasts only in the v
   // Broadcasts outside the viewer's threads count as ordinary unread: bold,
   // no dot, and no thread activity.
   expect(h.snapshot()).toMatchObject({ observedCount: 7, attentionCount: 3 });
-  expect(h.session.unread.activity("room").items).toHaveLength(1);
-  expect(h.session.unread.attention("room", otherBroadcast.id)).toMatchObject({
-    unread: true,
+  expect(
+    h.session.unread.activity("room").items?.map((item) => item.rootId),
+  ).toEqual([root.id]);
+  // Its parent lookup finds no conversation of the viewer's.
+  await vi.waitFor(() =>
+    expect(
+      h.session.unread.attention("room", otherBroadcast.id).pending,
+    ).toBeUndefined(),
+  );
+  const other = h.session.unread.attention("room", otherBroadcast.id);
+  expect(other).toMatchObject({ status: "ineligible", unread: true });
+  expect(other.category).toBeUndefined();
+  expect(h.snapshot()).toMatchObject({ observedCount: 7, attentionCount: 3 });
+  expect(h.session.unread.attention("room", broadcast.id)).toMatchObject({
+    status: "eligible",
+    category: "thread",
   });
   expect(
     h.session.unread.attention("room", missingRootBroadcast.id),
@@ -525,9 +538,19 @@ it("a broadcast in a thread the viewer started outside the retained window earns
   ]);
   h.emit([broadcast]);
   expect(h.snapshot()).toMatchObject({ observedCount: 1, attentionCount: 0 });
+  // Pending while the lookup runs, so a notification waits instead of dropping.
+  expect(h.session.unread.attention("room", broadcast.id)).toMatchObject({
+    status: "unknown",
+    pending: true,
+  });
   await vi.waitFor(() =>
     expect(h.snapshot()).toMatchObject({ observedCount: 1, attentionCount: 1 }),
   );
+  expect(h.session.unread.attention("room", broadcast.id)).toMatchObject({
+    status: "eligible",
+    category: "thread",
+    unread: true,
+  });
 });
 
 it("the channel snapshot names the oldest unread message its timeline shows", async () => {

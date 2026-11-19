@@ -207,6 +207,64 @@ it("unfollows a participated thread until the viewer explicitly follows it again
   });
 });
 
+it("a reply also sent to the channel earns attention only in the viewer's threads, and an explicit unfollow wins", async () => {
+  const { owner, unread, settled } = await setup();
+  const broadcast = (time: number, root: RelayEvent, extra: string[][] = []) =>
+    reply(peer, time, root, root, [["broadcast", "1"], ...extra]);
+  const authored = event(viewer, 10, []);
+  const repliedIn = event(peer, 11, []);
+  const mine = reply(viewer, 12, repliedIn);
+  const followed = event(peer, 13, []);
+  const stranger = event(peer, 14, []);
+  const unfollowed = event(viewer, 15, []);
+  owner.accept([authored, repliedIn, mine, followed, stranger, unfollowed]);
+  unread.follow("c0", followed.id, true);
+  unread.follow("c0", unfollowed.id, false);
+  const inAuthored = broadcast(20, authored);
+  const inRepliedIn = broadcast(21, repliedIn);
+  const inFollowed = broadcast(22, followed);
+  const inStranger = broadcast(23, stranger);
+  const inUnfollowed = broadcast(24, unfollowed);
+  const mention = broadcast(25, stranger, [["p", viewer]]);
+  owner.accept([
+    inAuthored,
+    inRepliedIn,
+    inFollowed,
+    inStranger,
+    inUnfollowed,
+    mention,
+  ]);
+  await settled(inStranger);
+
+  for (const item of [inAuthored, inRepliedIn, inFollowed])
+    expect(unread.attention("c0", item.id)).toMatchObject({
+      status: "eligible",
+      category: "thread",
+      unread: true,
+    });
+  expect(unread.attention("c0", mention.id)).toMatchObject({
+    category: "mention",
+    unread: true,
+  });
+  // Outside the viewer's threads: still unread, so the row is bold, but no
+  // attention category, so no dot and no alert.
+  for (const item of [inStranger, inUnfollowed]) {
+    const attention = unread.attention("c0", item.id);
+    expect(attention).toMatchObject({ status: "ineligible", unread: true });
+    expect(attention.category).toBeUndefined();
+  }
+  expect(
+    unread
+      .activity("c0")
+      .items?.map((item) => item.rootId)
+      .sort(),
+  ).toEqual([authored.id, repliedIn.id, followed.id, stranger.id].sort());
+  // Stranger's thread is listed only for the mention, not the broadcast.
+  expect(
+    unread.activity("c0").items?.find((item) => item.rootId === stranger.id),
+  ).toMatchObject({ latestMessageId: mention.id, unreadCount: 1 });
+});
+
 it("alerts on every reply under a root the label shows as followed", async () => {
   const { owner, unread, settled } = await setup();
   // Replied only under a peer's nested reply.

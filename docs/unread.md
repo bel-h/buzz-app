@@ -271,8 +271,8 @@ timeline and the thread being read, without reading unopened threads' replies.
   needs explicit `refresh()` or reconnect, not an unlimited automatic retry loop.
 - `attentionCount` is a separate observed subset: DMs, mentions and replies in
   the viewer's conversations, including those also sent to the channel. A
-  broadcast outside them counts as ordinary unread. It does not trigger notifications or
-  implement mute policy.
+  broadcast outside them counts as ordinary unread. It does not trigger
+  notifications or implement mute policy.
 - `markThrough(target, messageId)` is explicit prefix intent through verified
   evidence. It can mark unloaded earlier messages read; do not use it for viewport
   observation. A channel prefix requires a top-level message, not a reply.
@@ -332,8 +332,8 @@ Solo chat labels strengthen for any observed unread message, including mentions,
 broadcasts and relevant replies, even when muted, so Solo rows omit the attention dot.
 Ordinary unread renders no row marker. Unmuted DMs, mentions and relevant thread
 replies add one accent dot; a broadcast from a thread the viewer is not part of
-only strengthens the label, like a top-level post; non-DM row numerals are omitted and DM
-avatars are reserved for promoted offscreen cues. Thread activity reuses that dot:
+only strengthens the label, like a top-level post. Non-DM row numerals are
+omitted and DM avatars are reserved for promoted offscreen cues. Thread activity reuses that dot:
 its hover/focus/click popover groups unread replies by canonical thread root and
 opens the existing thread panel. Above the threads it lists unread top-level messages that
 mention the viewer, newest first; a mention opens at its message and is read like any
@@ -416,8 +416,8 @@ viewer is part of it when the viewer wrote the parent or also replied to that
 parent, or wrote or replied anywhere under the same canonical thread root, as in
 the reference client. A thread the viewer has not posted in therefore stays
 quiet, apart from mentions and broadcasts; such a broadcast counts as ordinary
-unread, without attention or thread activity. Explicit per-message unread intent still
-applies to any reply. The same rule feeds channel and thread counts, thread
+unread, without attention or thread activity. Explicit per-message unread
+intent still applies to any reply. The same rule feeds channel and thread counts, thread
 activity, per-message attention and the `thread` notification category.
 
 **Quiet agent messages.** A message whose signed `audience` tag is `agents` is

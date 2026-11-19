@@ -213,4 +213,41 @@ test.describe("thread activity", () => {
     await summary.click();
     await expect(title).toHaveCSS("font-weight", "500");
   });
+
+  test("a broadcast reply in a peer's thread bolds the row without a dot", async ({
+    page,
+    app,
+  }) => {
+    await holdReadingFocus(page);
+    await open(page, app);
+    const alpha = page
+      .locator('[data-sidebar-section="starred"]')
+      .locator('button[data-channel-id="alpha"]');
+    await page.locator('button[data-channel-id="beta"]').first().click();
+    await expect(alpha.locator("[data-channel-unread-title]")).toHaveCount(0);
+    const root = app.histories
+      .get("primary/alpha")
+      .find((event) => event.content === "Thread root 1");
+    app.relay.publish(
+      "primary",
+      finalizeEvent(
+        {
+          kind: 9,
+          created_at: Math.floor(Date.now() / 1000),
+          content: "Broadcast in a peer's thread",
+          tags: [
+            ["h", "alpha"],
+            ["e", root.id, "", "reply"],
+            ["broadcast", "1"],
+          ],
+        },
+        generateSecretKey(),
+      ),
+    );
+    await expect(alpha.locator("[data-channel-unread-title]")).toHaveCount(1);
+    await expect(alpha.locator("[data-channel-activity]")).toHaveCount(0);
+    await expect(
+      alpha.locator('[data-channel-unread][data-priority="true"]'),
+    ).toHaveCount(0);
+  });
 });
