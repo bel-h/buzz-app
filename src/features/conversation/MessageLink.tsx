@@ -36,6 +36,7 @@ import { safeLinkUrl } from "../relay/message-content";
 import {
   LinkChannelKindContext,
   LinkDescriptionContext,
+  LinkAccessibleNameContext,
   LinkInteractiveContext,
   LinkLabelContext,
   LinkContentContext,
@@ -119,6 +120,7 @@ export function MessageLink({
   const [unavailable, setUnavailable] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [description, setDescription] = useState<string>();
+  const [accessibleName, setAccessibleName] = useState<string>();
   // A renderer's own hover card, such as an agent card's Add to Buzz.
   const [offered, setOffered] = useState<LinkPreview>();
   const offeredAction = useRef<HTMLDivElement>(null);
@@ -292,7 +294,7 @@ export function MessageLink({
       <a
         ref={trigger}
         href={url}
-        aria-label={display}
+        aria-label={accessibleName ?? display}
         aria-description={description}
         aria-disabled={withheld || undefined}
         data-link-label={label ?? ""}
@@ -501,7 +503,11 @@ export function MessageLink({
               <LinkPreviewContext
                 value={interactive && host ? setOffered : undefined}
               >
-                {result}
+                <LinkAccessibleNameContext
+                  value={interactive ? setAccessibleName : undefined}
+                >
+                  {result}
+                </LinkAccessibleNameContext>
               </LinkPreviewContext>
             </LinkDescriptionContext>
           </LinkInteractiveContext>

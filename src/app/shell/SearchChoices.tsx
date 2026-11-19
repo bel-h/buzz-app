@@ -73,6 +73,10 @@ export type SearchDestination = {
   /** What choosing the row does, said in a preview that has nothing else to
    * show, e.g. "Open Activity". */
   action?: string | undefined;
+  /** Stays with the row above it: a group cut short in Top results keeps
+   * the two together, one row past its usual limit if need be. A cut that
+   * hides the row above still shows this one, after the rows shown. */
+  attached?: boolean | undefined;
   run: () => void;
 };
 
@@ -387,7 +391,8 @@ export function SearchChoices({
             const place = ranked.indexOf(group);
             if (place < 0) return group;
             const rows = resultRows(group);
-            const limit = place === 0 ? LEAD_ROWS : GROUP_ROWS;
+            const cap = place === 0 ? LEAD_ROWS : GROUP_ROWS;
+            const limit = rows[cap]?.attached ? cap + 1 : cap;
             if (rows.length <= limit && !group.count)
               return { ...group, destinations: rows };
             truncated.set(group.label, rows.length);
@@ -396,7 +401,10 @@ export function SearchChoices({
             const count = countOf(group);
             return {
               ...group,
-              destinations: rows.slice(0, limit),
+              destinations: [
+                ...rows.slice(0, limit),
+                ...rows.slice(limit).filter((row) => row.attached),
+              ],
               total: /^\d+$/.test(count) ? Number(count) : -1,
             };
           });

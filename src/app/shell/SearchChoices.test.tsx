@@ -420,6 +420,77 @@ it("opens the whole result group from its header while keeping typing focus", ()
   expect(field).toHaveFocus();
 });
 
+it("keeps an attached row with the row above it where Top results cuts a group", () => {
+  const attach = (rows: typeof destinations, at: number) =>
+    rows.map((row, index) => (index === at ? { ...row, attached: true } : row));
+  render(
+    <SearchChoices
+      query="channel"
+      onQueryChange={() => {}}
+      input={createRef<HTMLInputElement>()}
+      groups={[
+        // The lead group shows five rows; the sixth is attached to the fifth.
+        { label: "Agents", destinations: attach(destinations.slice(0, 6), 5) },
+        // Later groups show three rows; the fourth is attached to the third.
+        {
+          label: "Channels",
+          destinations: attach(destinations.slice(6, 12), 3),
+        },
+        // Unattached rows past the limit are still cut.
+        { label: "Pages", destinations: destinations.slice(12, 17) },
+      ]}
+      peek={{ ranked: true, preview: () => null }}
+    />,
+  );
+  const shown = (label: string) =>
+    within(screen.getByRole("group", { name: label }))
+      .getAllByRole("option")
+      .map((row) => row.textContent);
+  expect(shown("Agents")).toEqual(
+    destinations.slice(0, 6).map(({ label }) => label),
+  );
+  expect(
+    within(screen.getByRole("group", { name: "Agents" })).queryByRole(
+      "button",
+      { name: "Show all Agents" },
+    ),
+  ).toBeNull();
+  expect(shown("Channels")).toEqual(
+    destinations.slice(6, 10).map(({ label }) => label),
+  );
+  expect(shown("Pages")).toEqual(
+    destinations.slice(12, 15).map(({ label }) => label),
+  );
+});
+
+it("still shows an attached row when Top results cuts the row above it", () => {
+  // Five rows show; the row above the attached one (index 6) is cut.
+  const rows = destinations
+    .slice(0, 8)
+    .map((row, index) => (index === 6 ? { ...row, attached: true } : row));
+  render(
+    <SearchChoices
+      query="channel"
+      onQueryChange={() => {}}
+      input={createRef<HTMLInputElement>()}
+      groups={[{ label: "Agents", destinations: rows }]}
+      peek={{ ranked: true, preview: () => null }}
+    />,
+  );
+  const group = within(screen.getByRole("group", { name: "Agents" }));
+  expect(group.getAllByRole("option").map((row) => row.textContent)).toEqual([
+    ...destinations.slice(0, 5).map(({ label }) => label),
+    "channel-6",
+  ]);
+  // The rest are still a click away, in their own order.
+  fireEvent.click(group.getByRole("button", { name: "Show all Agents" }));
+  expect(
+    within(screen.getByRole("group", { name: "Agents" }))
+      .getAllByRole("option")
+      .map((row) => row.textContent),
+  ).toEqual(destinations.slice(0, 8).map(({ label }) => label));
+});
+
 it("keeps a chosen group while an edited query's results land, and lets it go if they settle without it", () => {
   const peekOf = (query: string, rows: number, busy: boolean) => (
     <SearchChoices

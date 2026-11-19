@@ -1367,13 +1367,14 @@ destination, roster, audio or controls.
 Every plugin surface in a channel or thread can open a target, such as a panel
 URL, with the same `canOpen(target)` / `open(target)` pair (`TargetOpener`):
 panels (`context`), channel-header launchers, composer tools and accessories,
-message renderers, message ⋯ action components, attachment renderers and inline
-renderers. The conversation host decides placement: in Channels a panel target
-opens as a side-pane tab, as if the user clicked a link to it in that message or
-composer. `canOpen` is presentation only. `open` re-resolves at click time and
-returns false outside a conversation host, after the contribution is removed or
-after its mount retires. Link renderers keep host-owned link activation;
-reaction choosers and message markers get no opener.
+message renderers, message ⋯ action components, attachment renderers, inline
+renderers and link preview cards (`opener`). The conversation host decides
+placement: in Channels a panel target opens as a side-pane tab, as if the user
+clicked a link to it in that message or composer. `canOpen` is presentation
+only. `open` re-resolves at click time and returns false outside a conversation
+host, after the contribution is removed or after its mount retires. Link
+renderers keep host-owned link activation; reaction choosers and message markers
+get no opener.
 
 ### Resolution order
 
@@ -2999,11 +3000,15 @@ lowest-`order` match draws its card under the panel
 [resolution order](#resolution-order), so a plugin claims its own URLs by
 registering below the default web card's catch-all band; a component that
 renders nothing leaves that link without a card. Components receive
-`{ url, messageId, open }`; `open()` routes `url` through the host's link
-handler, as clicking the link does, and returns false once the contribution or
-message has retired. Cards sit between the message bubble and its attachments.
-After three, the rest fold behind "Show N more previews". A render failure drops
-only that card. Registration follows the existing plugin lifetime.
+`{ url, messageId, open, opener }`;
+`open()` routes `url` through the host's link handler, as clicking the link
+does, and returns false once the contribution or message has retired. `opener`
+is the message's [`TargetOpener`](#opening-targets-from-channel-plugins), so a
+card can open a different target, such as its plugin's panel, while clicking the
+link itself still does what it always did. Hosts that predate it omit `opener`.
+Cards sit between the message bubble and its attachments. After three, the rest
+fold behind "Show N more previews". A render failure drops only that card.
+Registration follows the existing plugin lifetime.
 
 `registerCodeBlock({ id, title, matches, component, action? })` contributes optional
 presentation for a fenced code block. `matches(language)` receives the fence's
