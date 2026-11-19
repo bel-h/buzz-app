@@ -9734,12 +9734,19 @@ it.each([
   },
 );
 
-it.each(["disable", "remove", "edit", "pause", "stop"] as const)(
+it.each([
+  "disable",
+  "remove",
+  "edit",
+  "pause",
+  "offline pause",
+  "stop",
+] as const)(
   "resets or cancels history backoff when its owner chooses %s",
   async (action) => {
     vi.useFakeTimers({ now: 1_000_000 });
     const random = vi.spyOn(Math, "random").mockReturnValue(0);
-    const { service, session, recover, unrouted, ctx } = await setup({
+    const { service, session, recover, connect, unrouted, ctx } = await setup({
       identities: [echo],
     });
     unrouted.add(lobby);
@@ -9773,48 +9780,53 @@ it.each(["disable", "remove", "edit", "pause", "stop"] as const)(
       expect(service.snapshot().watchReadFailures).toMatchObject([
         { consecutiveFailures: 2 },
       ]);
+      const offline = action === "offline pause";
+      const pause = action === "pause" || offline;
+      if (offline) {
+        connect(false);
+        expect(service.snapshot().running).toEqual([]);
+      }
       if (action === "stop") await ctx.fiber.dispose();
       else
         await service.save(bot, {
-          attention:
-            action === "pause"
-              ? {
-                  "interest/default": {
-                    type: "interest",
-                    instructions: "Watch",
-                    paused: true,
-                  },
-                }
-              : {
-                  "watch/chat":
-                    action === "remove"
-                      ? null
-                      : {
-                          ...watch,
-                          ...(action === "edit"
-                            ? { name: "Edited watch" }
-                            : { enabled: false }),
-                        },
+          attention: pause
+            ? {
+                "interest/default": {
+                  type: "interest",
+                  instructions: "Watch",
+                  paused: true,
                 },
+              }
+            : {
+                "watch/chat":
+                  action === "remove"
+                    ? null
+                    : {
+                        ...watch,
+                        ...(action === "edit"
+                          ? { name: "Edited watch" }
+                          : { enabled: false }),
+                      },
+              },
         });
       await vi.advanceTimersByTimeAsync(0);
       if (action !== "edit") {
         expect(service.snapshot().watchReadFailures).toEqual([]);
-        await vi.advanceTimersByTimeAsync(600_000);
+        if (!offline) await vi.advanceTimersByTimeAsync(600_000);
         expect(failures).toHaveLength(2);
         if (action === "stop") return;
         await service.save(bot, {
-          attention:
-            action === "pause"
-              ? {
-                  "interest/default": {
-                    type: "interest",
-                    instructions: "Watch",
-                  },
-                }
-              : { "watch/chat": watch },
+          attention: pause
+            ? {
+                "interest/default": {
+                  type: "interest",
+                  instructions: "Watch",
+                },
+              }
+            : { "watch/chat": watch },
         });
-        await vi.advanceTimersByTimeAsync(35_000);
+        if (offline) connect(true);
+        await vi.advanceTimersByTimeAsync(offline ? 5_000 : 35_000);
       }
       expect(failures).toHaveLength(3);
       expect(service.snapshot().watchReadFailures).toMatchObject([

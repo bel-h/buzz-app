@@ -474,6 +474,8 @@ export type RunnerHost = {
   ready(key: AgentKey): Agent | undefined;
   /** A running agent, in any community. */
   agent(key: AgentKey): Agent | undefined;
+  /** The membership's saved Attention, even while it is disconnected. */
+  savedAttention(key: AgentKey): Agent["attention"];
   /** Whether the agent is in the event's channel, or undefined while its
    * roster is only the one saved on disk and the relay has not confirmed it. */
   member(agent: Agent, event: Pick<RelayEvent, "tags">): boolean | undefined;
@@ -1459,25 +1461,28 @@ export class AgentRunners {
     };
   }
   private currentReadRetry(
-    runner: Runner,
-    agent: Agent,
+    attention: Agent["attention"],
     prior: AttentionObject,
   ) {
-    if (!agent.attentionEnabled || !runner.type?.run) return false;
-    const object = agent.attention[prior.slug];
+    const object = attention[prior.slug];
     return (
       object?.value.type === "event" &&
       object.value.enabled &&
-      !interestPaused(agent.attention, object.value.interest_id) &&
+      !interestPaused(attention, object.value.interest_id) &&
       // A new session can reload an unchanged saved definition into a new object.
       (object === prior || JSON.stringify(object) === JSON.stringify(prior))
     );
   }
   watchReadFailures(agent: Agent): readonly WatchReadFailure[] {
     const runner = this.runners.get(agent.key);
-    if (!runner?.readRetries.size) return [];
+    if (
+      !agent.attentionEnabled ||
+      !runner?.type?.run ||
+      !runner.readRetries.size
+    )
+      return [];
     return [...runner.readRetries.values()].flatMap(({ object, failure }) =>
-      this.currentReadRetry(runner, agent, object) ? [failure] : [],
+      this.currentReadRetry(agent.attention, object) ? [failure] : [],
     );
   }
   /** Keeps each agent's catch-up going: on start, and after each connect, its
@@ -1535,12 +1540,16 @@ export class AgentRunners {
       const on = !!agent?.attentionEnabled && !!runner.type?.run;
       const reading: Stream[] = [];
       const streams = agent ? streamsOf(agent) : [];
-      // A disconnect can hide the agent row without changing its saved watches.
+      // Saved edits still invalidate retries when a disconnect hides the row.
+      const attention =
+        agent?.attention ?? this.host.savedAttention(runner.key);
       let retriesChanged = false;
       for (const [key, retry] of runner.readRetries)
         if (
           !shown ||
-          (agent && !this.currentReadRetry(runner, agent, retry.object))
+          agent?.attentionEnabled === false ||
+          !runner.type?.run ||
+          !this.currentReadRetry(attention, retry.object)
         ) {
           runner.readRetries.delete(key);
           retriesChanged = true;

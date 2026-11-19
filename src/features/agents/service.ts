@@ -2411,6 +2411,7 @@ export class AgentsService extends Service implements Agents {
       watchReadFailuresChanged: () => queueMicrotask(() => this.notify()),
       ready: (key) => this.ready(key),
       agent: (key) => this.agent(key),
+      savedAttention: (key) => this.records[key]?.attention ?? EMPTY,
       member: (agent, event) => this.member(agent, event),
       reads: (agent, event) => this.reads(agent, event),
       dm: (agent, event) => this.dm(agent, event),
