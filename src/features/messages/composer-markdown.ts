@@ -376,12 +376,21 @@ function paragraphMarkdown(
   const heading = block.type.name === "heading";
   let inlineCount = block.childCount;
   if (heading) {
-    // A Markdown hard break needs a following line of heading content.
-    while (
-      inlineCount > 0 &&
-      block.child(inlineCount - 1).type.name === "hard_break"
-    )
-      inlineCount--;
+    // Blank final lines cannot carry a heading's hard breaks. Code spans
+    // and links still produce Markdown content when their text is whitespace.
+    for (let index = inlineCount - 1; index >= 0; index--) {
+      const node = block.child(index);
+      if (node.type.name === "hard_break") {
+        inlineCount = index;
+      } else if (
+        !node.isText ||
+        /[^ \t]/.test(node.textContent) ||
+        composerSchema.marks.code.isInSet(node.marks) ||
+        composerSchema.marks.link.isInSet(node.marks)
+      ) {
+        break;
+      }
+    }
   }
   let text = "";
   const formats = [

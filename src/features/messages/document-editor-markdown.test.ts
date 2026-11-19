@@ -161,6 +161,51 @@ it.each(["C #", "C ###", "###", "C#"])(
 );
 
 it.each([
+  [1, [" "]],
+  [2, ["\t", " \t"]],
+] as const)("preserves H%i with trailing blank lines", (level, blankLines) => {
+  const heading = schema.nodes.heading.create({ level }, [
+    schema.text("Head"),
+    ...blankLines.flatMap((line) => [
+      schema.nodes.hard_break.create(),
+      schema.text(line),
+    ]),
+  ]);
+  const doc = schema.nodes.doc.create(null, heading);
+  const markdown = documentEditorMarkdown(projectComposerDocument(doc).draft);
+  const reopened = readComposerSnapshot(
+    documentEditorDraft(markdown).document,
+    "document",
+  );
+  expect(
+    reopened?.firstChild?.eq(
+      schema.nodes.heading.create({ level }, schema.text("Head")),
+    ),
+  ).toBe(true);
+});
+
+it.each([
+  schema.marks.code.create(),
+  schema.marks.link.create({ href: "https://example.com" }),
+])(
+  "keeps a whitespace $type.name span on the last line of a heading",
+  (mark) => {
+    const heading = schema.nodes.heading.create({ level: 2 }, [
+      schema.text("Head"),
+      schema.nodes.hard_break.create(),
+      schema.text(" ", [mark]),
+    ]);
+    const doc = schema.nodes.doc.create(null, heading);
+    const markdown = documentEditorMarkdown(projectComposerDocument(doc).draft);
+    const reopened = readComposerSnapshot(
+      documentEditorDraft(markdown).document,
+      "document",
+    );
+    expect(reopened?.firstChild?.eq(heading)).toBe(true);
+  },
+);
+
+it.each([
   "Setext heading\n===\n\nSecond\n---",
   "> ## Quoted heading\n>\n> Text",
   "> # Heading\n> continuation",
