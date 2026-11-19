@@ -128,6 +128,7 @@ export function SidebarUnread({
       // ResizeObserver delivery so each pass settles before another runs.
       positionFrame = requestAnimationFrame(() => {
         positionFrame = 0;
+        cue.removeAttribute("data-beside-action");
         const cueRect = cue.getBoundingClientRect();
         const actionRect = action.getBoundingClientRect();
         const center = cueRect.left + cueRect.width / 2;
@@ -155,6 +156,14 @@ export function SidebarUnread({
         const lifted = actionRect.width > 0 && cue.offsetWidth > available;
         if (lifted) cue.removeAttribute("data-preview-limit");
         cue.toggleAttribute("data-lifted", lifted);
+        // The stacked cue must fit inside the list frame that clips it.
+        if (
+          lifted &&
+          cue.offsetHeight + Number.parseFloat(getComputedStyle(cue).bottom) >
+            viewport.clientHeight
+        ) {
+          cue.dataset.besideAction = "";
+        }
       });
     };
     const resize = new ResizeObserver(() => {
@@ -203,6 +212,7 @@ export function SidebarUnread({
       resize.disconnect();
       mutations.disconnect();
       viewport.removeEventListener("scroll", schedule);
+      cue?.removeAttribute("data-beside-action");
       cue?.removeAttribute("data-lifted");
       cue?.removeAttribute("data-preview-limit");
     };
@@ -292,7 +302,10 @@ export function SidebarUnread({
               <span>·</span>
             </span>
           )}
-          <span className={styles.unreadEdgeLabel}>{count} unread</span>
+          <span className={styles.unreadEdgeLabel}>
+            {count}
+            <span className={styles.unreadEdgeSuffix}> unread</span>
+          </span>
         </Button>
       </div>
     );

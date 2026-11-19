@@ -816,4 +816,49 @@ test.describe("DM preview wiring", () => {
     await expect(below.locator("..")).toHaveCSS("bottom", "12px");
     await expect(visibleAvatars).toHaveCount(3);
   });
+  test("the lower unread cue is reachable in a short drawer at 200% interface size", async ({
+    page,
+    app,
+  }) => {
+    await open(page, app);
+    await page.setViewportSize({ width: 568, height: 240 });
+    await page.evaluate(() => {
+      localStorage.setItem("buzz-font-scale.v1", "2");
+      window.dispatchEvent(
+        new StorageEvent("storage", { key: null, storageArea: localStorage }),
+      );
+    });
+    await expect(page.locator("html")).toHaveCSS("--buzz-text-scale", "2");
+    await page
+      .getByRole("button", { name: "Show navigation", exact: true })
+      .click();
+    const action = sidebar(page).getByRole("button", { name: "New options" });
+    const below = cue(page, "below");
+    await expect(action).toBeInViewport({ ratio: 1 });
+    await expect(below).toBeInViewport({ ratio: 1 });
+    await expect(below).toHaveAccessibleName(
+      /^\d+ unread conversations below$/,
+    );
+    await action.click({ trial: true });
+    await below.click();
+    await expect(
+      list(page).locator("button[data-channel-id]:focus"),
+    ).toHaveCount(1);
+
+    await scroll(page, 0);
+    await expect(below).toBeInViewport({ ratio: 1 });
+    await action.focus();
+    await page.keyboard.press("Shift+Tab");
+    await expect(below).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(
+      list(page).locator("button[data-channel-id]:focus"),
+    ).toHaveCount(1);
+
+    await scroll(page, 0);
+    await page.setViewportSize({ width: 568, height: 500 });
+    await expect(below).toBeInViewport({ ratio: 1 });
+    await expect(below.getByText(/^\d+ unread$/)).toBeVisible();
+    await expect(below.locator("[data-unread-dm]:visible")).toHaveCount(3);
+  });
 });

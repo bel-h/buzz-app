@@ -174,7 +174,11 @@
     var(--space-2)
   );
 }
-.sidebar:has([data-sidebar-floating-action]) .channelList {
+.sidebar:has([data-sidebar-floating-action]) .channelListFrame {
+  min-height: 0;
+}
+/* Put the clearance on the rows so the scrollport can shrink in a short drawer. */
+.sidebar:has([data-sidebar-floating-action]) .channelListContent {
   padding-block-end: calc(
     var(--sidebar-floating-action-clearance) +
     var(--space-3)

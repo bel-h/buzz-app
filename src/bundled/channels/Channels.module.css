@@ -203,6 +203,24 @@
 .unreadEdge[data-edge="below"] [class~="buzz-button-label"] {
   flex-wrap: wrap;
 }
+.unreadEdge[data-edge="below"][data-beside-action] {
+  inset-inline-start: var(--sidebar-floating-action-clearance);
+  bottom: calc(var(--space-2) + (var(--size-control) - var(--space-6)) / 2);
+  max-width: calc(
+    100% -
+    var(--sidebar-floating-action-clearance) -
+    var(--unread-edge-inline-end)
+  );
+}
+.unreadEdge[data-beside-action] > [class~="buzz-button"] {
+  padding-inline: var(--space-1);
+}
+.unreadEdge[data-beside-action] [class~="buzz-button-label"] {
+  flex-wrap: nowrap;
+}
+.unreadEdge[data-beside-action] :is(.unreadDmPreviews, .unreadEdgeSuffix) {
+  display: none;
+}
 .channelSection {
   position: relative;
   flex-shrink: 0;
