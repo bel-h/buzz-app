@@ -84,11 +84,20 @@ test("channel settings owns its responsive side panel and returns keyboard focus
   await expect(
     panel.getByRole("button", { name: "Refresh channels", exact: true }),
   ).toBeVisible();
-  const conversationBox = await conversation.boundingBox();
-  const panelBox = await panel.boundingBox();
-  expect(panelBox.x).toBeGreaterThanOrEqual(
-    conversationBox.x + conversationBox.width,
+  // Reopening the pane widens the split over --duration-panel-enter. Two
+  // boundingBox() reads can straddle frames of that transition: an earlier,
+  // wider conversation against a later panel reads as a sub-pixel overlap,
+  // though every single frame keeps the panel past the conversation's edge.
+  // Measure the settled split, both edges in one layout pass.
+  await settlePanelMotion(page);
+  const [conversationRight, panelLeft] = await conversation.evaluate(
+    (before, after) => [
+      before.getBoundingClientRect().right,
+      after.getBoundingClientRect().left,
+    ],
+    await panel.elementHandle(),
   );
+  expect(panelLeft).toBeGreaterThanOrEqual(conversationRight);
   await page.keyboard.press("Escape");
   await expect(panel).toHaveCount(0);
   await expect(trigger).toBeFocused();
