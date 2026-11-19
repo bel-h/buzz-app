@@ -800,10 +800,10 @@ and are asked to sign in again in Buzz.
   the highlight, as do Control+J or Control+N and Control+K or Control+P on
   every platform, a Mac included; add your own keys under **Previous search
   result** and **Next search result** in Settings → Shortcuts, and the key
-  hints show them. Up and Down keep working. Tab and Shift+Tab, Control+L or
-  Control+F and Control+H or Control+B, or the group filter buttons above the
-  results, show one group whole, as does choosing a group's heading when it
-  has more; Escape goes back. Groups reorder as slower results arrive until
+  hints show them. Up and Down keep working. Tab, Control+L or Control+F
+  shows the next group whole and Shift+Tab, Control+H or Control+B the
+  previous one, as do the group filter buttons above the results and choosing
+  a group's heading when it has more; Escape goes back. Groups reorder as slower results arrive until
   you move the highlight; after that they stay put and later groups join at
   the end. The panel and key hints hide in narrow windows.
 - **Ask an agent**: start with `ask:` to write a question for your default
