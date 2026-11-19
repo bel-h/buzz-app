@@ -2,12 +2,12 @@
 
 ## Agent snapshots in packaged apps
 
-The bundled **Performance diagnostics** plugin is off by default. Enable it on
-this device in **Settings → Plugins → Manage plugins**. An agent can ask the
-owner to enable it with
+The bundled **Performance diagnostics** plugin starts off and is unlisted in
+the Plugins catalog. An agent can ask the owner to enable it on this device with
 `plugin_request({"action":"enable","id":"buzz.performance-diagnostics","reason":"Investigate Buzz performance"})`.
 The owner confirms the request in Buzz. Check `plugin_request_status` with the
-returned `requestId` and discover the tool after approval.
+returned `requestId` and discover the tool after approval. To turn diagnostics
+off, ask an agent to call `plugin_disable({"id":"buzz.performance-diagnostics"})`.
 
 Once enabled, an agent on this device can call
 `performance_snapshot({"duration_ms":5000})`. It samples aggregate activity

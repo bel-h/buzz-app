@@ -1834,8 +1834,9 @@ tab, asks **Discard changes?** first; **Keep editing** keeps them.
   folder. After that the agent can reload it from that folder. A reload that
   fails to start restores the previous version. Changed host access still needs
   the person's review through the plugin's **Update**.
-- **Performance diagnostics** starts off. Enable it in **Settings → Plugins →
-  Manage plugins** or approve an agent's enable request. Once enabled,
+- **Performance diagnostics** starts off and is unlisted in the Plugins catalog.
+  Approve an agent's enable request to turn it on. Ask an agent to disable it
+  when you finish. Once enabled,
   `performance_snapshot` gives an agent a bounded JSON report from this app.
   It samples visible page delay, client batch and read work, agent updates and
   plugin MCP reply encoding for 1–10 seconds (default 5). It reports aggregate
