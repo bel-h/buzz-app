@@ -675,8 +675,9 @@ test.describe("DM preview wiring", () => {
   test("production sidebar wires only 1:1 avatars and preserves their shape and overlap", async ({
     page,
     app,
-  }) => {
+  }, info) => {
     await page.setViewportSize({ width: 1440, height: 500 });
+    await page.emulateMedia({ colorScheme: "dark" });
     await open(page, app);
     for (const id of ["dm-a", "dm-b", "dm-c", "dm-d", "dm-group", "dm-self"])
       await expect(
@@ -740,5 +741,79 @@ test.describe("DM preview wiring", () => {
     );
     expect(boxes[1].left).toBeLessThan(boxes[0].right);
     expect(boxes[2].left).toBeLessThan(boxes[1].right);
+
+    // Check the painted cue against the sidebar centerline and the New button.
+    const resize = page.getByRole("separator", { name: "Resize sidebar" });
+    const action = sidebar(page).getByRole("button", { name: "New options" });
+    await expect(action).toBeVisible();
+    const geometry = () =>
+      below.evaluate((button) => {
+        const pane = button.closest("aside");
+        const sidebar = pane.getBoundingClientRect();
+        const cue = button.getBoundingClientRect();
+        const action = pane
+          .querySelector("[data-sidebar-floating-action]")
+          .getBoundingClientRect();
+        return {
+          centerDelta: Math.abs(
+            cue.left + cue.width / 2 - (sidebar.left + sidebar.width / 2),
+          ),
+          horizontalGap: cue.left - action.right,
+          verticalGap: action.top - cue.bottom,
+        };
+      });
+    const expectCentered = () =>
+      expect
+        .poll(async () => (await geometry()).centerDelta)
+        .toBeLessThanOrEqual(1);
+    const visibleAvatars = below.locator("[data-unread-dm]:visible");
+    const expectReadable = () =>
+      expect
+        .poll(() =>
+          below
+            .getByText(/^\d+ unread$/)
+            .evaluate((label) => label.scrollWidth - label.clientWidth),
+        )
+        .toBeLessThanOrEqual(1);
+    await expectCentered();
+    await expect
+      .poll(async () => (await geometry()).horizontalGap)
+      .toBeGreaterThanOrEqual(7);
+    await expect(below.locator("..")).toHaveCSS("bottom", "12px");
+    await sidebar(page).screenshot({
+      path: info.outputPath("unread-centered.png"),
+    });
+
+    await resize.press("Home");
+    await expectCentered();
+    await expect
+      .poll(async () => (await geometry()).horizontalGap)
+      .toBeGreaterThanOrEqual(7);
+    await expect(below.locator("..")).toHaveCSS("bottom", "12px");
+    await expect.poll(() => visibleAvatars.count()).toBeLessThan(3);
+    await expectReadable();
+    await action.click({ trial: true });
+    await below.click({ trial: true });
+    await sidebar(page).screenshot({
+      path: info.outputPath("unread-centered-compact.png"),
+    });
+    await page.evaluate(() => {
+      document.documentElement.style.fontSize = "200%";
+    });
+    await expect(visibleAvatars).toHaveCount(3);
+    await expectCentered();
+    await expect
+      .poll(async () => (await geometry()).verticalGap)
+      .toBeGreaterThanOrEqual(7);
+    await expectReadable();
+    await action.click({ trial: true });
+    await below.click({ trial: true });
+    await page.evaluate(() => {
+      document.documentElement.style.fontSize = "";
+    });
+    await resize.press("End");
+    await expectCentered();
+    await expect(below.locator("..")).toHaveCSS("bottom", "12px");
+    await expect(visibleAvatars).toHaveCount(3);
   });
 });

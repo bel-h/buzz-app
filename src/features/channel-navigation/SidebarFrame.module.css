@@ -28,20 +28,26 @@
   min-height: 0;
 }
 @media (hover: hover) and (pointer: fine) {
-  .sidebar [data-icon-variant="ghost"]:hover:not([data-disabled]) {
+  .sidebar
+    [data-icon-variant="ghost"]:hover:not(
+      [data-disabled],
+      [data-sidebar-floating-action] *
+    ) {
     background: var(--affordance-panel-hover);
   }
 }
 .sidebar
   [data-icon-variant="ghost"]:is(:active, [aria-expanded="true"]):not(
-    [data-disabled]
+    [data-disabled],
+    [data-sidebar-floating-action] *
   ) {
   background: var(--affordance-panel-hover);
 }
 .channelListFrame {
+  --sidebar-list-gutter-overhang: 6px;
   position: relative;
   /* Bring the scrollbar near the divider without clipping its native thumb. */
-  width: calc(100% + 6px);
+  width: calc(100% + var(--sidebar-list-gutter-overhang));
   min-width: 0;
   min-height: calc(var(--space-6) + var(--space-5) + var(--space-1) + 1px);
   flex: 1;
@@ -161,11 +167,16 @@
   ) {
   --text-standard: var(--text-row-selected);
 }
-/* Room for a floating sidebar action (MessagesSidebar's New menu). */
+/* The New button and list share a leading edge. Reserve its size and a gap. */
+.sidebar:has([data-sidebar-floating-action]) {
+  --sidebar-floating-action-clearance: calc(
+    var(--size-control) +
+    var(--space-2)
+  );
+}
 .sidebar:has([data-sidebar-floating-action]) .channelList {
   padding-block-end: calc(
-    var(--size-control) +
-    var(--space-2) +
+    var(--sidebar-floating-action-clearance) +
     var(--space-3)
   );
 }

@@ -360,6 +360,8 @@ export const TerminalWindowIcon = defineIcon(
 );
 import TablerTrashIcon from "@tabler/icons-react/dist/esm/icons/IconTrash.mjs";
 export const TrashIcon = defineIcon("tabler", TablerTrashIcon);
+import TablerUserCircleIcon from "@tabler/icons-react/dist/esm/icons/IconUserCircle.mjs";
+export const UserCircleIcon = defineIcon("tabler", TablerUserCircleIcon);
 import TablerUserIcon from "@tabler/icons-react/dist/esm/icons/IconUser.mjs";
 export const UserIcon = defineIcon("tabler", TablerUserIcon);
 import TablerShareIcon from "@tabler/icons-react/dist/esm/icons/IconShare2.mjs";

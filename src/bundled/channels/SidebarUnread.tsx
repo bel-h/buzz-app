@@ -81,14 +81,17 @@ export function SidebarUnread({
   children,
   listRef,
   dmPreviews,
+  floatingAction,
 }: {
   children: ReactNode;
   listRef?: RefObject<HTMLElement | null>;
   dmPreviews?: ReadonlyMap<string, UnreadDmPreview>;
+  floatingAction?: RefObject<HTMLDivElement | null> | undefined;
 }) {
   const ownList = useRef<HTMLElement>(null);
   const list = listRef ?? ownList;
   const content = useRef<HTMLDivElement>(null);
+  const lowerCue = useRef<HTMLDivElement>(null);
   const [edges, setEdges] = useState<Edges>({ above: [], below: [] });
   useEffect(() => {
     const viewport = list.current;
@@ -116,10 +119,60 @@ export function SidebarUnread({
     const schedule = () => {
       if (!frame) frame = requestAnimationFrame(measure);
     };
-    const resize = new ResizeObserver(schedule);
+    const cue = lowerCue.current;
+    const action = floatingAction?.current;
+    let positionFrame = 0;
+    const schedulePosition = () => {
+      if (!cue || !action || positionFrame) return;
+      // The adjustments below change an observed width. Do them outside the
+      // ResizeObserver delivery so each pass settles before another runs.
+      positionFrame = requestAnimationFrame(() => {
+        positionFrame = 0;
+        const cueRect = cue.getBoundingClientRect();
+        const actionRect = action.getBoundingClientRect();
+        const center = cueRect.left + cueRect.width / 2;
+        const gap =
+          Number.parseFloat(getComputedStyle(action).insetInlineStart) || 0;
+        const available =
+          2 * Math.max(center - actionRect.right, actionRect.left - center) -
+          2 * gap;
+        cue.removeAttribute("data-preview-limit");
+        if (
+          actionRect.width > 0 &&
+          available > 0 &&
+          cue.offsetWidth > available
+        ) {
+          // Try the widest option first and drop the farthest avatars first.
+          const previews = cue.querySelectorAll("[data-unread-dm]").length;
+          for (
+            let limit = previews - 1;
+            limit >= 0 && cue.offsetWidth > available;
+            limit--
+          ) {
+            cue.dataset.previewLimit = String(limit);
+          }
+        }
+        const lifted = actionRect.width > 0 && cue.offsetWidth > available;
+        if (lifted) cue.removeAttribute("data-preview-limit");
+        cue.toggleAttribute("data-lifted", lifted);
+      });
+    };
+    const resize = new ResizeObserver(() => {
+      schedulePosition();
+      schedule();
+    });
     resize.observe(viewport);
     resize.observe(rows);
-    const mutations = new MutationObserver(schedule);
+    if (cue && action) {
+      resize.observe(cue);
+      resize.observe(action);
+      schedulePosition();
+    }
+    const mutations = new MutationObserver((records) => {
+      if (cue && records.some(({ target }) => cue.contains(target)))
+        schedulePosition();
+      if (records.some(({ target }) => rows.contains(target))) schedule();
+    });
     mutations.observe(rows, {
       subtree: true,
       childList: true,
@@ -135,15 +188,25 @@ export function SidebarUnread({
         "data-moving",
       ],
     });
+    if (cue && action) {
+      mutations.observe(cue, {
+        subtree: true,
+        childList: true,
+        characterData: true,
+      });
+    }
     viewport.addEventListener("scroll", schedule, { passive: true });
     schedule();
     return () => {
       cancelAnimationFrame(frame);
+      cancelAnimationFrame(positionFrame);
       resize.disconnect();
       mutations.disconnect();
       viewport.removeEventListener("scroll", schedule);
+      cue?.removeAttribute("data-lifted");
+      cue?.removeAttribute("data-preview-limit");
     };
-  }, [list]);
+  }, [list, floatingAction]);
   const reveal = (edge: keyof Edges) => {
     const viewport = list.current;
     if (!viewport) return;
@@ -186,6 +249,7 @@ export function SidebarUnread({
     const attention = edges[edge].some((target) => target.attention);
     return (
       <div
+        ref={edge === "below" ? lowerCue : undefined}
         className={styles.unreadEdge}
         data-edge={edge}
         key={edge}
