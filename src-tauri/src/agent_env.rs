@@ -144,6 +144,8 @@ const BLOCKED: &[&str] = &[
     "AWS_ENDPOINT_URL",
     "AWS_ENDPOINT_URL_BEDROCK_RUNTIME",
     "AWS_ENDPOINT_URL_STS",
+    "AWS_CONTAINER_CREDENTIALS_FULL_URI",
+    "AWS_EC2_METADATA_SERVICE_ENDPOINT",
 ];
 
 /// The `secrets` name an agent launch asks for the list by.

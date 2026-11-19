@@ -160,6 +160,8 @@ async fn every_blocked_name_is_rejected_in_any_case() {
             "ANTHROPIC_FOUNDRY_RESOURCE",
             "CODEX_AGENT_IDENTITY_AUTHAPI_BASE_URL",
             "CODEX_AGENT_IDENTITY_JWKS_BASE_URL",
+            "AWS_CONTAINER_CREDENTIALS_FULL_URI",
+            "AWS_EC2_METADATA_SERVICE_ENDPOINT",
         ])
     {
         let mixed: String = name
@@ -183,6 +185,7 @@ async fn every_blocked_name_is_rejected_in_any_case() {
     for name in [
         "ANTHROPIC_API_KEY",
         "AWS_REGION",
+        "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI",
         "GITHUB_TOKEN",
         "DATABRICKS_TOKEN",
         "_X1",

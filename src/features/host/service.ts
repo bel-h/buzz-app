@@ -120,11 +120,11 @@ export type HostProcessOptions = Readonly<{
   /** Set by agent protection: the agent a protected engine is launched for.
    * Native checks that the agent's saved protection names this plugin. */
   protectedAgent?: Readonly<{ pubkey: string; relay: string }>;
-  /** Secrets native code holds, set in its environment after `env`; one that
-   * is not saved is left unset. Each is only for the processes it belongs
-   * to: `anthropic-api-key` (`ANTHROPIC_API_KEY`) for Buzz's Claude, and
-   * `agent-env`, the environment variables saved for local agents, for a
-   * process that runs an agent. */
+  /** Secrets native code holds; one that is not saved is left unset. Each is
+   * only for the processes it belongs to: `anthropic-api-key`
+   * (`ANTHROPIC_API_KEY`) for Buzz's Claude, set after `env`, and `agent-env`,
+   * the environment variables saved for local agents, for a process that runs
+   * an agent, set before `env` so the harness's own variables win. */
   secrets?: readonly ("anthropic-api-key" | "agent-env")[];
   onStdout?(data: string): void;
   onStderr?(data: string): void;

@@ -391,8 +391,10 @@ enum Stream {
 /// Starts the declared process `process_id` with `args` after its declared
 /// arguments. `env` adds variables (`null` removes one) to the app's own
 /// environment, less any Buzz identity: an agent's key never leaves the app.
-/// `secrets` names native-held secrets set after `env`, each only for the
-/// processes it belongs to; a secret that is not saved is left unset.
+/// `secrets` names native-held secrets, each only for the processes it belongs
+/// to; a secret that is not saved is left unset. `agent-env`, the list saved
+/// for local agents, is set before `env` so the harness's variables win; the
+/// others are set after it.
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn plugin_host_process_spawn<R: tauri::Runtime>(
