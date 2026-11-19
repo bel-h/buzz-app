@@ -457,7 +457,7 @@ it("completes open channels by word runs, without scattered letters", async () =
   }
 });
 
-it("does not complete a name that holds the typed words apart, as Command-K finds one", async () => {
+it("does not ask for or complete a name that holds the typed words apart, as Command-K finds one", async () => {
   vi.useFakeTimers();
   try {
     const apart = channel("apart", {
@@ -474,17 +474,23 @@ it("does not complete a name that holds the typed words apart, as Command-K find
     const previews = new Map(
       [apart, prefixed].map((entry) => [entry.id, entry]),
     );
+    // Were the answer to hold a name found word by word, completion would
+    // still drop it, so prose after `#name` closes the popup.
+    const searchPublic = vi.fn(async () => ({
+      channels: [prefixed, apart],
+      partial: false,
+    }));
     Object.assign(t.session.channels, {
-      // The store's answer may hold names found word by word; completion
-      // drops them, so prose after `#name` still closes the popup.
-      searchPublic: vi.fn(async () => ({
-        channels: [prefixed, apart],
-        partial: false,
-      })),
+      searchPublic,
       get: (id: string) => previews.get(id),
     });
     render(t.element("community buzz"));
     await act(async () => vi.advanceTimersByTime(SEARCH_DEBOUNCE_MS));
+    // The lookup is not asked for such names, so it resolves none of them.
+    expect(searchPublic).toHaveBeenCalledExactlyOnceWith(
+      "community buzz",
+      expect.objectContaining({ terms: false }),
+    );
     expect(t.result().items.map((item) => item.id)).toEqual(["prefixed"]);
   } finally {
     vi.useRealTimers();
