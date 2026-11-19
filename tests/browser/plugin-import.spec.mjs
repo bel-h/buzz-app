@@ -2821,6 +2821,43 @@ test("formatted documents create, reopen, and paste headings", async ({
   await expect(rich.locator("p")).toHaveText("After H3");
 });
 
+test("joining text into a single-line heading preserves the following lines", async ({
+  page,
+  app,
+}) => {
+  const { reader, rich, source, markdown, formatted } = await openTableEditor(
+    page,
+    app,
+  );
+  await markdown.click();
+  await source.fill("### Head\n\na\\\nb\\\nc");
+  await formatted.click();
+  const heading = rich.getByRole("heading", { level: 3 });
+  const paragraph = rich.locator("p");
+  await rich.focus();
+  await paragraph.evaluate((element) => {
+    const first = element.firstChild;
+    if (!first) throw new Error("Expected a paragraph with text");
+    element.ownerDocument.getSelection()?.collapse(first, 0);
+  });
+  await page.keyboard.press("Backspace");
+  await expect(heading).toHaveText("Heada");
+  await expect(paragraph).toHaveText("bc");
+  await expect(paragraph.locator("br")).toHaveCount(1);
+  await rich.press("ControlOrMeta+z");
+  await expect(heading).toHaveText("Head");
+  await expect(paragraph.locator("br")).toHaveCount(2);
+  await rich.press("ControlOrMeta+Shift+z");
+  await expect(heading).toHaveText("Heada");
+  await rich.press("ControlOrMeta+Enter");
+  await expect(reader.getByRole("status")).toHaveText("Saved 1");
+  await reader.getByRole("button", { name: "Read Guide" }).click();
+  await reader.getByRole("button", { name: "Edit Guide" }).click();
+  await expect(heading).toHaveText("Heada");
+  await expect(paragraph).toHaveText("bc");
+  await expect(paragraph.locator("br")).toHaveCount(1);
+});
+
 const smallTable = "| Cell | Value |\n| --- | --- |\n| cellword | 2 |";
 
 async function selectCellText(page, cell) {

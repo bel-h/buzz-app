@@ -936,6 +936,28 @@ export function EditableInput({
             token.to,
             composerSchema.text(token.node.attrs.source, token.node.marks),
           );
+        // Joins and HTML paste can bring hard breaks into single-line headings.
+        // Keep the first line as a heading and the rest as a paragraph.
+        if (current.current.markdownMode === "document") {
+          const { heading, hard_break } = composerSchema.nodes;
+          const splits: number[] = [];
+          tr.doc.descendants((node, pos) => {
+            if (!node.isTextblock) return;
+            if (node.type === heading && node.attrs.level > 2) {
+              let split: number | undefined;
+              node.forEach((child, offset) => {
+                if (split === undefined && child.type === hard_break)
+                  split = pos + 1 + offset;
+              });
+              if (split !== undefined) splits.push(split);
+            }
+            return false;
+          });
+          for (const split of splits.reverse()) {
+            tr.delete(split, split + 1);
+            tr.split(split, 1, [{ type: paragraph }]);
+          }
+        }
         if (endsWithTable(tr.doc)) {
           tr.insert(tr.doc.content.size, paragraph.create());
           if (
