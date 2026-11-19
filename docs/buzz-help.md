@@ -447,7 +447,8 @@ and are asked to sign in again in Buzz.
   its author, channel, time and text, or why it can't be shown. Spoilers stay
   hidden. Clicking the card opens the message. After three cards, the rest
   fold behind **Show more linked messages**. Write the link as
-  `<buzz://message?…>` to leave out its card.
+  `<buzz://message?…>` to leave out its card. A quote's “From” link shows no
+  card, since the quote is already there.
 - Select text in a message, such as by double-clicking a word, then right-click
   the highlight and choose **Quote highlight** (or press Q) to add it to that
   conversation's draft as a quote, ready for your reply below it. Published
