@@ -184,6 +184,11 @@ export class AgentSessions {
   active(key: string) {
     return this.opening.has(key) || !!this.live.get(key)?.process.active;
   }
+  /** Foreground work and native background continuations have drained. */
+  async idle(key: string) {
+    await this.opening.get(key);
+    await this.live.get(key)?.process.idle();
+  }
   async forget(key: string) {
     // Commit the reset before dropping the live process; failed writes must
     // not report success and resume the old session after restarting Buzz.
@@ -352,6 +357,7 @@ export class AgentSessions {
       admit,
       attribute,
       step,
+      delivered: onDelivered,
       acknowledged,
       accepted,
       superseded,
@@ -434,6 +440,7 @@ export class AgentSessions {
         ...pick,
         ...(activityScope ? { activityScope } : {}),
         ...(step ? { step } : {}),
+        ...(onDelivered ? { delivered: onDelivered } : {}),
         ...(acknowledged ? { acknowledged } : {}),
         ...(accepted ? { accepted } : {}),
         ...(superseded ? { superseded } : {}),
@@ -489,9 +496,28 @@ export class AgentSessions {
 
   /** Stops the turn running in conversation `key`, if any, once a process
    * starting for it has taken its message. */
-  async interrupt(key: string) {
+  async interrupt(key: string, killOnFailure = false) {
     await this.opening.get(key);
-    await this.live.get(key)?.process.interrupt();
+    const process = this.live.get(key)?.process;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      if (!killOnFailure) return await process?.interrupt();
+      await Promise.race([
+        Promise.all([process?.interrupt(), process?.idle()]),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(
+            () => reject(new Error("Claude did not stop")),
+            15_000,
+          );
+        }),
+      ]);
+    } catch (error) {
+      if (!killOnFailure) throw error;
+      await process?.kill();
+      await process?.exited;
+    } finally {
+      clearTimeout(timer);
+    }
   }
   /** Compacts the conversation's session, resuming it when its process has
    * stopped. Without a session there is nothing to compact. `attribute`

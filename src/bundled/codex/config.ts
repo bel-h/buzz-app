@@ -1,3 +1,7 @@
+import {
+  sessionScope,
+  type SessionScope,
+} from "../../features/agent-harness/session-scope";
 import { PRESET } from "../../features/agents/recommended";
 
 export type Config = {
@@ -7,7 +11,7 @@ export type Config = {
   effort: string;
   instructions: string;
   workspace: string;
-  scope: "thread" | "channel";
+  scope: SessionScope;
   /** Leaves Codex's Apps and plugins features to its own configuration
    * instead of turning them off. This device's only, as Apps follow its
    * Codex sign-in; never for protected agents. */
@@ -64,7 +68,7 @@ export function config(raw: unknown): Config {
       typeof value.workspace === "string" && value.workspace.trim()
         ? value.workspace.trim()
         : defaults.workspace,
-    scope: value.scope === "channel" ? "channel" : "thread",
+    scope: sessionScope(value.scope),
     ...(value.apps === true ? { apps: true as const } : {}),
     ...(value.preset === PRESET ? { preset: PRESET } : {}),
   };

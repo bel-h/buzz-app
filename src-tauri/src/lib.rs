@@ -1277,6 +1277,7 @@ pub fn run() {
         .manage(Terminals::default())
         .manage(HostCalls::default())
         .manage(HostProcesses::default())
+        .manage(host_files::ManagedFiles::default())
         .manage(HostMcpServers::default())
         .manage(HostForward::default())
         .manage(OAuthCallbackHost::default())

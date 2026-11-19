@@ -510,7 +510,7 @@ const Places = defineDoc({
   initial: () => ({}),
   checkpointWhen,
 });
-/** An Attention wake's reply destination belongs to its request, independently
+/** A request's reply destination is stored independently
  * of the conversation's tool defaults. Recorded before submission for recovery. */
 const Replies = defineDoc({
   kind: "buzz.replies",
@@ -1966,7 +1966,15 @@ export function serve({
    * steers a run working in it, `busy`, changes only what its owner picked,
    * as in Claude. The agent's `core` memory read for it is the
    * conversation's latest; a failed read shows it none if not yet shown. */
-  async function submit(opened, conversation, turn, busy, refresh, withdrawn) {
+  async function submit(
+    opened,
+    conversation,
+    turn,
+    busy,
+    refresh,
+    accept,
+    withdrawn,
+  ) {
     opened.cores.set(conversation.id, turn.core?.text);
     const steers = busy && turn.steer;
     const chosen = await choose(turn);
@@ -1991,6 +1999,9 @@ export function serve({
       turn = { ...turn, ...prompt };
     }
     if (withdrawn?.()) return;
+    const apply = await accept?.();
+    if (withdrawn?.()) return;
+    apply?.();
     // Its work carries its request: see `requestTelemetry`.
     const submission = await conversation.submit(
       {
@@ -2311,7 +2322,24 @@ export function serve({
           }, context);
         }
         opened.conversations.add(conversation.id);
-        opened.contexts.set(conversation.id, tools);
+        // The conversation's tools follow a turn only once Pi takes it, so
+        // one dropped before then leaves the running turn's.
+        const accept = async () => {
+          // Tools must recover at this source even if the host stops after
+          // acceptance, before the history watermark can advance.
+          await harness.commit(async (tx) => {
+            const places = await tx.doc(Places);
+            places[key] = {
+              conversation: conversation.id,
+              context: tools,
+              seen:
+                places[key]?.conversation === conversation.id
+                  ? places[key].seen
+                  : 0,
+            };
+          }, context);
+          return () => opened.contexts.set(conversation.id, tools);
+        };
         const state = await watch(opened, conversation.id);
         // Recorded once Pi has the turn: one that could not start leaves the
         // messages it would have been shown for the next.
@@ -2361,6 +2389,7 @@ export function serve({
               turn,
               busy,
               prompt,
+              accept,
             );
             if (!submitted) return false;
             if (session !== undefined) Object.assign(submitted, { session });
@@ -2376,6 +2405,7 @@ export function serve({
           );
           if (held) {
             opened.cores.set(conversation.id, turn.core?.text);
+            opened.contexts.set(conversation.id, tools);
             return placed({
               submission: held.id,
               conversation: conversation.id,
@@ -2408,6 +2438,7 @@ export function serve({
               turn,
               busy,
               prompt,
+              accept,
               () => waiting.interrupted,
             ));
           if (!submitted) {
@@ -2488,6 +2519,10 @@ export function serve({
     async unfinished({ agent }) {
       const opened = await agentOf(agent);
       const { submissions } = await opened.harness.inspect(context);
+      const places = (await opened.harness.snapshot(Places, context)) ?? {};
+      const keys = new Map(
+        Object.entries(places).map(([key, place]) => [place.conversation, key]),
+      );
       const replies = (await opened.harness.snapshot(Replies, context)) ?? {};
       return {
         submissions: submissions.flatMap(
@@ -2499,6 +2534,9 @@ export function serve({
                   {
                     submission: id,
                     conversation: conversationId,
+                    ...(keys.has(conversationId)
+                      ? { key: keys.get(conversationId) }
+                      : {}),
                     request: requestId,
                     ...(replies[requestId]
                       ? { reply: replies[requestId] }
@@ -2551,7 +2589,10 @@ export function serve({
             delete (await tx.doc(Replies))[request];
           }, context);
         } catch (error) {
-          console.warn("Pi could not clear a wake's reply destination", error);
+          console.warn(
+            "Pi could not clear a request's reply destination",
+            error,
+          );
         }
       }
       return result;
