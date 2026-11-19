@@ -1181,7 +1181,12 @@ function Composer({
     const saved = viewRevision(scope, draftKey);
     const nextRevision = JSON.stringify(next);
     diagnose(result, expected, saved, nextRevision);
-    if (result === "saved") revision.current = nextRevision;
+    if (result === "saved") {
+      revision.current = nextRevision;
+      // Saved text has no edits left to protect: a later change made elsewhere
+      // is loaded, not reported as a conflict.
+      dirty.current = false;
+    }
     setConflict(result === "changed");
     setStorageFailed(result === "failed");
     return result;
