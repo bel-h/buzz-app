@@ -7,6 +7,10 @@ import type {
   SidebarAssignmentIntent,
   SidebarPreferences,
 } from "../relay/sidebar-preferences";
+import { watchPulls } from "../../bundled/github/watcher";
+import type { PullStates } from "../../bundled/github/pull-states";
+import type { AddedTool } from "../../buzz-mcp/session-tools";
+import type { BuzzClient } from "../../buzz-mcp/client";
 import { federatedFixture } from "../federated-identity/testing";
 import { workingAgentDetails } from "../../bundled/channels/working-agents";
 import { completionTarget } from "../notifications/agent-completions";
@@ -1740,6 +1744,23 @@ describe("a conversation folder", () => {
     expect(JSON.stringify(f.native.publish.mock.calls)).not.toContain(
       "/home/me/work",
     );
+  });
+
+  it("allows a conversation folder when only a community session exists", async () => {
+    const list = vi.fn((): readonly AgentSession[] => [
+      { channelId: channel, community: true } as AgentSession,
+    ]);
+    const f = await ready({
+      conversationFolders: true,
+      sessions: { list, subscribe: () => () => {} },
+    });
+    await expect(
+      f.plugin.agents.assignConversationFolder(
+        f.agent.key,
+        { channelId: channel },
+        "~/work",
+      ),
+    ).resolves.toBe("/home/me/work");
   });
 
   it("is refused for a conversation that already has a session", async () => {
@@ -13642,6 +13663,497 @@ it("lets a run read and write its attention with expected-state tokens", async (
   ).rejects.toThrow(/^conflict:/);
 });
 
+/** Valid tool channel ids for nonmember, cached and unknown metadata. */
+const refusedChannels = [
+  "10000000-0000-4000-8000-000000000001",
+  "10000000-0000-4000-8000-000000000002",
+  "10000000-0000-4000-8000-000000000003",
+] as const;
+function watchChannelMetadata(session: RelaySession) {
+  const snapshot = session.channels.list();
+  vi.spyOn(session.channels, "list").mockReturnValue({
+    ...snapshot,
+    channels: snapshot.channels.map((row) => ({
+      ...row,
+      id:
+        row.id === "private"
+          ? refusedChannels[0]
+          : row.id === "saved"
+            ? refusedChannels[1]
+            : row.id,
+    })),
+  });
+}
+
+it("refuses watch channels delivery cannot receive, without saving add or update", async () => {
+  const { service, run, emit, session } = await setup();
+  watchChannelMetadata(session);
+  await service.create({ type: "example/echo", name: "Echo" });
+  await service.save(bot, { attentionEnabled: true });
+  const { attention } = await handleOf(run, emit);
+  for (const target of refusedChannels) {
+    await expect(
+      callAttentionTool(attention, "watch_add", {
+        id: "unreachable",
+        interest: "default",
+        expected_state: "object-v1:absent",
+        type: "event",
+        channels: [channel, target],
+        kinds: [9],
+        since: "now",
+      }),
+    ).rejects.toThrow(/cannot receive events.*channel/i);
+    expect((await attention.show("watch/unreachable")).object).toBeNull();
+  }
+  await callAttentionTool(attention, "watch_add", {
+    id: "reachable",
+    interest: "default",
+    expected_state: "object-v1:absent",
+    type: "event",
+    channels: [channel],
+    kinds: [9],
+    since: "now",
+  });
+  const before = await attention.show("watch/reachable");
+  await expect(
+    callAttentionTool(attention, "watch_update", {
+      id: "reachable",
+      interest: "default",
+      expected_state: before.expected_state,
+      channels: [refusedChannels[0]],
+      since: "now",
+    }),
+  ).rejects.toThrow(/cannot receive events.*channel/i);
+  expect(await attention.show("watch/reachable")).toEqual(before);
+});
+
+it.each(["event", "timer", "source"] as const)(
+  "refuses an unreachable %s delivery channel",
+  async (type) => {
+    const { service, run, emit, session } = await setup();
+    watchChannelMetadata(session);
+    await service.create({ type: "example/echo", name: "Echo" });
+    await service.save(bot, { attentionEnabled: true });
+    const { attention } = await handleOf(run, emit);
+    await expect(
+      callAttentionTool(attention, "watch_add", {
+        id: "unreachable",
+        interest: "default",
+        expected_state: "object-v1:absent",
+        type,
+        channel: refusedChannels[0],
+        ...(type === "event"
+          ? { channels: [channel], since: "now" }
+          : type === "timer"
+            ? { interval_secs: 60, prompt: "Check" }
+            : { provider: "attention/command", config: { command: ["true"] } }),
+      }),
+    ).rejects.toThrow(
+      /(?:not a member.*delivery channel|membership of delivery channel.*unconfirmed)/i,
+    );
+    expect((await attention.show("watch/unreachable")).object).toBeNull();
+  },
+);
+
+it.each(refusedChannels)(
+  "preserves a GitHub watch when a move to %s is refused",
+  async (target) => {
+    const { service, run, emit, session } = await setup();
+    watchChannelMetadata(session);
+    await service.create({ type: "example/echo", name: "Echo" });
+    await service.save(bot, { attentionEnabled: true });
+    const { attention } = await handleOf(run, emit);
+    vi.stubGlobal("localStorage", {
+      getItem: () => null,
+      setItem: () => {},
+      removeItem: () => {},
+    });
+    onTestFinished(() => {
+      vi.unstubAllGlobals();
+    });
+    const tools: AddedTool[] = [];
+    watchPulls(
+      {
+        agents: {
+          addAttentionSource: () => {},
+          addTool: (tool: AddedTool) => tools.push(tool),
+        },
+        effect: () => {},
+      } as unknown as Context,
+      {
+        read: async () => ({
+          state: {
+            state: "open",
+            head: "1111111111",
+            feedback: { viewer: "alice", ids: [], items: [] },
+          },
+        }),
+      } as unknown as PullStates,
+      undefined,
+    );
+    const tool = tools[0];
+    if (!tool) throw new Error("Missing GitHub watch tool");
+    const client = { key: bot, pubkey: bot, attention } as BuzzClient;
+    const url = "https://github.com/block/buzz-app/pull/2311";
+    await tool.call(
+      client,
+      { channel, topLevel: true },
+      { url, interest: "default" },
+    );
+    const watch = attention.watches({ interest: "default", type: "source" })[0];
+    if (!watch) throw new Error("Missing GitHub watch");
+    const slug = `watch/${watch.id}`;
+    const before = await attention.show(slug);
+    await attention.write(
+      "interest/moved",
+      { type: "interest", instructions: "Follow the PR here" },
+      { expected: "object-v1:absent" },
+    );
+    await expect(
+      tool.call(
+        client,
+        { channel: target, topLevel: true },
+        { url, interest: "moved" },
+      ),
+    ).rejects.toThrow(
+      /(?:not a member.*delivery channel|membership of delivery channel.*unconfirmed)/i,
+    );
+    expect(await attention.show(slug)).toEqual(before);
+    // Retry after returning to a confirmed destination, using the same watch.
+    await tool.call(
+      client,
+      { channel, topLevel: true },
+      { url, interest: "moved" },
+    );
+    expect((await attention.show(slug)).object).toMatchObject({
+      interest_id: "moved",
+      channel,
+    });
+    expect(attention.watches({ type: "source" })).toHaveLength(1);
+  },
+);
+
+it("resolves an unopened public listening channel before admission and delivers its events", async () => {
+  const { service, run, emit, session } = await setup();
+  await service.create({ type: "example/echo", name: "Echo" });
+  await service.save(bot, { attentionEnabled: true });
+  const { attention } = await handleOf(run, emit);
+  const target = refusedChannels[2];
+  let resolved = false;
+  const get = session.channels.get?.bind(session.channels);
+  vi.spyOn(session.channels, "get").mockImplementation((id) =>
+    id === target
+      ? resolved
+        ? { id, name: id, visibility: "public", members: [other] }
+        : undefined
+      : get?.(id),
+  );
+  const resolve = vi.fn(async (ids: readonly string[]) => {
+    expect(ids).toEqual([target]);
+    resolved = true;
+  });
+  Object.assign(session.channels, { resolve });
+  await callAttentionTool(attention, "watch_add", {
+    id: "unopened",
+    interest: "default",
+    expected_state: "object-v1:absent",
+    type: "event",
+    channels: [target],
+    kinds: [9],
+    since: 1,
+  });
+  expect(resolve).toHaveBeenCalledWith(
+    [target],
+    expect.objectContaining({ viewerLookup: false }),
+  );
+  const called = run.mock.calls.length;
+  emit({ events: [event("unopened-event", { tags: [["h", target]] })] });
+  await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(called + 1));
+  expect(run.mock.calls.at(-1)?.[0].trigger).toMatchObject({
+    type: "watch",
+    slug: "watch/unopened",
+  });
+  await expect(
+    callAttentionTool(attention, "watch_update", {
+      id: "unopened",
+      interest: "default",
+      expected_state: (await attention.show("watch/unopened")).expected_state,
+      channel: target,
+    }),
+  ).rejects.toThrow(
+    /(?:not a member.*delivery channel|membership of delivery channel.*unconfirmed)/i,
+  );
+});
+
+it.each(["private", "empty", "failed"] as const)(
+  "preserves a watch when listening metadata resolves %s",
+  async (result) => {
+    const { service, run, emit, session } = await setup();
+    await service.create({ type: "example/echo", name: "Echo" });
+    await service.save(bot, { attentionEnabled: true });
+    const { attention } = await handleOf(run, emit);
+    await callAttentionTool(attention, "watch_add", {
+      id: "kept",
+      interest: "default",
+      expected_state: "object-v1:absent",
+      type: "event",
+      channels: [channel],
+      kinds: [9],
+      since: 1,
+    });
+    const before = await attention.show("watch/kept");
+    const target = refusedChannels[2];
+    let resolved = false;
+    const get = session.channels.get?.bind(session.channels);
+    vi.spyOn(session.channels, "get").mockImplementation((id) =>
+      id === target && resolved && result === "private"
+        ? { id, name: id, visibility: "private", members: [other] }
+        : get?.(id),
+    );
+    const resolve = vi.fn(async () => {
+      if (result === "failed") throw new Error("Metadata read failed");
+      resolved = true;
+    });
+    Object.assign(session.channels, { resolve });
+    await expect(
+      callAttentionTool(attention, "watch_update", {
+        id: "kept",
+        interest: "default",
+        expected_state: before.expected_state,
+        channels: [target],
+      }),
+    ).rejects.toThrow(
+      result === "failed"
+        ? /Metadata read failed/
+        : /cannot receive events.*channel/i,
+    );
+    expect(resolve).toHaveBeenCalledOnce();
+    expect(await attention.show("watch/kept")).toEqual(before);
+  },
+);
+
+it("uses one listening policy for watch admission and event delivery", async () => {
+  const { service, run, emit, session } = await setup();
+  watchChannelMetadata(session);
+  await service.create({ type: "example/echo", name: "Echo" });
+  await service.save(bot, { attentionEnabled: true });
+  const { attention } = await handleOf(run, emit);
+  // Listening access may be broader than destination membership; admission and delivery share the policy.
+  vi.spyOn(
+    service as unknown as {
+      reads(agent: Agent, event: Pick<RelayEvent, "tags">): boolean;
+    },
+    "reads",
+  ).mockReturnValue(true);
+  await callAttentionTool(attention, "watch_add", {
+    id: "policy",
+    interest: "default",
+    expected_state: "object-v1:absent",
+    type: "event",
+    channels: [refusedChannels[0]],
+    kinds: [9],
+    since: 1,
+  });
+  const called = run.mock.calls.length;
+  emit({
+    events: [event("policy-event", { tags: [["h", refusedChannels[0]]] })],
+  });
+  await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(called + 1));
+  expect(run.mock.calls.at(-1)?.[0].trigger).toMatchObject({
+    type: "watch",
+    slug: "watch/policy",
+  });
+});
+
+it.each(["cached", "private"] as const)(
+  "allows unchanged destinations to be edited, rearmed and disabled after becoming %s",
+  async (state) => {
+    const { service, run, emit, session } = await setup();
+    await service.create({ type: "example/echo", name: "Echo" });
+    await service.save(bot, { attentionEnabled: true });
+    const { attention } = await handleOf(run, emit);
+    for (const type of ["event", "timer"] as const) {
+      await callAttentionTool(attention, "watch_add", {
+        id: type,
+        interest: "default",
+        expected_state: "object-v1:absent",
+        type,
+        channel,
+        ...(type === "event"
+          ? { channels: [channel], since: "now" }
+          : { interval_secs: 600, prompt: "Check" }),
+      });
+    }
+    const list = session.channels.list();
+    vi.spyOn(session.channels, "list").mockReturnValue({
+      ...list,
+      channels: list.channels.map((row) =>
+        row.id === channel
+          ? {
+              ...row,
+              ...(state === "cached"
+                ? { cached: true as const }
+                : { members: [], visibility: "private" as const }),
+            }
+          : row,
+      ),
+    });
+    for (const type of ["event", "timer"] as const) {
+      const shown = await attention.show(`watch/${type}`);
+      await callAttentionTool(attention, "watch_update", {
+        id: type,
+        interest: "default",
+        expected_state: shown.expected_state,
+        ...(type === "timer" ? { prompt: "Updated" } : { name: "Renamed" }),
+      });
+      const renamed = await attention.show(`watch/${type}`);
+      expect(renamed.object).toMatchObject({
+        enabled: true,
+        ...(type === "timer" ? { prompt: "Updated" } : { name: "Renamed" }),
+      });
+      if (type === "timer") {
+        await callAttentionTool(attention, "watch_rearm", {
+          id: type,
+          interest: "default",
+          expected_state: renamed.expected_state,
+        });
+      }
+      const enabled = await attention.show(`watch/${type}`);
+      await callAttentionTool(attention, "watch_disable", {
+        id: type,
+        interest: "default",
+        expected_state: enabled.expected_state,
+      });
+      const disabled = await attention.show(`watch/${type}`);
+      expect(disabled.object).toMatchObject({ enabled: false });
+      await expect(
+        callAttentionTool(
+          attention,
+          type === "timer" ? "watch_rearm" : "watch_enable",
+          {
+            id: type,
+            interest: "default",
+            expected_state: disabled.expected_state,
+          },
+        ),
+      ).rejects.toThrow(/channel/i);
+      expect(await attention.show(`watch/${type}`)).toEqual(disabled);
+    }
+  },
+);
+
+it.each([false, undefined])(
+  "admits only added listening channels while existing access is %s",
+  async (access) => {
+    const { service, run, emit, session } = await setup();
+    const added = refusedChannels[0];
+    const refused = refusedChannels[1];
+    const reads = vi
+      .spyOn(
+        service as unknown as {
+          reads(
+            agent: Agent,
+            event: Pick<RelayEvent, "tags">,
+          ): boolean | undefined;
+        },
+        "reads",
+      )
+      .mockReturnValue(true);
+    Object.assign(session.channels, { resolve: vi.fn(async () => {}) });
+    await service.create({ type: "example/echo", name: "Echo" });
+    await service.save(bot, { attentionEnabled: true });
+    const { attention } = await handleOf(run, emit);
+    for (const id of ["explicit", "all"]) {
+      await callAttentionTool(attention, "watch_add", {
+        id,
+        interest: "default",
+        expected_state: "object-v1:absent",
+        type: "event",
+        channels: id === "all" ? "all" : [channel, added],
+        since: "now",
+      });
+    }
+    reads.mockImplementation((_agent, event) =>
+      event.tags.some(([name, id]) => name === "h" && id === added)
+        ? true
+        : access,
+    );
+    for (const channels of [[added, channel], [channel], [channel, added]]) {
+      await callAttentionTool(attention, "watch_update", {
+        id: "explicit",
+        interest: "default",
+        expected_state: (await attention.show("watch/explicit")).expected_state,
+        channels,
+      });
+      expect((await attention.show("watch/explicit")).object).toMatchObject({
+        channels,
+      });
+    }
+    const before = await attention.show("watch/explicit");
+    await expect(
+      callAttentionTool(attention, "watch_update", {
+        id: "explicit",
+        interest: "default",
+        expected_state: before.expected_state,
+        channels: [channel, added, refused],
+      }),
+    ).rejects.toThrow(/cannot receive/i);
+    expect(await attention.show("watch/explicit")).toEqual(before);
+    await expect(
+      callAttentionTool(attention, "watch_update", {
+        id: "all",
+        interest: "default",
+        expected_state: (await attention.show("watch/all")).expected_state,
+        channels: [channel, added],
+      }),
+    ).rejects.toThrow(/cannot receive/i);
+    await callAttentionTool(attention, "watch_disable", {
+      id: "explicit",
+      interest: "default",
+      expected_state: before.expected_state,
+    });
+    await expect(
+      callAttentionTool(attention, "watch_enable", {
+        id: "explicit",
+        interest: "default",
+        expected_state: (await attention.show("watch/explicit")).expected_state,
+      }),
+    ).rejects.toThrow(/cannot receive/i);
+  },
+);
+
+it("can save an unreachable watch disabled, but cannot enable it until channel membership is confirmed", async () => {
+  const { service, run, emit, session } = await setup();
+  watchChannelMetadata(session);
+  await service.create({ type: "example/echo", name: "Echo" });
+  await service.save(bot, { attentionEnabled: true });
+  const { attention } = await handleOf(run, emit);
+  await callAttentionTool(attention, "watch_add", {
+    id: "disabled",
+    interest: "default",
+    expected_state: "object-v1:absent",
+    type: "event",
+    enabled: false,
+    channels: [refusedChannels[0]],
+    kinds: [9],
+    since: "now",
+  });
+  const before = await attention.show("watch/disabled");
+  await expect(
+    callAttentionTool(attention, "watch_enable", {
+      id: "disabled",
+      interest: "default",
+      expected_state: before.expected_state,
+    }),
+  ).rejects.toThrow(/cannot receive events.*channel/i);
+  await callAttentionTool(attention, "watch_remove", {
+    id: "disabled",
+    interest: "default",
+    expected_state: before.expected_state,
+  });
+  expect((await attention.show("watch/disabled")).object).toBeNull();
+});
+
 it("fails an agent's attention write that agent storage could not save, and keeps the saved value", async () => {
   let failing = false;
   const storage = fileStore(new Map(), async () => {
@@ -15031,6 +15543,73 @@ describe("Attention plugin sources", () => {
       expect(produce).toHaveBeenCalledTimes(1);
       expect(service.find(bot)?.attention["watch/pr"]).toBeDefined();
       expect(texts(service)).toEqual(["final output"]);
+    },
+  );
+  it.each([
+    ["completed", "cached"],
+    ["completed", "private"],
+    ["failed", "cached"],
+    ["failed", "private"],
+  ] as const)(
+    "refuses %s source restarts without losing output when destination is %s",
+    async (outcome, state) => {
+      const { service, run, plugin, native, session } = await sourceFixture();
+      run.mockRejectedValue(new Error("delivery failed"));
+      const produce = vi.fn(
+        async ({ emit }: Parameters<AttentionSource["run"]>[0]) => {
+          emit("final output");
+          if (outcome === "failed") throw new Error("producer failed");
+        },
+      );
+      plugin.agents.addAttentionSource({ id: "command", run: produce });
+      await service.create({ type: "example/echo", name: "Echo" });
+      await vi.waitFor(() => expect(native.claim).toHaveBeenCalledWith(bot, 0));
+      await service.save(bot, { attentionEnabled: true, attention: watches });
+      await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(1));
+      await settle();
+      const marker = service.find(bot)?.sourceRuns?.["watch/pr"];
+      if (outcome === "completed") expect(marker).toBeDefined();
+      else expect(marker).toBeUndefined();
+      const list = session.channels.list();
+      const channels = vi.spyOn(session.channels, "list").mockReturnValue({
+        ...list,
+        channels: list.channels.map((row) =>
+          row.id === channel
+            ? {
+                ...row,
+                ...(state === "cached"
+                  ? { cached: true as const }
+                  : { members: [], visibility: "private" as const }),
+              }
+            : row,
+        ),
+      });
+      const attention = plugin.agents.handle(bot)?.attention;
+      if (!attention) throw new Error("Missing agent handle");
+      const before = await attention.show("watch/pr");
+      const completed = service.find(bot)?.sourceRuns;
+      expect(texts(service)).toEqual(["final output"]);
+      for (const operation of ["watch_enable", "watch_update"] as const) {
+        await expect(
+          callAttentionTool(attention, operation, {
+            id: "pr",
+            interest: "pr",
+            expected_state: before.expected_state,
+            ...(operation === "watch_update" ? { name: "Renamed" } : {}),
+          }),
+        ).rejects.toThrow(/delivery channel/i);
+        expect(await attention.show("watch/pr")).toEqual(before);
+        expect(service.find(bot)?.sourceRuns).toEqual(completed);
+        expect(texts(service)).toEqual(["final output"]);
+      }
+      expect(produce).toHaveBeenCalledTimes(1);
+      channels.mockRestore();
+      await callAttentionTool(attention, "watch_enable", {
+        id: "pr",
+        interest: "pr",
+        expected_state: before.expected_state,
+      });
+      await vi.waitFor(() => expect(produce).toHaveBeenCalledTimes(2));
     },
   );
   it("delivers nonempty output, preserves queued output on completion, and does not rerun after restart", async () => {

@@ -40,8 +40,10 @@ native agent session before execution. The argument type is
 The host verifies the request and selects the native conversation first.
 The hook receives both the source message's channel/thread and that native
 conversation. It cannot change session scope, reply placement or access.
-Solo keeps each agent's existing channel conversation. Thread-scoped agents
-keep their existing thread conversations.
+Community-scoped agents use one logical lifetime across their conversations,
+including DMs, Solo chats and huddles. The admission's `conversation.community`
+identifies it; `source` still names the current request. Other scopes retain
+Solo and DM channel conversations and their existing thread/channel selection.
 
 `ready()` opens only the plugin's local keyed storage. It must not wait for
 relay publication or sidebar loading. `matches()` selects the sources the
@@ -2066,7 +2068,7 @@ Event watches and timers accept an optional delivery `channel` and thread `root`
 
 Without an address, the subscription runs an independent turn in its Interest's lane. Timers retain their occurrence and expiry budgets. An addressed timer waits without spending an occurrence while destination membership is unconfirmed or absent. `watch_show` reports delivery as held or blocked with a reason; delivery resumes once membership is confirmed. Expiry still applies while held. Membership checks never join channels. The Attention panel shows listening channels separately from the delivery destination.
 
-Event matches wait for confirmation of both listening and destination rosters. Confirmed destination nonmembership discards the match. Addressed wakes refresh the Interest instructions after harness startup and queue waits, immediately before submission, while retaining cancellation checks.
+When an agent creates or enables a watch, adds listening channels or changes its delivery channel, it needs confirmed access under the same policy used for event delivery. Removing or reordering an explicit listening list checks no unchanged channels; changing from all channels to an explicit list checks the full list. Other edits on active watches and timer rearms remain available if an unchanged channel later becomes unreachable or unconfirmed. An agent's write to an enabled completed source restarts it and requires confirmed destination membership. Disabled watches remain editable and removable. Event matches wait for confirmation of both listening and destination rosters. Confirmed destination nonmembership discards the match. Addressed wakes refresh the Interest instructions after harness startup and queue waits, immediately before submission, while retaining cancellation checks.
 
 Conversation wakes are local, have no signed message to resume, and never publish their synthetic anchor ids. Pi saves an Attention wake's reply destination separately from its tool context so a recovered answer keeps its destination. Ordinary plugin wakes retain the separate contract above.
 

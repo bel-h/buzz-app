@@ -66,6 +66,7 @@ import {
 } from "./attention";
 import {
   checkedWrite,
+  AttentionError,
   interestIds,
   show,
   watchSummaries,
@@ -463,6 +464,12 @@ export type RunnerHost = {
    * channel is public; undefined as for `member`. Only a member may be
    * delivered to. */
   reads(agent: Agent, event: Pick<RelayEvent, "tags">): boolean | undefined;
+  /** Resolves listening metadata before an enabled watch is admitted. */
+  resolveChannels?(
+    agent: Agent,
+    channels: readonly string[],
+    signal: AbortSignal,
+  ): Promise<void>;
   /** Whether the event's channel is a DM between the agent and one other. */
   dm(agent: Agent, event: RelayEvent): boolean;
   /** Whether the event came as it would have with no watch keeping channels
@@ -3763,6 +3770,56 @@ export class AgentRunners {
             );
             lifetime.throwIfAborted();
             check?.();
+            if (value && value.type !== "interest" && value.enabled) {
+              const agent = this.host.agent(key);
+              if (!agent) throw new Error("This agent is no longer running");
+              const previous = before.attention[slug]?.value;
+              const prior =
+                previous?.type === "interest" ? undefined : previous;
+              const enabling = !prior?.enabled;
+              const channels =
+                value.type === "event" && value.channels !== "all"
+                  ? value.channels.filter(
+                      (channel) =>
+                        enabling ||
+                        prior?.type !== "event" ||
+                        prior.channels === "all" ||
+                        !prior.channels.includes(channel),
+                    )
+                  : [];
+              if (channels.length) {
+                await this.host.resolveChannels?.(agent, channels, lifetime);
+                lifetime.throwIfAborted();
+                check?.();
+                for (const channel of channels)
+                  if (
+                    this.host.reads(agent, { tags: [["h", channel]] }) !== true
+                  )
+                    throw new AttentionError(
+                      "invalid-operation",
+                      `Cannot receive events from channel ${channel}. Check channel access and retry this write after metadata is confirmed.`,
+                    );
+              }
+              // An enabled source write replaces its producer, even if the
+              // destination is unchanged and the previous run failed.
+              if (
+                value.channel &&
+                (enabling ||
+                  value.type === "source" ||
+                  prior?.channel !== value.channel)
+              ) {
+                const member = this.host.member(agent, {
+                  tags: [["h", value.channel]],
+                });
+                if (member !== true)
+                  throw new AttentionError(
+                    "invalid-operation",
+                    member === undefined
+                      ? `Membership of delivery channel ${value.channel} is unconfirmed. Retry this write after the relay confirms membership.`
+                      : `Agent is not a member of the delivery channel ${value.channel}. Choose a joined channel or join it before retrying this write.`,
+                  );
+              }
+            }
             return next;
           });
           return show(after, slug, seconds());

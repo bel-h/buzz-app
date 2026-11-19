@@ -137,8 +137,9 @@ export function SidebarUnread({
         const cueRect = cue.getBoundingClientRect();
         const actionRect = action.getBoundingClientRect();
         const center = cueRect.left + cueRect.width / 2;
+        // The floating row uses the same gap around New as below it.
         const gap =
-          Number.parseFloat(getComputedStyle(action).insetInlineStart) || 0;
+          Number.parseFloat(getComputedStyle(action).insetBlockEnd) || 0;
         const available =
           2 * Math.max(center - actionRect.right, actionRect.left - center) -
           2 * gap;
