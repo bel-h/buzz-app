@@ -861,9 +861,9 @@ export function createUnread({
       entry.mentioned ||
       entry.broadcast ||
       conversation(entry));
-  /** Retained evidence cannot decide this reply's conversation yet. A
-   * broadcast counts either way, but only its conversation earns attention. */
-  const undecided = (entry: Evidence, dm: boolean) =>
+  /** Retained evidence cannot tell whether this reply is in one of the
+   * viewer's conversations, and a lookup could. */
+  const unknownConversation = (entry: Evidence, dm: boolean) =>
     !entry.quiet &&
     !!entry.parentId &&
     !dm &&
@@ -871,6 +871,11 @@ export function createUnread({
     !conversation(entry) &&
     chosen(entry) === undefined &&
     !lookups.get(conversationKey(entry.channelId, entry.parentId))?.done;
+  /** Retained evidence cannot decide whether this reply counts yet. A
+   * broadcast counts either way: its lookup decides only its attention, so
+   * its unread state never waits on it. */
+  const undecided = (entry: Evidence, dm: boolean) =>
+    !entry.broadcast && unknownConversation(entry, dm);
   /** `seen` is the row's `seen:` cut: only a channel row passes one. */
   function isUnread(
     entry: Evidence,
@@ -1930,7 +1935,8 @@ export function createUnread({
     if (
       lookups.has(key) ||
       (!structuralRecovery &&
-        (!undecided(entry, dm) || !afterFrontier(entry, reads.state(), dm)))
+        (!unknownConversation(entry, dm) ||
+          !afterFrontier(entry, reads.state(), dm)))
     )
       return;
     lookups.set(key, {
