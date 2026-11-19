@@ -67,12 +67,17 @@ import {
 import styles from "./CommunityAdmin.module.css";
 import { DIRECT_MEMBER_ADD_ENABLED } from "./features";
 import { canShareInvite, shareInvite } from "./shareInvite";
+import { InviteLinks } from "./InviteLinks";
 
 const DAY = 24 * 60 * 60;
-const EXPIRY = [1, 3, 7, 30].map((days) => ({
-  value: String(days * DAY),
-  label: days === 1 ? "1 day" : `${days} days`,
-}));
+const NEVER = "never";
+const EXPIRY = [
+  ...[1, 3, 7, 30].map((days) => ({
+    value: String(days * DAY),
+    label: days === 1 ? "1 day" : `${days} days`,
+  })),
+  { value: NEVER, label: "Never expires" },
+];
 const USES = [
   { value: "", label: "No limit" },
   ...[1, 5, 10, 25].map((uses) => ({
@@ -84,7 +89,7 @@ const message = (reason: unknown) =>
   reason instanceof Error ? reason.message : String(reason);
 const STALE = "The member list is out of date. Retry before making changes.";
 
-export type MembershipMethod = "members" | "invite" | "direct";
+export type MembershipMethod = "members" | "invite" | "links" | "direct";
 type MembershipSelection = {
   selectedMethod?: MembershipMethod | undefined;
   onMethodChange?: ((method: MembershipMethod) => void) | undefined;
@@ -306,6 +311,7 @@ function Members({
       busy={busy || !!pending}
       community={community}
       members={members}
+      name={name}
       owner={role === "owner"}
       stale={stale}
       refreshing={refreshing}
@@ -523,6 +529,7 @@ function MembershipContent({
   busy,
   community,
   members,
+  name,
   owner,
   stale,
   refreshing,
@@ -536,6 +543,7 @@ function MembershipContent({
   busy: boolean;
   community: string;
   members: readonly Member[];
+  name(pubkey: string): string;
   owner: boolean;
   stale: boolean;
   refreshing: boolean;
@@ -597,7 +605,11 @@ function MembershipContent({
     setLink({ settings });
     setCopied(false);
     setError("");
-    mintInvite(community, Number(ttl), uses ? Number(uses) : null).then(
+    mintInvite(
+      community,
+      ttl === NEVER ? null : Number(ttl),
+      uses ? Number(uses) : null,
+    ).then(
       (invite) => {
         if (minting.current === request) setLink({ settings, url: invite.url });
       },
@@ -683,6 +695,12 @@ function MembershipContent({
               value: "invite",
               label: "Invite",
               panelId: "invite-share-panel",
+              disabled: adding || busy,
+            },
+            {
+              value: "links",
+              label: "Links",
+              panelId: "invite-links-panel",
               disabled: adding || busy,
             },
             ...(DIRECT_MEMBER_ADD_ENABLED
@@ -824,6 +842,20 @@ function MembershipContent({
               </div>
             </SettingsGroup>
           </div>
+        </section>
+      )}
+      {method === "links" && (
+        <section
+          role="tabpanel"
+          id="invite-links-panel"
+          aria-labelledby="invite-links-panel-tab"
+        >
+          <InviteLinks
+            community={community}
+            name={name}
+            locked={locked}
+            active={active}
+          />
         </section>
       )}
       {DIRECT_MEMBER_ADD_ENABLED && method === "direct" && (

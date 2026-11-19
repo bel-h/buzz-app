@@ -707,3 +707,115 @@ it("ignores a late mint from a previous Invite visit", async () => {
     screen.queryByDisplayValue("https://primary.example/invite/old"),
   ).toBeNull();
 });
+
+it("mints a link that never expires", async () => {
+  const user = userEvent.setup();
+  const calls = broker({
+    invite: () =>
+      Response.json({
+        invite_id: "0b9c8f7e-1d2a-4b3c-9e8f-7a6b5c4d3e2f",
+        code: "abc",
+        url: "https://primary.example/invite/abc",
+        expires_at: null,
+        max_uses: null,
+        uses_remaining: null,
+      }),
+  });
+  const { relay: data } = relay(owner);
+  render(<CommunityAdmin relay={data} active={() => true} />);
+  await user.click(await screen.findByRole("tab", { name: "Invite" }));
+  await screen.findByDisplayValue("https://primary.example/invite/abc");
+  await user.click(
+    screen.getByRole("button", { name: "Choose invite expiry" }),
+  );
+  await user.click(
+    await screen.findByRole("menuitemradio", { name: "Never expires" }),
+  );
+  await waitFor(() =>
+    expect(calls.filter((c) => c.route === "invite").at(-1)?.body).toEqual({
+      never_expires: true,
+      max_uses: null,
+    }),
+  );
+});
+
+it("lists invite links and revokes one by row or by pasted link", async () => {
+  const user = userEvent.setup();
+  const permanent = "0b9c8f7e-1d2a-4b3c-9e8f-7a6b5c4d3e2f";
+  let revoked = false;
+  const calls = broker({
+    invites: () =>
+      Response.json({
+        invites: [
+          {
+            id: permanent,
+            created_by: owner,
+            created_at: 1700000000,
+            expires_at: null,
+            max_uses: null,
+            use_count: 2,
+            revoked_at: revoked ? 1700000100 : null,
+            status: revoked ? "revoked" : "active",
+          },
+          {
+            id: "1b9c8f7e-1d2a-4b3c-9e8f-7a6b5c4d3e2f",
+            created_by: admin,
+            created_at: 1690000000,
+            expires_at: 1690003600,
+            max_uses: 5,
+            use_count: 5,
+            revoked_at: null,
+            status: "exhausted",
+          },
+        ],
+        next_before: null,
+      }),
+    "invite-revoke": (body) => {
+      revoked = true;
+      return Response.json({
+        id: (body as { id?: string }).id ?? permanent,
+        revoked_at: 1700000100,
+      });
+    },
+  });
+  const { relay: data } = relay(owner);
+  render(<CommunityAdmin relay={data} active={() => true} />);
+  await user.click(await screen.findByRole("tab", { name: "Links" }));
+  const list = await screen.findByRole("list", { name: "Invite links" });
+  expect(list).toHaveTextContent("Active · 2 uses · Never expires");
+  expect(list).toHaveTextContent("Used up · 5 of 5 uses · Expired");
+  expect(calls.find((c) => c.route === "invites")?.body).toEqual({});
+
+  const [rowRevoke] = screen.getAllByRole("button", { name: /^Revoke Link/ });
+  await user.click(rowRevoke as HTMLElement);
+  await user.click(
+    within(await screen.findByRole("alertdialog")).getByRole("button", {
+      name: "Revoke",
+    }),
+  );
+  await waitFor(() =>
+    expect(list).toHaveTextContent("Revoked · 2 uses · Never expires"),
+  );
+  expect(calls.filter((c) => c.route === "invite-revoke")).toEqual([
+    { route: "invite-revoke", body: { id: permanent } },
+  ]);
+
+  const field = screen.getByRole("textbox", { name: "Revoke a link" });
+  await user.type(field, "https://other.example/invite/abc");
+  expect(screen.getByRole("alert")).toHaveTextContent(
+    "This invite link is for a different community.",
+  );
+  await user.clear(field);
+  await user.type(field, "https://primary.example/invite/abc");
+  await user.click(screen.getByRole("button", { name: "Revoke" }));
+  await user.click(
+    within(await screen.findByRole("alertdialog")).getByRole("button", {
+      name: "Revoke",
+    }),
+  );
+  await waitFor(() =>
+    expect(
+      calls.filter((c) => c.route === "invite-revoke").at(-1)?.body,
+    ).toEqual({ code: "abc" }),
+  );
+});

@@ -9,15 +9,23 @@ const KINDS: Record<string, number> = { add: 9030, remove: 9031, role: 9032 };
 
 /** Normalized `POST /api/invites` body; unknown fields are dropped. */
 export function inviteRequest(value: unknown) {
-  const { ttl_secs: ttl, max_uses: uses = null } = (value ?? {}) as {
+  const {
+    ttl_secs: ttl,
+    max_uses: uses = null,
+    never_expires: never,
+  } = (value ?? {}) as {
     ttl_secs?: unknown;
     max_uses?: unknown;
+    never_expires?: unknown;
   };
+  if (never !== undefined && (never !== true || ttl !== undefined))
+    throw new Error("Invalid invite expiry");
   if (
-    typeof ttl !== "number" ||
-    !Number.isSafeInteger(ttl) ||
-    ttl < MIN_TTL ||
-    ttl > MAX_TTL
+    never !== true &&
+    (typeof ttl !== "number" ||
+      !Number.isSafeInteger(ttl) ||
+      ttl < MIN_TTL ||
+      ttl > MAX_TTL)
   )
     throw new Error("Invalid invite expiry");
   if (
@@ -28,7 +36,46 @@ export function inviteRequest(value: unknown) {
       uses > MAX_USES)
   )
     throw new Error("Invalid invite use limit");
-  return { ttl_secs: ttl, max_uses: uses };
+  return never === true
+    ? { never_expires: true, max_uses: uses }
+    : { ttl_secs: ttl as number, max_uses: uses };
+}
+
+/** `GET /api/invites` path for one page; `before` is the relay's opaque cursor. */
+export function inviteListPath(value: unknown) {
+  const { before, ...rest } = (value ?? {}) as { before?: unknown };
+  if (
+    Object.keys(rest).length ||
+    (before !== undefined &&
+      (typeof before !== "string" || !/^\d{1,20}_[0-9a-f-]{36}$/.test(before)))
+  )
+    throw new Error("Invalid invite list request");
+  return before === undefined
+    ? "/api/invites"
+    : `/api/invites?before=${before}`;
+}
+
+/** Normalized `POST /api/invites/revoke` body: exactly one of `id` or `code`. */
+export function revokeRequest(value: unknown) {
+  const { id, code, ...rest } = (value ?? {}) as {
+    id?: unknown;
+    code?: unknown;
+  };
+  if (Object.keys(rest).length === 0) {
+    if (
+      typeof id === "string" &&
+      code === undefined &&
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id)
+    )
+      return { id };
+    if (
+      typeof code === "string" &&
+      id === undefined &&
+      /^[a-zA-Z0-9._-]{1,256}$/.test(code)
+    )
+      return { code };
+  }
+  throw new Error("Invalid revoke request");
 }
 
 /** Unsigned NIP-43 add/remove/role command for one member. */
@@ -78,6 +125,11 @@ const REASONS = new Set([
   "invalid: cannot set role to owner",
   "blocked: you are banned from this community",
   "only relay owners and admins can create invites",
+  "only relay owners and admins can list invites",
+  "only relay owners, admins or the invite's creator can revoke it",
+  "invite_not_revocable",
+  "invite_not_found",
+  "invite_restricted",
   "community writes are temporarily unavailable",
 ]);
 

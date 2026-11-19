@@ -78,12 +78,13 @@ pub(crate) fn origin(value: &str) -> Result<Url> {
 
 fn request_url(community: &str, path: &str, method: &str) -> Result<Url> {
     let allowed = match method {
-        "GET" => matches!(path, "/" | "/api/join-policy"),
+        "GET" => matches!(path, "/" | "/api/join-policy") || invite_list(path),
         "POST" => matches!(
             path,
             "/query"
                 | "/events"
                 | "/api/invites"
+                | "/api/invites/revoke"
                 | "/api/invites/claim"
                 | "/api/invites/accept-policy"
                 | "/gifs/search"
@@ -97,6 +98,21 @@ fn request_url(community: &str, path: &str, method: &str) -> Result<Url> {
     origin(community)?
         .join(path)
         .map_err(|_| "Invalid relay path".into())
+}
+
+/// `GET /api/invites`, optionally with the relay's `<micros>_<uuid>` cursor.
+fn invite_list(path: &str) -> bool {
+    let Some(rest) = path.strip_prefix("/api/invites") else {
+        return false;
+    };
+    let Some(cursor) = rest.strip_prefix("?before=") else {
+        return rest.is_empty();
+    };
+    cursor.split_once('_').is_some_and(|(micros, id)| {
+        (1..=20).contains(&micros.len())
+            && micros.bytes().all(|b| b.is_ascii_digit())
+            && workflow_uuid(id)
+    })
 }
 
 fn workflow_uuid(value: &str) -> bool {
@@ -951,7 +967,8 @@ pub(crate) async fn relay_http(
         url,
         &method,
         body,
-        method == "POST",
+        // The invite list is owner/admin-only, so its read is signed too.
+        method == "POST" || invite_list(&path),
         MAX_RESPONSE,
     );
     cancellable(id.as_deref(), &method, &path, request).await

@@ -22,8 +22,21 @@ fn routes_cannot_retarget_credentials_or_expand_http_access() {
     ] {
         assert!(request_url("https://relay.test", path, "POST").is_err());
     }
-    for path in ["/api/invites", "/gifs/search", "/profiles/search"] {
+    for path in ["/gifs/search", "/profiles/search", "/api/invites/revoke"] {
         assert!(request_url("https://relay.test", path, "POST").is_ok());
+        assert!(request_url("https://relay.test", path, "GET").is_err());
+    }
+    let cursor = "/api/invites?before=1795049564000000_0b9c8f7e-1d2a-4b3c-9e8f-7a6b5c4d3e2f";
+    for path in ["/api/invites", cursor] {
+        assert!(request_url("https://relay.test", path, "GET").is_ok());
+    }
+    assert!(request_url("https://relay.test", "/api/invites", "POST").is_ok());
+    for path in [
+        "/api/invites?limit=200",
+        "/api/invites?before=1_x",
+        "/api/invites?before=1795049564000000_0b9c8f7e-1d2a-4b3c-9e8f-7a6b5c4d3e2f&limit=1",
+        "/api/invites/claim",
+    ] {
         assert!(request_url("https://relay.test", path, "GET").is_err());
     }
     assert!(request_url("https://relay.test", "/gifs/other", "POST").is_err());
