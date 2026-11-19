@@ -1549,7 +1549,7 @@ export async function connectSignedTransport(
             profiling,
             event.id,
             principal().api,
-            event.kind === ARTIFACT_KIND ? "background" : "foreground",
+            event.kind === ARTIFACT_KIND ? "artifact" : "foreground",
             false,
             refusalText,
           ).catch((error) => {
@@ -1617,7 +1617,7 @@ async function signedPost(
   profiling: RelayProfiler,
   id: string,
   admission: Parameters<typeof admittedApiRequest>[0],
-  priority: "foreground" | "background" = "foreground",
+  priority: Parameters<typeof admittedApiRequest>[3] = "foreground",
   optionalPresence = false,
   reason?: (body: unknown, status: number) => string | undefined,
 ) {

@@ -241,7 +241,7 @@ export async function readApiFailure(
 }
 
 type Ticket = {
-  priority: "foreground" | "background";
+  priority: "foreground" | "background" | "artifact";
   signal?: AbortSignal | undefined;
   start(): void;
   reject(error: Error): void;
@@ -252,14 +252,14 @@ type Ticket = {
  * Cooldowns reject queued work rather than spending a read's 10s deadline. */
 export function createApiAdmission() {
   const activeLimit = 6;
-  const backgroundActiveLimit = 4;
+  const artifactActiveLimit = 4;
   const queuedLimit = 128;
-  const backgroundQueuedLimit = 120;
+  const artifactQueuedLimit = 120;
   let pausedUntil = 0,
     active = 0,
-    activeBackground = 0,
+    activeArtifacts = 0,
     preparing = 0,
-    preparingBackground = 0,
+    preparingArtifacts = 0,
     presenceBusy = false,
     presenceNext = 0;
   const queue: Ticket[] = [];
@@ -282,7 +282,11 @@ export function createApiAdmission() {
     while (active < activeLimit && queue.length) {
       const ticket =
         queue.find((entry) => entry.priority === "foreground") ??
-        (activeBackground < backgroundActiveLimit ? queue[0] : undefined);
+        queue.find(
+          (entry) =>
+            entry.priority !== "artifact" ||
+            activeArtifacts < artifactActiveLimit,
+        );
       if (!ticket) return;
       remove(ticket);
       ticket.start();
@@ -311,19 +315,19 @@ export function createApiAdmission() {
       priority: Ticket["priority"] = "foreground",
     ): Promise<T> {
       if (performance.now() < pausedUntil) throw pauseError();
-      const background = priority === "background";
+      const artifact = priority === "artifact";
       if (
         preparing >= queuedLimit ||
-        (background && preparingBackground >= backgroundQueuedLimit)
+        (artifact && preparingArtifacts >= artifactQueuedLimit)
       )
         throw new ApiCapacity();
       preparing++;
-      if (background) preparingBackground++;
+      if (artifact) preparingArtifacts++;
       try {
         return await work();
       } finally {
         preparing--;
-        if (background) preparingBackground--;
+        if (artifact) preparingArtifacts--;
       }
     },
     idle: () =>
@@ -347,10 +351,10 @@ export function createApiAdmission() {
     ): Promise<T> {
       if (signal?.aborted) return Promise.reject(signal.reason);
       if (performance.now() < pausedUntil) return Promise.reject(pauseError());
-      const background = priority === "background";
+      const artifact = priority === "artifact";
       if (
         queue.length >= queuedLimit ||
-        (background && queue.length >= backgroundQueuedLimit)
+        (artifact && queue.length >= artifactQueuedLimit)
       )
         return Promise.reject(new ApiCapacity());
       return new Promise((resolve, reject) => {
@@ -359,10 +363,10 @@ export function createApiAdmission() {
           signal,
           start() {
             active++;
-            if (background) activeBackground++;
+            if (artifact) activeArtifacts++;
             const finish = () => {
               active--;
-              if (background) activeBackground--;
+              if (artifact) activeArtifacts--;
               pump();
             };
             try {
