@@ -397,7 +397,8 @@ const oversized = new Map<string, number>();
 /** The whole turns in the last {@link LATEST_MIB} MiB of the conversation's
  * saved session, oldest first; undefined with no saved session. While a turn
  * is larger than that, none, so what is shown stays, except undefined every
- * {@link OVERSIZED_READ_MS} to read it in full. */
+ * {@link OVERSIZED_READ_MS} to read it in full. The same fallback recovers
+ * delivered steers when the window omits their turn's opening prompt. */
 export async function readLatestTurns(
   spawn: Spawn,
   workspace: SessionsPlace,
@@ -445,11 +446,22 @@ export async function readLatestTurns(
     },
     working,
     nameOf,
-  ).filter((turn) => !turn.partial);
-  if (from && turns[0]) turns[0].newSession = false;
-  if (from && !turns.length) return tooLarge();
-  oversized.delete(path);
-  return turns;
+  );
+  const first = turns[0];
+  const whole = turns.filter((turn) => !turn.partial);
+  if (
+    from &&
+    (!whole.length ||
+      (first?.partial &&
+        first.items.some((item) => item.type === "prompt" && item.steer)))
+  ) {
+    const fallback = tooLarge();
+    if (!fallback || !whole.length) return fallback;
+  } else {
+    oversized.delete(path);
+  }
+  if (from && whole[0]) whole[0].newSession = false;
+  return whole;
 }
 
 /** A session file in `~/.claude/projects`. One too large to read whole is

@@ -942,6 +942,39 @@ it("reads a session's latest whole turns from its end", async () => {
   ).toEqual([["2", "2"]]);
 });
 
+it("requests a full read when a clipped turn contains a delivered steer", async () => {
+  clock = 0;
+  const session = { ...conversation, sessionId: "clipped-steer" };
+  const { spawn } = host({
+    "./-Users-me--buzz/clipped-steer.jsonl": [
+      line("user", turn("older")),
+      line("assistant", [{ type: "text", text: "x".repeat(3 << 20) }]),
+      line("attachment", undefined, {
+        attachment: {
+          type: "queued_command",
+          prompt: steerPrompt(turn("also lint")),
+        },
+      }),
+      line("assistant", [{ type: "text", text: "Lint passed." }]),
+      line("user", turn("latest")),
+      line("assistant", [{ type: "text", text: "Done." }]),
+    ].join("\n"),
+  });
+  const signal = new AbortController().signal;
+  await expect(
+    readLatestTurns(spawn, "~/.buzz", session, true, signal),
+  ).resolves.toBeUndefined();
+  const full = await readTranscript(spawn, "~/.buzz", session, true, signal);
+  expect(full?.turns[0]?.items).toMatchObject([
+    { text: "older" },
+    expect.anything(),
+    expect.objectContaining({ text: "also lint", steer: true }),
+    expect.objectContaining({ text: "Lint passed." }),
+  ]);
+  const latest = await readLatestTurns(spawn, "~/.buzz", session, true, signal);
+  expect(latest?.map(({ turnId }) => turnId)).toEqual(["u5"]);
+});
+
 it("reads a turn larger than the chunk in full only every 30 s, keeping what is shown between", async () => {
   clock = 0;
   const { spawn } = host({
