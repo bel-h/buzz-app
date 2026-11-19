@@ -224,22 +224,6 @@ function blocksMarkdown(
       block.type.name === "bullet_list" || block.type.name === "ordered_list";
     const tightItem =
       mode === "document" && doc.type.name === "list_item" && !doc.attrs.spread;
-    // An empty first item cannot interrupt a paragraph in CommonMark. A bare
-    // dash directly under that paragraph would be parsed as a heading underline.
-    const emptyNestedList =
-      list &&
-      previous?.type.name === "paragraph" &&
-      previous.content.size > 0 &&
-      block.firstChild?.firstChild?.content.size === 0;
-    // Blank separation prevents lazy quote continuation and adjacent blocks
-    // merging on send; ordinary authored paragraph newlines remain unchanged.
-    if (previous)
-      blocks.push(
-        (mode === "chat" && paragraphs) ||
-          (tightItem && !paragraphs && !emptyNestedList)
-          ? "\n"
-          : "\n\n",
-      );
     if (list) alternate = lastList === block.type && !alternate;
     let output: string;
     if (block.type.name === "markdown_table") {
@@ -290,6 +274,21 @@ function blocksMarkdown(
         mode === "document" && block.attrs.spread ? "\n\n" : "\n",
       );
     } else output = paragraphMarkdown(block, authored.get(offset), mode);
+    // Empty lists and ordered lists starting at a number other than 1 cannot interrupt a
+    // paragraph. A setext underline would pull that paragraph into the heading.
+    const needsBlankLine =
+      previous?.type.name === "paragraph" &&
+      previous.content.size > 0 &&
+      ((list && block.firstChild?.firstChild?.content.size === 0) ||
+        (block.type.name === "ordered_list" && block.attrs.order !== 1) ||
+        (block.type.name === "heading" && /\n(?:=+|-+)$/.test(output)));
+    if (previous)
+      blocks.push(
+        (mode === "chat" && paragraphs) ||
+          (tightItem && !paragraphs && !needsBlankLine)
+          ? "\n"
+          : "\n\n",
+      );
     blocks.push(output);
     if (list) lastList = block.type;
     else if (/\S/.test(output)) {

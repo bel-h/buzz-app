@@ -193,6 +193,43 @@ it("keeps structural paragraphs even in a list item with tight defaults", () => 
   );
 });
 
+it.each([
+  [
+    schema.nodes.ordered_list.create(
+      { order: 3 },
+      schema.nodes.list_item.create(
+        null,
+        schema.nodes.paragraph.create(null, schema.text("Third")),
+      ),
+    ),
+    "- First\n\n  3. Third",
+  ],
+  [
+    schema.nodes.heading.create({ level: 2 }, [
+      schema.text("Head"),
+      schema.nodes.hard_break.create(),
+      schema.text("More"),
+    ]),
+    "- First\n\n  Head\\\n  More\n  ----",
+  ],
+] as const)(
+  "preserves a non-interrupting block in a tight list item",
+  (block, expected) => {
+    const item = schema.nodes.list_item.create(null, [
+      schema.nodes.paragraph.create(null, schema.text("First")),
+      block,
+    ]);
+    const doc = schema.nodes.doc.create(
+      null,
+      schema.nodes.bullet_list.create(null, item),
+    );
+    const markdown = documentEditorMarkdown(projectComposerDocument(doc).draft);
+    expect(semanticTree(fromMarkdown(markdown))).toEqual(
+      semanticTree(fromMarkdown(expected)),
+    );
+  },
+);
+
 it.each([1, 2, 3])(
   "preserves a typed trailing backslash run of %s before a hard break",
   (count) => {
