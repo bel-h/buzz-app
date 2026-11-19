@@ -2821,6 +2821,23 @@ test("formatted documents create, reopen, and paste headings", async ({
   await expect(rich.locator("p")).toHaveText("After H3");
 });
 
+async function clickParagraphStart(paragraph) {
+  await paragraph.click({ position: { x: 1, y: 4 } });
+  await expect
+    .poll(() =>
+      paragraph.evaluate((element) => {
+        const selection = element.ownerDocument.getSelection();
+        return (
+          selection?.isCollapsed &&
+          selection.anchorOffset === 0 &&
+          (selection.anchorNode === element ||
+            selection.anchorNode === element.firstChild)
+        );
+      }),
+    )
+    .toBe(true);
+}
+
 test("joining text into a single-line heading preserves the following lines", async ({
   page,
   app,
@@ -2834,12 +2851,7 @@ test("joining text into a single-line heading preserves the following lines", as
   await formatted.click();
   const heading = rich.getByRole("heading", { level: 3 });
   const paragraph = rich.locator("p");
-  await rich.focus();
-  await paragraph.evaluate((element) => {
-    const first = element.firstChild;
-    if (!first) throw new Error("Expected a paragraph with text");
-    element.ownerDocument.getSelection()?.collapse(first, 0);
-  });
+  await clickParagraphStart(paragraph);
   await page.keyboard.press("Backspace");
   await expect(heading).toHaveText("Heada");
   await expect(paragraph).toHaveText("bc");
@@ -2874,13 +2886,7 @@ test("joined list items retain paragraphs after nested blocks on reopen", async 
     await source.fill(`- First\n  ${content}\n- Second`);
     await formatted.click();
     const items = rich.locator("ul").first().locator(":scope > li");
-    await rich.focus();
-    await items
-      .last()
-      .locator("p")
-      .evaluate((element) => {
-        element.ownerDocument.getSelection()?.collapse(element, 0);
-      });
+    await clickParagraphStart(items.last().locator("p"));
     await page.keyboard.press("Backspace");
     await expect(items).toHaveCount(1);
     await expect(items.locator(":scope > p")).toHaveText(["First", "Second"]);
