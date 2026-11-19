@@ -2612,8 +2612,8 @@ export function createRelaySession(
                 ? "busy"
                 : "settled";
           },
-          () => {
-            for (const thread of threads) thread.retry();
+          (timed) => {
+            for (const thread of threads) thread.retry(timed);
           },
         ),
         // Visibility owns its quiet retries and exhausts without `transient`,
