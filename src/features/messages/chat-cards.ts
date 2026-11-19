@@ -173,25 +173,62 @@ export function separateChatCards(
   };
 }
 
-/** Solo chat links eligible for sharing, excluding quoted, code and hidden links. */
-export function chatCardIds(
+/** Find Solo destinations in sent Markdown without treating link labels as URLs. */
+export function chatLinkIds(
   content: string,
-  channels: readonly ReferenceChannel[] = [],
+  channels: readonly ReferenceChannel[],
 ): string[] {
-  const { cards } = separateChatCards({ content } as ChannelMessage, channels);
-  return [
-    ...new Set(
-      cards.flatMap((card) =>
-        messageLinkParts(card.content).flatMap((part) => {
-          const target = part.url && parseBuzzLink(part.url);
-          return target &&
-            target.format === "legacy" &&
-            !target.messageId &&
-            !target.threadRootId
-            ? [target.channelId]
-            : [];
-        }),
-      ),
-    ),
-  ];
+  if (
+    content.length > MAX_MARKDOWN_LENGTH ||
+    !/buzz:/i.test(content) ||
+    content.includes("||")
+  )
+    return [];
+  const scan = scanMarkdown(content);
+  if (scan.tooDeep) return [];
+  const ids = new Set<string>();
+  const add = (url: string | undefined) => {
+    const target = url && parseBuzzLink(url);
+    if (
+      target &&
+      target.format === "legacy" &&
+      !target.messageId &&
+      !target.threadRootId &&
+      channels.some(
+        ({ id, channelType }) =>
+          id === target.channelId && channelType === "solo",
+      )
+    )
+      ids.add(target.channelId);
+  };
+  const visit = (node: typeof scan.tree) => {
+    switch (node.type) {
+      case "link":
+        add(node.url);
+        break;
+      case "linkReference":
+        add(scan.definitions.get(node.identifier?.toLowerCase() ?? ""));
+        break;
+      case "text": {
+        const start = node.position?.start.offset;
+        const end = node.position?.end.offset;
+        if (start !== undefined && end !== undefined)
+          for (const { url } of messageLinkParts(content.slice(start, end)))
+            add(url);
+        break;
+      }
+      case "blockquote":
+      case "code":
+      case "inlineCode":
+      case "html":
+      case "image":
+      case "imageReference":
+      case "definition":
+        break;
+      default:
+        node.children?.forEach(visit);
+    }
+  };
+  visit(scan.tree);
+  return [...ids];
 }

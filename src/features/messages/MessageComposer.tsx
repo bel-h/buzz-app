@@ -18,7 +18,7 @@ import {
 import { accentButtonStyle } from "../../shared/theme/accent";
 import { restoreChatLinks } from "./composer-chat-cards";
 import { pastedFiles } from "./composer-clipboard";
-import { chatCardIds } from "./chat-cards";
+import { chatLinkIds } from "./chat-cards";
 import { useConversationPresentation } from "../conversation/ConversationPresentation";
 import { TypingPresentation } from "../conversation/typing-presentation";
 import { useTypingBroadcast } from "./useTypingBroadcast";
@@ -3045,7 +3045,7 @@ function Composer({
         ),
       );
       const tuned = Object.keys(sentPicks).length > 0;
-      const linkedChats = chatCardIds(content, channels());
+      const linkedChats = chatLinkIds(content, channels());
       if (linkedChats.length) {
         setSending(true);
         setError(undefined);
