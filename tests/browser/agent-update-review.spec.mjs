@@ -229,10 +229,20 @@ for (const catalog of [true, false]) {
     await review.getByRole("button", { name: "Save", exact: true }).click();
     const error = catalog
       ? "Choose an available Codex model or Codex default before saving."
-      : "Check Codex models or choose Codex default before saving.";
+      : "Check Codex models or clear the model and thinking overrides before saving.";
     await expect(
       review.getByRole("alert").filter({ hasText: error }),
     ).toBeVisible();
     expect(await page.evaluate(() => window.updateReviewResult())).toEqual([]);
+    if (!catalog) {
+      await review
+        .getByRole("button", { name: "Clear model and thinking overrides" })
+        .click();
+      await review.getByRole("button", { name: "Save", exact: true }).click();
+      await expect(review).toHaveCount(0);
+      const [saved] = await page.evaluate(() => window.updateReviewResult());
+      expect(saved.config).not.toHaveProperty("model");
+      expect(saved.config).not.toHaveProperty("effort");
+    }
   });
 }
