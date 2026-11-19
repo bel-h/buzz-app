@@ -1130,7 +1130,11 @@ sidePanelOverlapTest(
       near(threadHeader.y, channelHeader.y);
     };
 
+    // settlePanelMotion sees only animations already running, so wait for
+    // each trigger's end state first: a dock not yet mounted or unmounted
+    // would let the settle resolve before the slide begins.
     await toggle.click();
+    await expect(sidePanel).toBeVisible();
     await openThread();
     await stacked(thread);
     await page
@@ -1139,6 +1143,7 @@ sidePanelOverlapTest(
       )
       .click();
     await button(page, "Hide side panel fixture").click();
+    await expect(sidePanel).toBeHidden();
     await openThread();
     await toggle.click();
     await stacked(thread);

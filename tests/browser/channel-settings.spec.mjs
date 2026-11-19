@@ -90,13 +90,16 @@ test("channel settings owns its responsive side panel and returns keyboard focus
   // though every single frame keeps the panel past the conversation's edge.
   // Measure the settled split, both edges in one layout pass.
   await settlePanelMotion(page);
-  const [conversationRight, panelLeft] = await conversation.evaluate(
-    (before, after) => [
-      before.getBoundingClientRect().right,
-      after.getBoundingClientRect().left,
+  const conversationHandle = await conversation.elementHandle();
+  const panelHandle = await panel.elementHandle();
+  const [conversationRight, panelLeft] = await page.evaluate(
+    ([conversationEl, panelEl]) => [
+      conversationEl.getBoundingClientRect().right,
+      panelEl.getBoundingClientRect().left,
     ],
-    await panel.elementHandle(),
+    [conversationHandle, panelHandle],
   );
+  await Promise.all([conversationHandle.dispose(), panelHandle.dispose()]);
   expect(panelLeft).toBeGreaterThanOrEqual(conversationRight);
   await page.keyboard.press("Escape");
   await expect(panel).toHaveCount(0);
