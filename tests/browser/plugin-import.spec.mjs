@@ -2984,12 +2984,26 @@ test("document table text keeps toolbar, Backspace and history scoped", async ({
   });
   await rich.pressSequentially("Z");
   await expect(rich).toContainText("AfterZ");
+  await page.evaluate(() => {
+    document.addEventListener("keydown", (event) => {
+      if (event.key.toLowerCase() !== "z" || !(event.metaKey || event.ctrlKey))
+        return;
+      const direction = event.shiftKey ? "redo" : "undo";
+      document.documentElement.dataset.tableHistory = `${direction}:${event.defaultPrevented}`;
+    });
+  });
+  const pageRoot = page.locator("html");
   await selectGridText();
   await page.keyboard.press("ControlOrMeta+z");
+  await expect(pageRoot).toHaveAttribute("data-table-history", "undo:true");
   await expect(rich).toContainText("After");
   await expect(rich).not.toContainText("AfterZ");
+  await selectGridText();
+  await page.keyboard.press("ControlOrMeta+Shift+z");
+  await expect(pageRoot).toHaveAttribute("data-table-history", "redo:true");
+  await expect(rich).toContainText("AfterZ");
   await markdown.click();
-  await expect(source).toHaveValue(original);
+  await expect(source).toHaveValue(`${original}Z`);
 });
 
 test("toolbar wrapping keeps table Markdown source through reopen", async ({
