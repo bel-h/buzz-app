@@ -2580,6 +2580,7 @@ export function createRelaySession(
     () => liveRecoveryStatus(live.snapshot()),
     live.retry,
   );
+  let threadRecovery = () => {};
   const recovery = transport
     ? createRecovery([
         liveRecovery,
@@ -2594,6 +2595,26 @@ export function createRelaySession(
           sidebarPreferences.queries.subscribe,
           () => loadState(sidebarPreferences.queries.snapshot()),
           () => void sidebarPreferences.queries.refresh(),
+        ),
+        // Threads a person reads; see createThreadView's `recover`.
+        recoverable(
+          (listener) => {
+            threadRecovery = listener;
+            return () => {
+              threadRecovery = () => {};
+            };
+          },
+          () => {
+            const states = [...threads].map((thread) => thread.recovery());
+            return states.includes("failed")
+              ? "failed"
+              : states.includes("busy")
+                ? "busy"
+                : "settled";
+          },
+          () => {
+            for (const thread of threads) thread.retry();
+          },
         ),
         // Visibility owns its quiet retries and exhausts without `transient`,
         // so this source only reports `busy`; its retry is not reached.
@@ -2991,7 +3012,12 @@ export function createRelaySession(
     thread(
       channelId: string,
       messageId: string,
-      options?: { exact?: boolean; priority?: Priority },
+      options?: {
+        exact?: boolean;
+        priority?: Priority;
+        /** A person reads this view: see createThreadView's `recover`. */
+        reading?: boolean;
+      },
     ) {
       if (closed || views.size >= 64)
         throw new Error("Relay view capacity unavailable");
@@ -3060,6 +3086,8 @@ export function createRelaySession(
         notify,
         dropped: streamDropped,
         now: storeNow,
+        recover:
+          options?.reading && recovery ? () => threadRecovery() : undefined,
       });
       threads.add(thread);
       // Without its root retained, a first open admits none of these; a view
