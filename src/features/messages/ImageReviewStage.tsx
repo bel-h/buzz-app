@@ -499,7 +499,9 @@ export function ImageReviewStage({
           )}
           {copyNotice && (
             <span role={copyNotice === "error" ? "alert" : "status"}>
-              {copyNotice === "success" ? "Image copied" : "Couldn't copy image"}
+              {copyNotice === "success"
+                ? "Image copied"
+                : "Couldn't copy image"}
             </span>
           )}
           {nativeSource && source && (
@@ -536,7 +538,8 @@ export function ImageReviewStage({
                   rel="noreferrer"
                   onClick={(event) => {
                     if (!pixels) return;
-                    if (event.metaKey || event.ctrlKey || event.shiftKey) return;
+                    if (event.metaKey || event.ctrlKey || event.shiftKey)
+                      return;
                     if (onOpenLink(pixels)) event.preventDefault();
                   }}
                 />
