@@ -1285,6 +1285,25 @@ it("renders provider, model, and thinking as direct settings inputs", async () =
   expect(save).toHaveBeenCalledWith({ ...saved, model: "", effort: "" });
 });
 
+it("says a connected Huddle keeps its compaction threshold until it reconnects", async () => {
+  const f = fixture();
+  render(
+    <f.tabs.SettingsTab
+      {...f.props(
+        defaults,
+        vi.fn(async () => {}),
+      )}
+    />,
+  );
+  expect(
+    await screen.findByRole("textbox", {
+      name: "Auto-compact at (thousands of tokens)",
+    }),
+  ).toHaveAccessibleDescription(
+    "Compacts at this many tokens, or sooner if the model's context window fills first. A connected Huddle keeps its threshold until it reconnects.",
+  );
+});
+
 it("keeps settings editable while a provider change waits for Save", async () => {
   const f = fixture();
   const save = vi.fn(async () => {});

@@ -31,7 +31,7 @@ import { AgentInstructions } from "../../features/agents/AgentInstructions";
 import { CreateModelChoices } from "../../features/agents/CreateModelChoices";
 import { ModelPicker } from "../../features/agents/ModelPicker";
 import { AISettings, runsOnDetails } from "../../features/agents/AISettings";
-import { CompactionField } from "../../features/agents/Compaction";
+import { COMPACTION, CompactionField } from "../../features/agents/Compaction";
 import { withCompactAt } from "../../features/agents/compact-at";
 import {
   candidatesFor,
@@ -1611,6 +1611,7 @@ export function createTabs(
               )}
               <CompactionField
                 value={draft.compactAt}
+                description={`${COMPACTION} A connected Huddle keeps its threshold until it reconnects.`}
                 disabled={saving}
                 onChange={(value) => setDraft(withCompactAt(draft, value))}
               />

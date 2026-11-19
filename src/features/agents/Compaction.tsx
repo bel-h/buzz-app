@@ -18,6 +18,10 @@ const parse = (text: string) => {
   return compactAt(tokens) ? tokens : undefined;
 };
 
+/** What the field does, which a harness can add to. */
+export const COMPACTION =
+  "Compacts at this many tokens, or sooner if the model's context window fills first.";
+
 const INVALID = `Enter a whole number of at least ${MIN_COMPACT_AT / 1000}K, or leave it blank for the harness default.`;
 
 /** When the agent's session compacts its context: a size in thousands of
@@ -25,7 +29,7 @@ const INVALID = `Enter a whole number of at least ${MIN_COMPACT_AT / 1000}K, or 
  * `onChange`; anything else keeps its error and stops its form submitting. */
 export function CompactionField({
   value,
-  description = "Compacts at this many tokens, or sooner if the model's context window fills first.",
+  description = COMPACTION,
   disabled = false,
   onChange,
 }: {
