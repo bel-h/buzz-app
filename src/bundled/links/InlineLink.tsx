@@ -100,7 +100,7 @@ const icons = {
   buzz: ChatCircleIcon,
   chat: ChatCircleIcon,
   channel: HashIcon,
-  message: ChatCircleIcon,
+  message: ThreadIcon,
   thread: ThreadIcon,
 };
 

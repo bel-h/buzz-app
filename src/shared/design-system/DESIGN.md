@@ -2249,10 +2249,9 @@ Inline search settings use the search variant of PreferenceRow with a gear icon 
 
 Proposed pending designer sign-off, as a narrow exception to the chat and
 conversation icon rule under Icons. Use `ChatCircleIcon` for a Solo chat in
-navigation, headers, tabs and inline chat links. Linked messages also use
-`ChatCircleIcon`.
-Use `ThreadIcon` (Tabler Message2) for thread tabs, thread links and Reply actions.
-Its text lines identify a conversation without the forward-like arrow in MessageReply.
+navigation, headers, tabs and inline chat links.
+Use `ThreadIcon` (Tabler Message2) for message links, thread links, thread tabs,
+and Reply actions. The text lines identify links to messages and threads.
 Keep private Team channels' lock icon; privacy alone does not
 replace a Solo chat’s identity icon. A withheld link uses the lock.
 

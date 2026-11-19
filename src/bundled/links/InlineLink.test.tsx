@@ -44,19 +44,29 @@ it("identifies exact GitHub hosts, ordinary websites, and Buzz entity links", ()
 });
 
 it.each([
-  ["buzz://channel/general", "channel", "Channel"],
-  [`buzz://message?channel=general&id=${"a".repeat(64)}`, "message", "Message"],
+  ["buzz://channel/general", "channel", "Channel", "hash"],
+  [
+    `buzz://message?channel=general&id=${"a".repeat(64)}`,
+    "message",
+    "Message",
+    "message-2",
+  ],
   [
     `buzz://message?channel=general&id=${"a".repeat(64)}&thread=${"b".repeat(64)}`,
     "thread",
     "Thread",
+    "message-2",
   ],
-])("renders semantic Buzz labels for %s", (href, kind, label) => {
-  const html = renderToStaticMarkup(<InlineLink href={href} />);
-  expect(html).toContain(`data-link-kind="${kind}"`);
-  expect(textOf(html)).toBe(label);
-  expect(html).toContain('href="buzz://');
-});
+])(
+  "renders semantic Buzz labels and icons for %s",
+  (href, kind, label, icon) => {
+    const html = renderToStaticMarkup(<InlineLink href={href} />);
+    expect(html).toContain(`data-link-kind="${kind}"`);
+    expect(html).toContain(`tabler-icon-${icon}`);
+    expect(textOf(html)).toBe(label);
+    expect(html).toContain('href="buzz://');
+  },
+);
 
 it("renders private channel links with the design-system lock icon", () => {
   const markup = renderToStaticMarkup(
