@@ -3060,8 +3060,7 @@ export class CodexRuntime {
     // Undefined uses the default destination; null is an explicit one that
     // answers no request in this turn.
     const target =
-      active &&
-      (call.tool === "send" || call.tool === "reply_in_subthread")
+      active && (call.tool === "send" || call.tool === "reply_in_subthread")
         ? addressed(args, answering)
         : undefined;
     const request = target ?? active?.reply;
