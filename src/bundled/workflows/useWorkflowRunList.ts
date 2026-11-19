@@ -65,11 +65,17 @@ type State = Readonly<{
   ended: boolean;
   /** Polls started since a read last changed a shown run. */
   quiet: number;
+  /** The relay refused a read, so the list was emptied. Until the person asks
+   * again, no read puts a run back: one that was under way predates the
+   * refusal. */
+  denied: boolean;
 }>;
 type Action =
   | { type: "newest"; page: WorkflowRunPage }
   | { type: "failed"; error: string | undefined }
   | { type: "clear" }
+  | { type: "denied" }
+  | { type: "retry" }
   | { type: "page"; page: WorkflowRunPage }
   | { type: "polling" }
   | { type: "started" }
@@ -89,10 +95,16 @@ const EMPTY: State = {
   added: null,
   ended: false,
   quiet: 0,
+  denied: false,
 };
 function reduce(state: State, action: Action): State {
   switch (action.type) {
+    case "denied":
+      return state.denied ? state : { ...EMPTY, denied: true };
+    case "retry":
+      return state.denied ? EMPTY : state;
     case "newest": {
+      if (state.denied) return state;
       const list = withNewest(state.list, action.page);
       return {
         ...state,
@@ -110,7 +122,7 @@ function reduce(state: State, action: Action): State {
       };
     }
     case "failed":
-      return state.failed && state.error === action.error
+      return state.denied || (state.failed && state.error === action.error)
         ? state
         : { ...state, failed: true, error: action.error };
     // The session purged what it held; copies of it go too.
@@ -176,7 +188,11 @@ export function useWorkflowRunList({
       dispatch({ type: "newest", page: newest.data });
     } else if (newest?.status === "error") {
       readAt.current = performance.now();
-      dispatch({ type: "failed", error: newest.error });
+      dispatch(
+        newest.denied
+          ? { type: "denied" }
+          : { type: "failed", error: newest.error },
+      );
     } else if (newest?.status === "idle" || newest?.status === "unavailable")
       dispatch({ type: "clear" });
   }, [newest]);
@@ -210,13 +226,15 @@ export function useWorkflowRunList({
     onScreen &&
     !covered;
 
-  // History the session cleared waits for an explicit refresh.
+  // History the session cleared, or the relay refused, waits for an explicit
+  // refresh.
   const live =
-    newest?.status === "ready" ||
-    newest?.status === "loading" ||
-    newest?.status === "error";
-  const latest = useRef({ capability, workflow, state, refresh, live });
-  latest.current = { capability, workflow, state, refresh, live };
+    !state.denied &&
+    (newest?.status === "ready" ||
+      newest?.status === "loading" ||
+      newest?.status === "error");
+  const latest = useRef({ capability, workflow, state, newest, refresh, live });
+  latest.current = { capability, workflow, state, newest, refresh, live };
   const reading = useRef(new Set<WorkflowView<WorkflowRunPage>>());
   useEffect(() => {
     const views = reading.current;
@@ -237,6 +255,9 @@ export function useWorkflowRunList({
     try {
       await view.refresh();
       const snapshot = view.snapshot();
+      // A refusal of any page empties the whole list.
+      if (snapshot.status === "error" && snapshot.denied)
+        dispatch({ type: "denied" });
       return snapshot.status === "ready" ? snapshot.data : undefined;
     } catch {
       return undefined;
@@ -244,6 +265,17 @@ export function useWorkflowRunList({
       reading.current.delete(view);
       view.dispose();
     }
+  }, []);
+  /** The person asks for the newest page, which is the only way back from a
+   * refusal. */
+  const retry = useCallback(async () => {
+    if (latest.current.state.denied) {
+      // A read begun before the refusal is not an answer to this request.
+      if (latest.current.newest?.status === "loading")
+        await latest.current.refresh();
+      dispatch({ type: "retry" });
+    }
+    await latest.current.refresh();
   }, []);
 
   const polling = useRef<Promise<void> | undefined>(undefined);
@@ -362,6 +394,8 @@ export function useWorkflowRunList({
     loaded: state.loaded,
     failed: state.failed,
     error: state.error,
+    denied: state.denied,
+    refresh: retry,
     /** Older runs exist that are not shown yet. */
     more: !!next,
     ended: state.ended,

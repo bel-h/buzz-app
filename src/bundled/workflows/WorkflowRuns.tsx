@@ -71,11 +71,13 @@ function RunList({
     (oldest.current ?? list.region)?.focus();
   });
   // A view replaced for the same workflow keeps the runs it had read.
-  if (!snapshot && !list.loaded) return <p role="status">Reading runs…</p>;
+  if (!snapshot && !list.loaded && !list.denied)
+    return <p role="status">Reading runs…</p>;
   const status = snapshot?.status;
   // A failure lasts until a read succeeds, so its line and its retry stay put
   // while the list tries again by itself.
-  const needsRefresh = status === "idle" || list.failed || refreshing;
+  const needsRefresh =
+    status === "idle" || list.failed || list.denied || refreshing;
   return (
     <section
       ref={list.section}
@@ -93,7 +95,7 @@ function RunList({
               loading={refreshing}
               onClick={() => {
                 setRefreshing(true);
-                void refresh().finally(() => setRefreshing(false));
+                void list.refresh().finally(() => setRefreshing(false));
               }}
             >
               Refresh runs
@@ -101,7 +103,7 @@ function RunList({
           )}
         </div>
       )}
-      {status === "loading" && !list.loaded && !list.failed && (
+      {status === "loading" && !list.loaded && !list.failed && !list.denied && (
         <p role="status">Reading runs…</p>
       )}
       {status === "unavailable" && (
@@ -112,6 +114,12 @@ function RunList({
       )}
       {status === "idle" && (
         <p role="status">History cleared. Refresh to read it again.</p>
+      )}
+      {list.denied && (
+        <p role="alert" className="text-danger">
+          The relay refused to show this workflow’s runs, so the ones shown here
+          were removed. Retry with Refresh runs.
+        </p>
       )}
       {list.failed && (
         <p role="alert" className="text-danger">

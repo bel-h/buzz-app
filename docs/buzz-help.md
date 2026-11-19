@@ -2076,7 +2076,9 @@ and up to about half a minute otherwise, including for an active run that has
 not changed for about a minute. The detail pane’s list pauses while the editor
 is open over it. Scroll to the end of the list to load the next older runs, or
 use **Load older runs**; **No older runs.** marks the end. If history can’t be
-read, the runs already shown stay and **Refresh runs** retries. If a workflow
+read, the runs already shown stay and **Refresh runs** retries. If the
+community refuses access to the history, the runs shown are removed and the
+list stops updating until you use **Refresh runs**. If a workflow
 starts more than 20 runs between two updates, the list starts again from the
 newest runs.
 

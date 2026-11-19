@@ -29,6 +29,10 @@ export interface WorkflowView<T> {
     status: "idle" | "loading" | "ready" | "error" | "unavailable";
     data: T;
     error?: string;
+    /** With "error": the relay itself refused this read (401 or 403), so
+     * whatever was copied from earlier reads must go. Absent for a failure
+     * that may pass on its own. */
+    denied?: true;
   }>;
   subscribe(listener: () => void): () => void;
   refresh(options?: { ifStale?: boolean }): Promise<void>;

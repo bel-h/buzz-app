@@ -122,9 +122,13 @@ See the [capability contract](../src/features/workflows/types.ts).
   list catches up when shown again, and a brief absence costs no extra read. A
   failed read keeps the runs already shown and offers **Refresh runs**, which
   stays in place with its error until a read succeeds, as does history the
-  session cleared. Known limit: when more runs arrive between two reads than
-  one page holds, the list starts over from the newest page and drops the
-  older pages it had loaded, with any open details.
+  session cleared. A read of any page that the relay itself refuses (401 or
+  403) is different: it can arrive before this session learns that channel
+  access was lost, so the list removes every run and trace it had copied, says
+  so, and stops rereading. An answer from a read that was already under way is
+  ignored. **Refresh runs** reads again. Known limit: when more runs arrive
+  between two reads than one page holds, the list starts over from the newest
+  page and drops the older pages it had loaded, with any open details.
 - Archived channels: the relay accepts saves and runs there, but every run
   fails. Their group and Recently updated rows say Archived. Run now and
   turning a workflow on are unavailable in rows, details and the editor, whose
