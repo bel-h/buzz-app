@@ -24,6 +24,7 @@ export type {
 export type { NamingIdentity } from "../features/identity-names/policy";
 export type { Browser, BrowserViewProps } from "../features/browser/api";
 export type {
+  AppOverlay,
   Page,
   PagePreviewProps,
   PageSidebarProps,
@@ -31,6 +32,14 @@ export type {
 } from "../features/pages/service";
 export type { Backdrop, Backdrops } from "../features/backdrops/service";
 export type { SubjectLift } from "../features/messages/subject-lift";
+export type {
+  PluginButtonProps,
+  PluginDialogProps,
+  PluginFieldProps,
+  PluginInputProps,
+  PluginSwitchProps,
+  PluginUi,
+} from "../features/plugin-ui/contract";
 export type {
   SidebarRow,
   SidebarRowSortMode,
@@ -71,6 +80,11 @@ export type {
   GeneralAccessPolicy,
 } from "../bundled/channels/ChannelGeneralAccess";
 export type { MemberChange } from "../features/channel-members/administration-protocol";
+export type {
+  DocumentEditorProps,
+  DocumentEditorHandle,
+  DocumentEditorSelection,
+} from "../features/messages/DocumentEditor";
 export type {
   ConversationWorkspaceProps,
   PageTabTarget,
@@ -167,6 +181,10 @@ export type {
 } from "../features/notifications/service";
 
 export type { VoiceRecording } from "../features/relay/voice-media";
+export type {
+  RecommendedCandidate,
+  RecommendedSetup,
+} from "../features/agents/recommended";
 
 export type {
   Agents,
@@ -177,6 +195,10 @@ export type {
   AgentSession,
   AgentSessions,
   Delivery,
+  ModelSettings,
+  NoteChange,
+  PluginNote,
+  RecommendedSource,
   StandaloneTurn,
   TurnResult,
 } from "../features/agents/service";

@@ -44,6 +44,7 @@ import {
   type StandaloneTurn,
   type TurnResult,
 } from "../../features/agents/service";
+import { compactAt } from "../../features/agents/compact-at";
 import { workflowOf } from "../../features/agents/owner-attestation";
 import {
   ownerReads,
@@ -105,6 +106,9 @@ export type Config = Readonly<{
   workspace: string;
   /** Whether each thread is its own session, or the whole channel is one. */
   scope: Scope;
+  /** The context size, in tokens, its sessions compact at, when below
+   * goose's own; unset is goose's default. This device's only. */
+  compactAt?: string;
 }>;
 export const DEFAULT_CONFIG: Config = Object.freeze({
   model: "",
@@ -179,8 +183,13 @@ type Entry = {
   policies: Map<
     string,
     {
-      topLevel: boolean;
+      solo: boolean;
       steerable?(model?: string, effort?: string): boolean;
+      /** The running turn's effective model and effort picks. */
+      picks?: Readonly<{
+        model?: string | undefined;
+        effort?: string | undefined;
+      }>;
       handed: Promise<unknown>;
       settled: Promise<unknown>;
       cancel(): void;
@@ -579,11 +588,14 @@ export class GooseRuntime {
     let noteRoot: string | undefined;
     let notes: ReturnType<NonNullable<AgentHandle["notes"]>> = [];
     const prior = entry.policies.get(key);
+    // A turn keeps the posting policy it was admitted with: a request in a
+    // Solo chat shared since, or the reverse, waits for its turns to settle
+    // rather than steering into them and changing their tools' context.
     const same =
       key === COMMUNITY_SESSION
         ? entry.config.scope === "community" &&
           prior?.steerable?.(model, effort) === true
-        : prior?.topLevel === topLevel;
+        : prior?.solo === solo;
     const wait =
       key === COMMUNITY_SESSION || entry.policies.has(COMMUNITY_SESSION)
         ? Promise.all(
@@ -717,13 +729,21 @@ export class GooseRuntime {
     void done.then(() => {
       foregroundDone = true;
     });
+    // A steer without a pick runs on the turn's own picks.
+    const picks = same
+      ? {
+          model: model ?? prior?.picks?.model,
+          effort: effort ?? prior?.picks?.effort,
+        }
+      : { model, effort };
     const policy = {
-      topLevel,
+      solo,
       steerable: (nextModel?: string, nextEffort?: string) =>
         !interrupted &&
         !foregroundDone &&
-        (!nextModel || nextModel === model) &&
-        (!nextEffort || nextEffort === effort),
+        (!nextModel || nextModel === picks.model) &&
+        (!nextEffort || nextEffort === picks.effort),
+      picks,
       handed,
       settled: Promise.all([same ? prior?.settled : undefined, done]).then(() =>
         entry.sessions.idle(key),
@@ -1111,6 +1131,7 @@ export class GooseRuntime {
         (handler) => this.serve(handler),
         undefined,
         () => entry.handle,
+        () => compactAt(entry.config.compactAt),
       ),
       contexts: new Map(),
       policies: new Map(),
@@ -1125,7 +1146,7 @@ export class GooseRuntime {
         entry.lifetime.signal,
         workSignal ?? AbortSignal.abort(new Error("The turn has ended")),
       ]);
-      const client =
+      const client = () =>
         handle &&
         appClient(handle, {
           signal,
@@ -1169,12 +1190,14 @@ export class GooseRuntime {
       const context = (conversation && entry.contexts.get(conversation)) || {};
       return respond(client, context, message, this.added());
     };
-    const get = (): Promise<GooseProcess> => {
+    const get = (
+      drained?: (process: GooseProcess) => boolean,
+    ): Promise<GooseProcess> => {
       const protection = entry.handle?.protection;
       if (!protection) {
         if (entry.protected)
           throw new Error("The protected agent has no live policy binding");
-        return entry.goose.get();
+        return entry.goose.get(drained);
       }
       protection.assertAvailable();
       // Another key means a replaced provider, which is already stopping its
@@ -1192,13 +1215,16 @@ export class GooseRuntime {
         (handler) => this.serve(handler),
         protection,
         () => entry.handle,
+        () => compactAt(entry.config.compactAt),
       );
       const worker = entry.worker;
       const { stopping } = entry;
       // One replaced while this waited is never started: ask for the current.
       return stopping
-        ? stopping.then(() => (entry.worker === worker ? worker.get() : get()))
-        : worker.get();
+        ? stopping.then(() =>
+            entry.worker === worker ? worker.get(drained) : get(drained),
+          )
+        : worker.get(drained);
     };
     entry.sessions = new AgentSessions({
       resolveDirectory: (path) => this.desktop.resolveDirectory(path),
@@ -1220,7 +1246,9 @@ export class GooseRuntime {
         effort: entry.config.effort,
       }),
       // The prompt's other parts, its instructions, team, name and core
-      // memory, reach a running session in place as its next turn starts.
+      // memory, reach a running session in place as its next turn starts. A
+      // changed compaction threshold reaches only new sessions, in a goose
+      // started with it: open ones keep their history in theirs.
       fingerprint: () =>
         JSON.stringify([
           entry.config.provider.trim() ? 0 : this.defaultsRevision,

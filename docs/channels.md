@@ -639,7 +639,12 @@ New message from previewing the DM's history (see
 refreshes with the channel roster, preserves the last good set on failure and
 rejects older snapshots. Live cross-device visibility updates are deferred; any
 confirmed `41010` open, including New message Send, unhides the DM, and its row
-returns when visibility next refreshes.
+returns when visibility next refreshes. A new message from another member also
+unhides it on the relay, which republishes the snapshot before the message fans
+out, so its arrival in a hidden DM refreshes visibility and the row returns.
+Reconnect replay counts as an arrival, and one that lands before the first
+visibility read finishes waits for that read to classify it. A message only for
+agents (`audience: agents`) leaves the DM hidden.
 
 A definitive rejection offers retry without optimistic removal. If publication or
 confirmation has an uncertain outcome, the dialog warns that the command may have
@@ -987,8 +992,10 @@ to its underlying conversation/message without that panel.
 
 The header **Access** button opens the one access dialog every conversation uses.
 It is titled **Channel access** in channels and **Chat access** in a Solo chat (see
-[Sharing a Solo chat](solo/sharing.md)). A Solo chat owner can remove people and
-agents there but cannot change roles.
+[Sharing a Solo chat](solo/sharing.md)). A Solo chat owner can remove current
+non-owner members. In a Private Solo chat on a relay that supports role updates,
+the owner can lower their access, restore participation for verified agents,
+and grant Admin to their own verified agents.
 One search field, with an accessible name but no visible label, filters current
 members and lists people, agents and Teams to invite under **Not in this channel**.
 With an empty query, channels and Solo chats show invitations only when the viewer is
@@ -1245,18 +1252,21 @@ disposal, but cannot retract a request already sent. Unsent work is canceled;
 recovery is in-memory, not durable across session disposal or restart.
 
 The development broker and native transport advertise a separate
-`memberAdministration` capability and admit only exact `9000` Admin/Member/Guest
-changes, the signer's own ownership transfer or `9001` other-member removals
-through purpose-bound routes. Generic
-invitation signing is unchanged; the relay still enforces the authoritative ACL.
+`memberAdministration` capability. Its purpose-bound routes admit ordinary
+channel `9000` Admin/Member/Guest changes and the signer's own ownership transfer,
+as well as `9001` other-member removals. The relay enforces the authoritative ACL.
 Hosts without this writer can read verified roles but expose no management controls.
 Native support requires a rebuilt binary; no unrestricted writer fallback is used.
 
-**Accepted protocol limitation:** role commands are existing relay upserts, not
-conditional updates. A departure after final preflight can be undone by the role
-command re-adding the target; a concurrent role edit can be overwritten. Client
-checks/readback reduce uncertainty but do not provide atomic conflict rejection.
-Preventing these races requires separately scoped relay support.
+In Private Solo chats, the writer uses kind `9050` for role changes when the
+relay advertises `buzz-solo-member-role` in its NIP-11 information document.
+The command includes the target's expected current role. The relay updates an
+existing member only if that role still matches, so it rejects the edit if the
+member left or their role changed before the write.
+
+Ordinary channel `9000` role changes are unconditional relay upserts. A command
+can re-add a member who departed after the final preflight or overwrite a
+concurrent role edit. Client checks and readback reduce uncertainty.
 
 Regression coverage lives in `administration.test.ts`,
 `MemberAdministration.test.tsx`, `native.test.ts`, and `browser-host/relay-broker-api.test.mjs`;
