@@ -160,7 +160,10 @@ export function useMessageEdit(session: ComposerSession, restore: () => void) {
       const content = messageEditContent(body, attachments);
       if (!content.trim()) {
         // Attachments sent without Markdown cannot stand alone in an edit.
-        if (attachments.length) setError("Add text to keep these attachments.");
+        if (attachments.length)
+          setError(
+            "Add text to keep these attachments, or remove them to delete the message.",
+          );
         return;
       }
       if (!current || !lastEditableMessage(session, [current])) {

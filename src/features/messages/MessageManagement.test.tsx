@@ -707,6 +707,21 @@ it("keeps a message with only its sent attachments when the text is cleared", as
   ).toBeNull();
 });
 
+it("offers deletion once the text and every attachment tile are removed", async () => {
+  const h = await fixture(true, false, false, true);
+  fireEvent.click(
+    await screen.findByRole("menuitem", { name: "Edit message" }),
+  );
+  await screen.findByRole("textbox", { name: "Edit message" });
+  fill("");
+  fireEvent.click(screen.getByRole("button", { name: "Remove original.pdf" }));
+  submit();
+  expect(
+    await screen.findByRole("alertdialog", { name: "Delete message?" }),
+  ).toBeVisible();
+  expect(h.publications).toHaveLength(0);
+});
+
 it("reverses an own message force from its menu without changing notification eligibility", async () => {
   const h = await fixture();
   const target = {
